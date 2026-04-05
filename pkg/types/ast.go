@@ -21,6 +21,18 @@ const (
 	EdgeDefines  EdgeKind = "defines"
 	EdgeInherits EdgeKind = "inherits"
 	EdgeUses     EdgeKind = "uses"
+
+	// EdgeDataFlow records that a function passes a specific argument to a named
+	// parameter of another function. Metadata keys: "param_name", "arg_expr", "arg_type".
+	EdgeDataFlow EdgeKind = "data_flow"
+
+	// EdgeReads records that a function reads a field or global variable.
+	// Metadata key: "field" (qualified field name, e.g. "User.Email").
+	EdgeReads EdgeKind = "reads"
+
+	// EdgeWrites records that a function writes a field or global variable.
+	// Metadata key: "field" (qualified field name).
+	EdgeWrites EdgeKind = "writes"
 )
 
 // CodeNode represents a single entity in the codebase (function, class, file, module).

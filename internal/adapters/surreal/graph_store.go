@@ -10,6 +10,7 @@ import (
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
 	"github.com/commit0-dev/commit0/internal/domain"
+	"github.com/commit0-dev/commit0/internal/infra/retry"
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
@@ -84,10 +85,11 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		localID = node.Qualified
 	}
 
-	// Build file and repo record IDs as param strings so SurrealQL can
-	// cast them to the correct record<...> type inside the query.
-	repoRef := fmt.Sprintf("repo:%s", node.RepoSlug)
-	fileRef := fmt.Sprintf("file:%s", node.FilePath)
+	// Pass repo/file as typed models.RecordID objects so the Go SDK serializes
+	// them via CBOR correctly — especially when slugs or paths contain '/' which
+	// type::record(string) may mis-parse as a division operator.
+	repoRef := models.NewRecordID("repo", node.RepoSlug)
+	fileRef := models.NewRecordID("file", node.FilePath)
 
 	// SurrealDB 3.0 strict mode: option<T> fields need NONE (not NULL)
 	// when the value is absent. The Go SDK's models.None serializes correctly.
@@ -138,8 +140,10 @@ func upsertNodeQuery(table string) string {
 UPSERT type::record($record_id) CONTENT {
     name:         $name,
     qualified:    $qualified,
-    file:         type::record($file_ref),
-    repo:         type::record($repo_ref),
+    file_path:    $file_path,
+    repo_slug:    $repo_slug,
+    file:         $file_ref,
+    repo:         $repo_ref,
     language:     $language,
     start_line:   $start_line,
     end_line:     $end_line,
@@ -155,8 +159,10 @@ UPSERT type::record($record_id) CONTENT {
 UPSERT type::record($record_id) CONTENT {
     name:         $name,
     qualified:    $qualified,
-    file:         type::record($file_ref),
-    repo:         type::record($repo_ref),
+    file_path:    $file_path,
+    repo_slug:    $repo_slug,
+    file:         $file_ref,
+    repo:         $repo_ref,
     language:     $language,
     start_line:   $start_line,
     end_line:     $end_line,
@@ -168,7 +174,9 @@ UPSERT type::record($record_id) CONTENT {
 		return `
 UPSERT type::record($record_id) CONTENT {
     path:         $file_path,
-    repo:         type::record($repo_ref),
+    file_path:    $file_path,
+    repo_slug:    $repo_slug,
+    repo:         $repo_ref,
     language:     $language,
     content_hash: $content_hash,
     embedding:    $embedding
@@ -178,7 +186,9 @@ UPSERT type::record($record_id) CONTENT {
 UPSERT type::record($record_id) CONTENT {
     name:      $name,
     path:      $file_path,
-    repo:      type::record($repo_ref),
+    file_path: $file_path,
+    repo_slug: $repo_slug,
+    repo:      $repo_ref,
     language:  $language,
     docstring: $docstring,
     embedding: $embedding
@@ -196,7 +206,7 @@ RELATE $from->calls->$to CONTENT {
     call_site:  $call_site,
     is_dynamic: $is_dynamic,
     call_type:  $call_type,
-    repo:       type::record($repo_ref)
+    repo:       $repo_ref
 };`
 	case types.EdgeImports:
 		return `
@@ -213,6 +223,27 @@ RELATE $from->inherits->$to CONTENT {
 		return `
 RELATE $from->uses->$to CONTENT {
     usage_type: $usage_type
+};`
+	case types.EdgeDataFlow:
+		return `
+RELATE $from->data_flow->$to CONTENT {
+    call_site:  $call_site,
+    param_name: $param_name,
+    arg_expr:   $arg_expr,
+    arg_type:   $arg_type,
+    repo:       $repo_ref
+};`
+	case types.EdgeReads:
+		return `
+RELATE $from->reads->$to CONTENT {
+    field_name: $field_name,
+    repo:       $repo_ref
+};`
+	case types.EdgeWrites:
+		return `
+RELATE $from->writes->$to CONTENT {
+    field_name: $field_name,
+    repo:       $repo_ref
 };`
 	}
 	return ""
@@ -245,16 +276,35 @@ func edgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
 		toTable = "function"
 	}
 
+	// Data-flow metadata
+	paramName := optionalMeta(edge.Metadata, "param_name")
+	argExpr := optionalMeta(edge.Metadata, "arg_expr")
+	argType := optionalMeta(edge.Metadata, "arg_type")
+	fieldName := optionalMeta(edge.Metadata, "field")
+
 	return map[string]any{
 		"from":         models.NewRecordID(fromTable, fromID),
 		"to":           models.NewRecordID(toTable, toID),
 		"call_site":    edge.CallSite,
 		"is_dynamic":   edge.IsDynamic,
 		"call_type":    callType,
-		"repo_ref":     fmt.Sprintf("repo:%s", repoSlug),
+		"repo_ref":     models.NewRecordID("repo", repoSlug),
 		"inherit_kind": inheritKind,
 		"usage_type":   usageType,
+		"param_name":   paramName,
+		"arg_expr":     argExpr,
+		"arg_type":     argType,
+		"field_name":   fieldName,
 	}
+}
+
+// optionalMeta returns models.None when a metadata key is absent, so SurrealDB
+// strict mode receives NONE for option<T> fields instead of an empty string.
+func optionalMeta(meta map[string]string, key string) any {
+	if v, ok := meta[key]; ok && v != "" {
+		return v
+	}
+	return models.None
 }
 
 // kindFromTable converts a DB table name back to a NodeKind.
@@ -324,15 +374,18 @@ func (a *SurrealAdapter) GetNode(ctx context.Context, id string) (*types.CodeNod
 }
 
 // GetNodeByQualified looks up a node by repo slug + fully qualified name.
+// If the input contains no dot (i.e. it is an unqualified short name), a
+// second pass searches the `name` field so that users can type bare function
+// names like "ParseGoMod" instead of "treesitter.ParseGoMod".
 func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified string) (*types.CodeNode, error) {
 	// Try each node table in priority order.
 	tables := []string{"function", "class", "module", "file"}
-	const q = `SELECT * FROM $table WHERE repo = type::record($repo_ref) AND qualified = $qualified LIMIT 1;`
+	const q = `SELECT * FROM $table WHERE repo = $repo_ref AND qualified = $qualified LIMIT 1;`
 
 	for _, table := range tables {
 		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, map[string]any{
 			"table":     models.Table(table),
-			"repo_ref":  fmt.Sprintf("repo:%s", repo),
+			"repo_ref":  models.NewRecordID("repo", repo),
 			"qualified": qualified,
 		})
 		if err != nil {
@@ -342,6 +395,26 @@ func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified
 			row := (*results)[0].Result[0]
 			node := rowToCodeNode(row, kindFromTable(table))
 			return &node, nil
+		}
+	}
+
+	// Fallback: bare name lookup (no dot means the caller supplied a short name).
+	if !strings.Contains(qualified, ".") {
+		const nameQ = `SELECT * FROM $table WHERE repo = $repo_ref AND name = $name LIMIT 1;`
+		for _, table := range tables {
+			results, err := surrealdb.Query[[]nodeRow](ctx, a.db, nameQ, map[string]any{
+				"table":    models.Table(table),
+				"repo_ref": models.NewRecordID("repo", repo),
+				"name":     qualified,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("get node by name %s/%s: %w", repo, qualified, err)
+			}
+			if results != nil && len(*results) > 0 && len((*results)[0].Result) > 0 {
+				row := (*results)[0].Result[0]
+				node := rowToCodeNode(row, kindFromTable(table))
+				return &node, nil
+			}
 		}
 	}
 
@@ -364,16 +437,15 @@ func (a *SurrealAdapter) DeleteNode(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteNodesByRepo removes all nodes (all tables) that belong to a repo.
+// DeleteNodesByRepo removes all nodes (all tables) that belong to a repo by
+// deleting the repo record — all node tables declare
+// `repo TYPE record<repo> REFERENCE ON DELETE CASCADE`, so the DB cascades the
+// delete to every function, class, file, and module in one round-trip. The repo
+// record is then re-created by UpsertRepo on the next indexing run.
 func (a *SurrealAdapter) DeleteNodesByRepo(ctx context.Context, repo string) error {
-	const q = `
-DELETE FROM ` + "`function`" + ` WHERE repo = type::record($repo_ref);
-DELETE FROM class     WHERE repo = type::record($repo_ref);
-DELETE FROM file      WHERE repo = type::record($repo_ref);
-DELETE FROM module    WHERE repo = type::record($repo_ref);`
-
+	const q = `DELETE type::record($repo_id);`
 	results, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
-		"repo_ref": fmt.Sprintf("repo:%s", repo),
+		"repo_id": models.NewRecordID("repo", repo),
 	})
 	if err != nil {
 		return fmt.Errorf("delete nodes for repo %s: %w", repo, err)
@@ -465,18 +537,10 @@ func (a *SurrealAdapter) TraceForward(ctx context.Context, startID string, depth
 		depth = 5
 	}
 
-	// Build a parameterised recursive CTE using SurrealDB path syntax.
-	// We select each hop together with its depth level.
+	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
 	q := fmt.Sprintf(`
-SELECT
-    id,
-    name,
-    qualified,
-    language,
-    <-calls.call_site  AS call_site,
-    <-calls.call_type  AS call_type,
-    <-calls.is_dynamic AS is_dynamic
-FROM $start->calls->function{1..%d};`, depth)
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(->calls->function);`, depth)
 
 	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
 		"start": models.NewRecordID(table, localID),
@@ -502,16 +566,10 @@ func (a *SurrealAdapter) TraceReverse(ctx context.Context, startID string, depth
 		depth = 5
 	}
 
+	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
 	q := fmt.Sprintf(`
-SELECT
-    id,
-    name,
-    qualified,
-    language,
-    ->calls.call_site  AS call_site,
-    ->calls.call_type  AS call_type,
-    ->calls.is_dynamic AS is_dynamic
-FROM $start<-calls<-function{1..%d};`, depth)
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(<-calls<-function);`, depth)
 
 	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
 		"start": models.NewRecordID(table, localID),
@@ -574,10 +632,10 @@ func (a *SurrealAdapter) BlastRadius(ctx context.Context, targetID string, maxDe
 		maxDepth = 10
 	}
 
-	// Reverse traversal: who calls the target (transitively)?
+	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
 	q := fmt.Sprintf(`
 SELECT id, name, qualified, language, file_path, repo_slug
-FROM $target<-calls<-function{1..%d};`, maxDepth)
+FROM $target.{1..%d}(<-calls<-function);`, maxDepth)
 
 	type affectedRow struct {
 		ID        *models.RecordID `json:"id"`
@@ -630,41 +688,224 @@ FROM $target<-calls<-function{1..%d};`, maxDepth)
 }
 
 // ---------------------------------------------------------------------------
+// GraphStore — Neighborhood & data-flow queries
+// ---------------------------------------------------------------------------
+
+// neighborRow is used to unmarshal a callee/caller row with full node fields.
+type neighborRow struct {
+	ID        *models.RecordID `json:"id"`
+	Qualified string           `json:"qualified"`
+	Signature string           `json:"signature"`
+	Docstring string           `json:"docstring"`
+	FilePath  string           `json:"file_path"`
+	ParamName string           `json:"param_name"`
+	ArgExpr   string           `json:"arg_expr"`
+	StartLine int              `json:"start_line"`
+}
+
+func neighborRowToNeighborNode(r neighborRow) domain.NeighborNode {
+	return domain.NeighborNode{
+		Qualified: r.Qualified,
+		Signature: r.Signature,
+		Docstring: r.Docstring,
+		FilePath:  r.FilePath,
+		StartLine: r.StartLine,
+		ParamName: r.ParamName,
+		ArgExpr:   r.ArgExpr,
+	}
+}
+
+// GetNeighborhood returns the immediate graph context for nodeID: callers and
+// callees (with signatures), data-flow sources/sinks, and accessed fields.
+// Returns an empty Neighborhood (not an error) when no neighbors exist.
+func (a *SurrealAdapter) GetNeighborhood(ctx context.Context, nodeID string) (*domain.Neighborhood, error) {
+	table, localID := splitRecordID(nodeID)
+	if table == "" || localID == "" {
+		return nil, domain.Validation(fmt.Sprintf("invalid node id: %q", nodeID))
+	}
+
+	// Single multi-LET query fetches all neighbor categories in one round-trip.
+	q := `
+LET $node = type::record($table + ":" + $local_id);
+
+LET $callees = (
+    SELECT out.qualified AS qualified, out.signature AS signature,
+           out.docstring AS docstring, out.file_path  AS file_path,
+           out.start_line AS start_line
+    FROM calls WHERE in = $node LIMIT 30 FETCH out
+);
+LET $callers = (
+    SELECT in.qualified AS qualified, in.signature AS signature,
+           in.docstring AS docstring, in.file_path  AS file_path,
+           in.start_line AS start_line
+    FROM calls WHERE out = $node LIMIT 30 FETCH in
+);
+LET $sinks = (
+    SELECT out.qualified AS qualified, out.signature AS signature,
+           out.file_path AS file_path, out.start_line AS start_line,
+           param_name, arg_expr
+    FROM data_flow WHERE in = $node LIMIT 20 FETCH out
+);
+LET $sources = (
+    SELECT in.qualified AS qualified, in.signature AS signature,
+           in.file_path AS file_path, in.start_line AS start_line,
+           param_name, arg_expr
+    FROM data_flow WHERE out = $node LIMIT 20 FETCH in
+);
+LET $reads_f  = (SELECT field_name FROM reads  WHERE in = $node);
+LET $writes_f = (SELECT field_name FROM writes WHERE in = $node);
+
+RETURN {
+    callees:  $callees,
+    callers:  $callers,
+    sinks:    $sinks,
+    sources:  $sources,
+    reads:    $reads_f.field_name,
+    writes:   $writes_f.field_name
+};`
+
+	type neighborhoodRow struct {
+		Callees []neighborRow `json:"callees"`
+		Callers []neighborRow `json:"callers"`
+		Sinks   []neighborRow `json:"sinks"`
+		Sources []neighborRow `json:"sources"`
+		Reads   []string      `json:"reads"`
+		Writes  []string      `json:"writes"`
+	}
+
+	results, err := surrealdb.Query[[]neighborhoodRow](ctx, a.db, q, map[string]any{
+		"table":    table,
+		"local_id": localID,
+	})
+	if err != nil {
+		// Non-fatal: return an empty neighborhood so callers can proceed.
+		return &domain.Neighborhood{}, nil //nolint:nilerr
+	}
+	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		return &domain.Neighborhood{}, nil
+	}
+
+	row := (*results)[0].Result[0]
+	nb := &domain.Neighborhood{
+		Reads:  row.Reads,
+		Writes: row.Writes,
+	}
+	for _, r := range row.Callees {
+		nb.Callees = append(nb.Callees, neighborRowToNeighborNode(r))
+	}
+	for _, r := range row.Callers {
+		nb.Callers = append(nb.Callers, neighborRowToNeighborNode(r))
+	}
+	for _, r := range row.Sinks {
+		nb.DataSinks = append(nb.DataSinks, neighborRowToNeighborNode(r))
+	}
+	for _, r := range row.Sources {
+		nb.DataSources = append(nb.DataSources, neighborRowToNeighborNode(r))
+	}
+	return nb, nil
+}
+
+// TraceDataFlow follows data_flow edges from startID.
+// direction: "forward" (sinks), "reverse" (sources), "both".
+func (a *SurrealAdapter) TraceDataFlow(ctx context.Context, startID string, depth int, direction string) ([]types.TraceHop, error) {
+	table, localID := splitRecordID(startID)
+	if table == "" || localID == "" {
+		return nil, domain.Validation(fmt.Sprintf("invalid start id: %q", startID))
+	}
+	if depth <= 0 {
+		depth = 5
+	}
+
+	var q string
+	switch direction {
+	case "reverse":
+		q = fmt.Sprintf(`
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(<-data_flow<-function);`, depth)
+	default: // "forward" or "both" — forward is the primary direction
+		q = fmt.Sprintf(`
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(->data_flow->function);`, depth)
+	}
+
+	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
+		"start": models.NewRecordID(table, localID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("trace data flow %s: %w", startID, err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+
+	hops := buildTraceHops((*results)[0].Result, "data_flow")
+	for i := range hops {
+		hops[i].Edge.Kind = types.EdgeDataFlow
+	}
+
+	// For "both", append the reverse hops as well.
+	if direction == "both" {
+		revQ := fmt.Sprintf(`
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(<-data_flow<-function);`, depth)
+		revResults, err := surrealdb.Query[[]traceRow](ctx, a.db, revQ, map[string]any{
+			"start": models.NewRecordID(table, localID),
+		})
+		if err == nil && revResults != nil && len(*revResults) > 0 {
+			revHops := buildTraceHops((*revResults)[0].Result, "data_flow")
+			for i := range revHops {
+				revHops[i].Edge.Kind = types.EdgeDataFlow
+			}
+			hops = append(hops, revHops...)
+		}
+	}
+
+	return hops, nil
+}
+
+// ListNodeIDs returns the record IDs of all indexable nodes (function, class, file,
+// module) for a given repo slug. Used by the neighborhood re-embedding pass.
+func (a *SurrealAdapter) ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error) {
+	type idRow struct {
+		ID *models.RecordID `json:"id"`
+	}
+
+	// "function" is a reserved keyword — backtick-quoted. Query each table
+	// separately to avoid UNION ALL cross-statement parsing issues in SurrealDB.
+	tables := []string{"`function`", "class", "file", "module"}
+	params := map[string]any{
+		"repo_ref": models.NewRecordID("repo", repoSlug),
+	}
+
+	var ids []string
+	for _, table := range tables {
+		q := fmt.Sprintf("SELECT id FROM %s WHERE repo = $repo_ref;", table)
+		results, err := surrealdb.Query[[]idRow](ctx, a.db, q, params)
+		if err != nil {
+			return nil, fmt.Errorf("list node ids %s [%s]: %w", repoSlug, table, err)
+		}
+		if results == nil || len(*results) == 0 {
+			continue
+		}
+		for _, r := range (*results)[0].Result {
+			if r.ID != nil {
+				ids = append(ids, fmt.Sprintf("%s:%v", r.ID.Table, r.ID.ID))
+			}
+		}
+	}
+	return ids, nil
+}
+
+// ---------------------------------------------------------------------------
 // GraphStore — Batch upsert (transactional)
 // ---------------------------------------------------------------------------
 
-// UpsertFileBatch atomically upserts all nodes and edges for a parsed file.
-// Uses an interactive SurrealDB v3 transaction; retries up to 3x on conflict.
+// UpsertFileBatch upserts all nodes and edges for a parsed file.
+// Each UPSERT/RELATE statement is individually atomic in SurrealDB, so we
+// avoid wrapping them in a transaction — transactions cause write conflicts
+// under concurrent indexing because multiple goroutines may touch the same
+// repo/file records.
 func (a *SurrealAdapter) UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error {
-	const maxAttempts = 3
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		err := a.upsertFileBatchOnce(ctx, nodes, edges)
-		if err == nil {
-			return nil
-		}
-		if !isConflictErr(err) || attempt == maxAttempts-1 {
-			return err
-		}
-		wait := time.Duration(attempt*50) * time.Millisecond
-		a.log.Warn("upsert batch conflict, retrying", "attempt", attempt+1, "wait", wait)
-		time.Sleep(wait)
-	}
-	return nil
-}
-
-func (a *SurrealAdapter) upsertFileBatchOnce(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error {
-	tx, err := a.db.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-
-	defer func() {
-		if !tx.IsClosed() {
-			_ = tx.Cancel(ctx)
-		}
-	}()
-
 	for i := range nodes {
 		node := &nodes[i]
 		table := nodeTable(string(node.Kind))
@@ -672,14 +913,20 @@ func (a *SurrealAdapter) upsertFileBatchOnce(ctx context.Context, nodes []types.
 		if q == "" {
 			continue
 		}
-		results, err := surrealdb.Query[any](ctx, tx, q, nodeParams(node))
+		err := retry.WithRetry(ctx, 3, func() error {
+			results, err := surrealdb.Query[any](ctx, a.db, q, nodeParams(node))
+			if err != nil {
+				return classifySurrealError(err)
+			}
+			for _, r := range *results {
+				if r.Status == "ERR" {
+					return classifySurrealError(fmt.Errorf("%v", r.Error))
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			return fmt.Errorf("upsert node %s: %w", node.ID, err)
-		}
-		for _, r := range *results {
-			if r.Status == "ERR" {
-				return fmt.Errorf("upsert node %s: %v", node.ID, r.Error)
-			}
 		}
 	}
 
@@ -695,7 +942,7 @@ func (a *SurrealAdapter) upsertFileBatchOnce(ctx context.Context, nodes []types.
 		if q == "" {
 			continue
 		}
-		results, err := surrealdb.Query[any](ctx, tx, q, edgeParams(edge, repoSlug))
+		results, err := surrealdb.Query[any](ctx, a.db, q, edgeParams(edge, repoSlug))
 		if err != nil {
 			return fmt.Errorf("relate edge %s->%s: %w", edge.FromID, edge.ToID, err)
 		}
@@ -706,16 +953,7 @@ func (a *SurrealAdapter) upsertFileBatchOnce(ctx context.Context, nodes []types.
 		}
 	}
 
-	return tx.Commit(ctx)
-}
-
-// isConflictErr heuristically detects a transaction conflict error from SurrealDB.
-func isConflictErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "conflict") || strings.Contains(msg, "transaction")
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -738,15 +976,26 @@ UPSERT type::record($id) CONTENT {
     last_indexed_at: $last_indexed_at
 };`
 
+	// option<datetime> fields must be NONE (not NULL) when absent.
+	var lastIndexedAt any = models.None
+	if repo.LastIndexedAt != nil {
+		lastIndexedAt = repo.LastIndexedAt
+	}
+	// array<string> must not be nil — use empty slice.
+	languages := repo.Languages
+	if languages == nil {
+		languages = []string{}
+	}
+
 	results, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
 		"id":              models.NewRecordID("repo", repo.Slug),
 		"slug":            repo.Slug,
 		"path":            repo.Path,
 		"remote_url":      repo.RemoteURL,
 		"default_branch":  repo.DefaultBranch,
-		"languages":       repo.Languages,
+		"languages":       languages,
 		"last_commit":     repo.LastCommit,
-		"last_indexed_at": repo.LastIndexedAt,
+		"last_indexed_at": lastIndexedAt,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert repo %s: %w", repo.Slug, err)
@@ -805,4 +1054,20 @@ func repoRowToRepo(r repoRow) *types.Repo {
 		LastCommit:    r.LastCommit,
 		LastIndexedAt: r.LastIndexedAt,
 	}
+}
+
+// classifySurrealError wraps SurrealDB errors into domain error types so the
+// retry layer can distinguish transient failures from permanent ones.
+// Transaction write conflicts are common under concurrent upsert workloads and
+// are safe to retry with backoff.
+func classifySurrealError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "Transaction conflict") ||
+		strings.Contains(msg, "write conflict") {
+		return domain.Conflict(msg)
+	}
+	return err
 }

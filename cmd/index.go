@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,22 +11,33 @@ import (
 )
 
 var indexCmd = &cobra.Command{
-	Use:   "index <path>",
+	Use:   "index [github-url|local-path]",
 	Short: "Index a repository into the graph",
-	Args:  cobra.ExactArgs(1),
+	Long: `Index a repository into the commit0 graph.
+
+The repository slug is always derived from the GitHub remote URL, ensuring
+consistent naming across all commit0 commands.
+
+Examples:
+  commit0 index https://github.com/commit0-dev/commit0.git   # clone and index
+  commit0 index https://github.com/owner/repo                # .git suffix optional
+  commit0 index /path/to/local/repo                          # must have git remote origin
+  commit0 index                                              # current directory`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(configPath(cmd))
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
 
-		repoSlug, _ := cmd.Flags().GetString("slug")
-		if repoSlug == "" {
-			absPath, err := filepath.Abs(args[0])
-			if err != nil {
-				return fmt.Errorf("resolve path: %w", err)
-			}
-			repoSlug = filepath.Base(absPath)
+		arg := "."
+		if len(args) > 0 {
+			arg = args[0]
+		}
+
+		repoPath, repoSlug, err := resolveRepoSource(cmd.Context(), arg)
+		if err != nil {
+			return err
 		}
 
 		langsRaw, _ := cmd.Flags().GetString("languages")
@@ -47,12 +57,15 @@ var indexCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		fmt.Printf("Indexing %s as %q...\n", args[0], repoSlug)
+		fmt.Printf("Indexing %s as %q...\n", repoPath, repoSlug)
+
+		force, _ := cmd.Flags().GetBool("force")
 
 		result, err := svc.Index(cmd.Context(), app.IndexRequest{
-			RepoPath:  args[0],
+			RepoPath:  repoPath,
 			RepoSlug:  repoSlug,
 			Languages: languages,
+			Force:     force,
 		})
 		if err != nil {
 			return fmt.Errorf("index: %w", err)
@@ -66,6 +79,6 @@ var indexCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(indexCmd)
-	indexCmd.Flags().String("slug", "", "Repository slug (defaults to directory name)")
 	indexCmd.Flags().String("languages", "", "Comma-separated list of languages to index (e.g. go,python)")
+	indexCmd.Flags().Bool("force", false, "Delete existing nodes before indexing (removes stale data)")
 }

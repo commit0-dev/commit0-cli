@@ -51,6 +51,30 @@ type AffectedNode struct {
 	HopCount int
 }
 
+// DataFlowResult represents the result of a data-flow analysis rooted at a symbol.
+type DataFlowResult struct {
+	Explanation string
+	Direction   string
+	Paths       []FlowPath
+	Root        CodeNode
+	Timing      TimingInfo
+}
+
+// FlowPath is one chain of data movement through the codebase, tagged with the
+// parameter name or field name being tracked.
+type FlowPath struct {
+	DataTag string
+	Hops    []FlowHop
+}
+
+// FlowHop is a single step in a data-flow path.
+type FlowHop struct {
+	DataExpr string
+	Edge     CodeEdge
+	Node     CodeNode
+	Depth    int
+}
+
 // TimingInfo holds performance metrics for operations.
 type TimingInfo struct {
 	EmbedMS   int64 // Time spent embedding

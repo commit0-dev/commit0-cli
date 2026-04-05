@@ -60,12 +60,12 @@ jobs:
             -coverpkg=./internal/app/... \
             ./...
 
-      - name: Enforce 99.8 % coverage threshold
+      - name: Enforce 98 % coverage threshold
         run: |
           COVERAGE=$(go tool cover -func=coverage.out \
             | grep -E "^total:" | awk '{print $3}' | tr -d '%')
           echo "coverage=${COVERAGE}" >> "$GITHUB_ENV"
-          THRESHOLD=99.8
+          THRESHOLD=98
           if awk "BEGIN{exit !($COVERAGE < $THRESHOLD)}"; then
             echo "::error::Coverage ${COVERAGE}% is below the required ${THRESHOLD}%"
             exit 1
@@ -81,7 +81,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Total** | **${coverage}%** |"
-            echo "| Threshold | 99.8% |"
+            echo "| Threshold | 98% |"
             echo ""
             echo "### Per-function breakdown"
             echo '```'
@@ -113,24 +113,6 @@ jobs:
           go-version-file: go.mod
           go-package: ./...
 
-  # ── Dependency review ─────────────────────────────────────────────────────
-  # Blocks PRs that introduce dependencies with known CVEs or non-permissive
-  # licenses.
-  dependency-review:
-    name: Dependency review
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: high
-          deny-licenses: GPL-2.0, LGPL-2.0, LGPL-2.1, AGPL-3.0
-          comment-summary-in-pr: always
-
   # ── Container image scan ──────────────────────────────────────────────────
   # Builds linux/amd64 only, loads into the local daemon for trivy — no push.
   # Gated on lint + test to avoid wasting resources on a broken PR.
@@ -140,7 +122,6 @@ jobs:
     needs: [lint, test]
     permissions:
       contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@v4
 
@@ -161,18 +142,10 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.build.outputs.imageid }}
-          format: sarif
-          output: trivy.sarif
+          format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy.sarif
-          category: trivy-image

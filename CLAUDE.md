@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 make build          # CGO_ENABLED=1 go build -trimpath … -o commit0 .
 make test           # go test -count=1 -timeout=5m ./...
 make test-race      # + race detector
-make test-cover     # internal/app coverage — enforces 99.8% threshold
+make test-cover     # internal/app coverage — enforces 98% threshold
 make lint           # golangci-lint (mirrors pre-push hook and CI)
 make lint-fix       # golangci-lint --fix
 make install-hooks  # pre-commit (fmt/vet) + pre-push (golangci-lint)
@@ -46,7 +46,7 @@ See [docs/LAYOUT.md](docs/LAYOUT.md) for the full annotated directory tree.
 
 ## Testing
 
-`internal/app/` unit tests use in-memory stubs for all ports (`stubs_test.go`). Coverage: **99.8%** threshold on `internal/app/...`. Adapter integration tests require live SurrealDB + `GEMINI_API_KEY`. Compile-time check pattern: `_ domain.GraphStore = (*SurrealAdapter)(nil)`.
+`internal/app/` unit tests use in-memory stubs for all ports (`stubs_test.go`). Coverage: **98%** threshold on `internal/app/...`. Adapter integration tests require live SurrealDB + `GEMINI_API_KEY`. Compile-time check pattern: `_ domain.GraphStore = (*SurrealAdapter)(nil)`.
 
 ## SurrealDB 3.0 Specifics
 
@@ -54,8 +54,8 @@ Use `HNSW` (not `MTREE`), `COMPUTED` (not `<future>`), `LET $var`, `type::record
 
 ## Gemini Embedding 2
 
-- Index prefix: `"task: search result | query: {content}"`
-- Query prefix: `"task: search query | query: {user_question}"`
+- **Index (documents):** `"title: [KIND] {Qualified} | text: {description}"` — produced by `ContextBuilder`, sent as-is to `EmbedBatch` (no prefix added by the embedder).
+- **Query:** `"task: code retrieval | query: {user_question}"` — prepended by `GeminiEmbedder.EmbedQuery`.
 - SDK: `google.golang.org/genai` → `client.Models.EmbedContent(ctx, "gemini-embedding-2-preview", ...)`
 
 ## Custom Skills

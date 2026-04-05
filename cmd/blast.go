@@ -37,18 +37,21 @@ var blastCmd = &cobra.Command{
 			return fmt.Errorf("blast: %w", err)
 		}
 
-		fmt.Printf("Blast radius for %s: %d affected nodes (%dms)\n\n",
-			result.Target.Qualified, len(result.Affected), result.Timing.TotalMS)
+		fmt.Printf("%s %s%s %s\n\n",
+			bold("Blast radius for"),
+			bold(cyan(result.Target.Qualified)),
+			gray(":"),
+			gray(fmt.Sprintf("%d affected nodes (%dms)", len(result.Affected), result.Timing.TotalMS)))
 		for i, aff := range result.Affected {
-			fmt.Printf("%d. %s (hop %d)\n   %s\n",
-				i+1,
-				aff.Node.Qualified,
-				aff.HopCount,
-				aff.Node.FilePath,
+			fmt.Printf("%s %s %s\n   %s\n",
+				gray(fmt.Sprintf("%d.", i+1)),
+				bold(aff.Node.Qualified),
+				dim(yellow(fmt.Sprintf("hop %d", aff.HopCount))),
+				gray(aff.Node.FilePath),
 			)
 		}
 		if result.Summary != "" {
-			fmt.Printf("\nSummary:\n%s\n", result.Summary)
+			fmt.Printf("\n%s\n%s\n", bold("Summary:"), result.Summary)
 		}
 		return nil
 	},

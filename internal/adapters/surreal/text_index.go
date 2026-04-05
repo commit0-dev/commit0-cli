@@ -22,6 +22,8 @@ type ftsRow struct {
 	Signature  string           `json:"signature"`
 	Docstring  string           `json:"docstring"`
 	Body       string           `json:"body"`
+	StartLine  int              `json:"start_line"`
+	EndLine    int              `json:"end_line"`
 	Centrality int              `json:"centrality"`
 	FTSScore   float64          `json:"fts_score"` // from search::score()
 }
@@ -79,6 +81,8 @@ func (a *SurrealAdapter) TextSearch(ctx context.Context, query string, opts doma
 					Signature: r.Signature,
 					Docstring: r.Docstring,
 					Body:      r.Body,
+					StartLine: r.StartLine,
+					EndLine:   r.EndLine,
 				},
 				FTSScore:   r.FTSScore,
 				Centrality: r.Centrality,
@@ -121,10 +125,10 @@ func (a *SurrealAdapter) ftsSearchTable(
 SELECT %s,
     search::score(1) AS fts_score
 FROM %s
-WHERE (%s) AND repo = type::record($repo_ref)
+WHERE (%s) AND repo = $repo_ref
 ORDER BY fts_score DESC
 LIMIT $topk;`, cols, escaped, whereClause)
-		params["repo_ref"] = fmt.Sprintf("repo:%s", repoSlug)
+		params["repo_ref"] = models.NewRecordID("repo", repoSlug)
 	} else {
 		q = fmt.Sprintf(`
 SELECT %s,

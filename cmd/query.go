@@ -1,11 +1,12 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
+	"os"
 	"strings"
 
+	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/tw"
 	"github.com/spf13/cobra"
 
 	"github.com/commit0-dev/commit0/internal/app"
@@ -50,26 +51,48 @@ var queryCmd = &cobra.Command{
 			return fmt.Errorf("query: %w", err)
 		}
 
-		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			fmt.Printf("Found %d results in %dms\n\n", len(result.Nodes), result.Timing.TotalMS)
-			for i, node := range result.Nodes {
-				n := node.Node
-				switch n.Kind {
-				case types.NodeModule:
-					version := ""
-					if n.Docstring != "" {
-						version = " " + n.Docstring
-					}
-					fmt.Printf("%d. [MODULE] %s%s (score: %.3f)\n   import \"%s\"\n\n",
-						i+1, n.Name, version, node.FusedScore, n.Qualified)
-				default:
-					label := strings.ToUpper(string(n.Kind))
-					fmt.Printf("%d. [%s] %s (score: %.3f)\n   %s:%d\n\n",
-						i+1, label, n.Qualified, node.FusedScore, n.FilePath, n.StartLine)
+		fmt.Printf(bold("Found %d results")+" %s\n\n",
+			len(result.Nodes), gray(fmt.Sprintf("embed:%dms search:%dms explain:%dms",
+				result.Timing.EmbedMS, result.Timing.SearchMS, result.Timing.ExplainMS)))
+
+		tbl := tablewriter.NewTable(os.Stdout,
+			tablewriter.WithHeaderAlignment(tw.AlignLeft),
+			tablewriter.WithConfig(tablewriter.Config{
+				Row: tw.CellConfig{
+					Formatting: tw.CellFormatting{AutoWrap: tw.WrapNone},
+				},
+			}),
+		)
+		tbl.Header([]string{"#", "Kind", "Qualified Name", "Location", "Score"})
+		for i, node := range result.Nodes {
+			n := node.Node
+			var kind, name, location string
+			switch n.Kind {
+			case types.NodeModule:
+				version := ""
+				if n.Docstring != "" {
+					version = " " + n.Docstring
 				}
+				kind = "MODULE"
+				name = n.Name + version
+				location = fmt.Sprintf("import %q", n.Qualified)
+			default:
+				kind = strings.ToUpper(string(n.Kind))
+				name = n.Qualified
+				location = fmt.Sprintf("%s:%d", n.FilePath, n.StartLine)
 			}
+			tbl.Append([]string{ //nolint:errcheck
+				fmt.Sprintf("%d", i+1),
+				kind,
+				name,
+				location,
+				fmt.Sprintf("%.3f", node.FusedScore),
+			})
 		}
+		tbl.Render() //nolint:errcheck
+
 		if result.Explanation != "" {
+			fmt.Println(cyan("─────────────────────────────────────"))
 			fmt.Println(result.Explanation)
 		}
 		return nil

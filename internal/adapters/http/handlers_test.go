@@ -80,6 +80,15 @@ func (s *httpTestGraphStore) ListRepos(ctx context.Context) ([]types.Repo, error
 }
 func (s *httpTestGraphStore) ApplySchema(ctx context.Context) error             { return nil }
 func (s *httpTestGraphStore) GetSchemaVersion(ctx context.Context) (int, error) { return 1, nil }
+func (s *httpTestGraphStore) GetNeighborhood(_ context.Context, _ string) (*domain.Neighborhood, error) {
+	return &domain.Neighborhood{}, nil
+}
+func (s *httpTestGraphStore) TraceDataFlow(_ context.Context, _ string, _ int, _ string) ([]types.TraceHop, error) {
+	return nil, nil
+}
+func (s *httpTestGraphStore) ListNodeIDs(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
 
 type httpTestVectorIndex struct {
 	err     error

@@ -68,6 +68,25 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	startTime := time.Now()
 	run := &indexRun{}
 
+	// Force re-index: cascade-delete all existing nodes via the repo record so
+	// stale records (functions/files removed from the codebase) don't persist.
+	if req.Force {
+		if err := is.store.DeleteNodesByRepo(ctx, req.RepoSlug); err != nil {
+			return nil, fmt.Errorf("delete existing nodes: %w", err)
+		}
+		is.log.Info("deleted existing nodes", "repo", req.RepoSlug)
+	}
+
+	// Ensure the repo record exists — nodes reference it via record<repo>.
+	// Must run after the force delete so the repo is recreated if it was wiped.
+	if err := is.store.UpsertRepo(ctx, &types.Repo{
+		Slug:      req.RepoSlug,
+		Path:      req.RepoPath,
+		Languages: []string{},
+	}); err != nil {
+		return nil, fmt.Errorf("upsert repo: %w", err)
+	}
+
 	// Stage 1: Walk filesystem
 	is.log.Info("starting walk", "repo", req.RepoSlug, "path", req.RepoPath)
 	fileCh, walkErrCh := is.walker.Walk(ctx, req.RepoPath, domain.WalkOpts{
@@ -184,13 +203,91 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		return nil, fmt.Errorf("walk failed: %w", err)
 	}
 
-	return &IndexResult{
+	result := &IndexResult{
 		FilesIndexed: run.filesIndexed,
 		NodesCreated: run.nodesCreated,
 		EdgesCreated: run.edgesCreated,
 		Timing: types.TimingInfo{
 			TotalMS: time.Since(startTime).Milliseconds(),
 		},
+	}
+
+	// Neighborhood re-embedding pass: now that all nodes and edges are stored,
+	// re-embed every node with full graph context (callers, callees, data-flow).
+	if _, err := is.ReembedNeighborhood(ctx, req.RepoSlug); err != nil {
+		is.log.Warn("neighborhood reembed failed", "repo", req.RepoSlug, "err", err)
+		// Non-fatal: base embeddings are still valid.
+	}
+
+	return result, nil
+}
+
+// ReembedResult holds statistics from a neighborhood re-embedding pass.
+type ReembedResult struct {
+	NodesUpdated int
+	Skipped      int
+	Timing       types.TimingInfo
+}
+
+// ReembedNeighborhood re-embeds all nodes for repoSlug using graph-context
+// (callers, callees, data-flow neighbors). Safe to call after the main Index
+// pipeline completes — that is when edges are present in the store.
+func (is *IndexService) ReembedNeighborhood(ctx context.Context, repoSlug string) (*ReembedResult, error) {
+	start := time.Now()
+
+	// Builder with store so ForNodeCtx enriches context with graph neighbors.
+	builder := NewContextBuilderWithStore(32768, is.store)
+
+	ids, err := is.store.ListNodeIDs(ctx, repoSlug)
+	if err != nil {
+		return nil, fmt.Errorf("list node ids: %w", err)
+	}
+
+	batchSize := is.cfg.Index.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	var updated int
+
+	// Process IDs in chunks matching the Gemini batch size.
+	for i := 0; i < len(ids); i += batchSize {
+		end := min(i+batchSize, len(ids))
+		chunk := ids[i:end]
+
+		nodes := make([]types.CodeNode, 0, len(chunk))
+		for _, id := range chunk {
+			node, err := is.store.GetNode(ctx, id)
+			if err != nil {
+				is.log.Warn("reembed: get node", "id", id, "err", err)
+				continue
+			}
+			nodes = append(nodes, *node)
+		}
+		if len(nodes) == 0 {
+			continue
+		}
+
+		batcher := NewEmbedBatcher(is.embedder, batchSize)
+		enriched, err := batcher.Process(ctx, nodes, builder)
+		if err != nil {
+			is.log.Warn("reembed: embed batch", "err", err)
+			continue
+		}
+
+		for i := range enriched {
+			n := enriched[i]
+			if err := is.store.UpsertNode(ctx, &n); err != nil {
+				is.log.Warn("reembed: upsert", "id", n.ID, "err", err)
+				continue
+			}
+			updated++
+		}
+	}
+
+	return &ReembedResult{
+		NodesUpdated: updated,
+		Timing:       types.TimingInfo{TotalMS: time.Since(start).Milliseconds()},
 	}, nil
 }
 

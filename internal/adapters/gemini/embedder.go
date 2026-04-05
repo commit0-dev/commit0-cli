@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	indexPrefix = "task: search result | query: "
-	queryPrefix = "task: search query | query: "
+	// queryPrefix uses the Gemini Embedding 2 code-retrieval task type, which is
+	// optimized for matching natural-language questions to source code.
+	// Document text uses the "title: … | text: …" convention and is produced by
+	// ContextBuilder — no additional prefix is added at embed time.
+	queryPrefix = "task: code retrieval | query: "
 
 	maxRetryAttempts = 3
 )
@@ -92,7 +95,7 @@ func (e *GeminiEmbedder) EmbedBatch(ctx context.Context, inputs []domain.EmbedIn
 	contents := make([]*genai.Content, len(inputs))
 	for i, inp := range inputs {
 		parts := []*genai.Part{
-			genai.NewPartFromText(indexPrefix + inp.Text),
+			genai.NewPartFromText(inp.Text),
 		}
 		// Attach inline images when present.
 		for j, imgBytes := range inp.Images {

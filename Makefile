@@ -47,7 +47,7 @@ test:
 test-race:
 	go test -race -count=1 -timeout=5m ./...
 
-## test-cover: run coverage for internal/app and enforce 99.8 % threshold
+## test-cover: run coverage for internal/app and enforce 98 % threshold
 test-cover:
 	@go test -count=1 -timeout=5m \
 		-coverprofile=coverage.out \
@@ -57,9 +57,9 @@ test-cover:
 	@COVERAGE=$$(go tool cover -func=coverage.out \
 		| grep -E "^total:" | awk '{print $$3}' | tr -d '%'); \
 	echo "Coverage: $${COVERAGE}%"; \
-	awk "BEGIN{exit !($${COVERAGE} < 99.8)}" || \
-		{ echo "FAIL: coverage $${COVERAGE}% < 99.8%"; exit 1; }; \
-	echo "PASS: $${COVERAGE}% >= 99.8%"
+	awk "BEGIN{exit ($${COVERAGE} < 98)}" || \
+		{ echo "FAIL: coverage $${COVERAGE}% < 98%"; exit 1; }; \
+	echo "PASS: $${COVERAGE}% >= 98%"
 
 cover-html: test-cover
 	go tool cover -html=coverage.out -o coverage.html

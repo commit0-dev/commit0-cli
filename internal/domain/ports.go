@@ -89,6 +89,44 @@ type WalkOpts struct {
 	MaxFileKB int
 }
 
+// NeighborNode is an enriched reference to an adjacent graph node, carrying
+// the signature and docstring needed to build richer embedding context.
+type NeighborNode struct {
+	Qualified string
+	Signature string
+	Docstring string
+	FilePath  string
+	// ParamName is set on DataSinks: the callee parameter that receives the data.
+	ParamName string
+	// ArgExpr is set on DataSources: the expression passed at the call site.
+	ArgExpr   string
+	StartLine int
+}
+
+// Neighborhood holds all immediate graph context for a node.
+// It is used by the ContextBuilder to produce richer embedding inputs.
+type Neighborhood struct {
+	// Callees are functions directly called by this node.
+	Callees []NeighborNode
+	// Callers are functions that directly call this node.
+	Callers []NeighborNode
+	// DataSinks are nodes that receive data from this node via data_flow edges.
+	DataSinks []NeighborNode
+	// DataSources are nodes whose data flows into this node via data_flow edges.
+	DataSources []NeighborNode
+	// Reads lists field names (e.g. "User.Email") read by this node.
+	Reads []string
+	// Writes lists field names written by this node.
+	Writes []string
+}
+
+// IsEmpty reports whether a Neighborhood has no useful context.
+func (nb *Neighborhood) IsEmpty() bool {
+	return len(nb.Callees) == 0 && len(nb.Callers) == 0 &&
+		len(nb.DataSinks) == 0 && len(nb.DataSources) == 0 &&
+		len(nb.Reads) == 0 && len(nb.Writes) == 0
+}
+
 // GraphStore provides CRUD operations and graph traversal.
 type GraphStore interface {
 	UpsertNode(ctx context.Context, node *types.CodeNode) error
@@ -101,6 +139,15 @@ type GraphStore interface {
 	TraceForward(ctx context.Context, startID string, depth int) ([]types.TraceHop, error)
 	TraceReverse(ctx context.Context, startID string, depth int) ([]types.TraceHop, error)
 	BlastRadius(ctx context.Context, targetID string, maxDepth int) ([]types.AffectedNode, error)
+	// GetNeighborhood returns the immediate graph context for nodeID: callers,
+	// callees (with signatures), and data-flow sources/sinks.
+	GetNeighborhood(ctx context.Context, nodeID string) (*Neighborhood, error)
+	// TraceDataFlow follows data_flow edges from startID.
+	// direction must be "forward" (sinks), "reverse" (sources), or "both".
+	TraceDataFlow(ctx context.Context, startID string, depth int, direction string) ([]types.TraceHop, error)
+	// ListNodeIDs returns the record IDs of all indexable nodes for a repo.
+	// Used by the neighborhood re-embedding pass.
+	ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error)
 	UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
 	UpsertRepo(ctx context.Context, repo *types.Repo) error
 	GetRepo(ctx context.Context, slug string) (*types.Repo, error)

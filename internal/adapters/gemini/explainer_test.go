@@ -59,6 +59,22 @@ func TestNewGeminiExplainerCustomModel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// buildExplainPrompt — system preamble
+// ---------------------------------------------------------------------------
+
+func TestBuildExplainPrompt_AgenticPreamble(t *testing.T) {
+	req := domain.ExplainRequest{
+		QueryType: "search",
+		UserQuery: "test",
+	}
+	out := buildExplainPrompt(req)
+
+	mustContain(t, out, "senior software engineer")
+	mustContain(t, out, "code intelligence agent")
+	mustContain(t, out, "actionable insights")
+}
+
+// ---------------------------------------------------------------------------
 // buildExplainPrompt — query type routing
 // ---------------------------------------------------------------------------
 
@@ -81,7 +97,7 @@ func TestBuildExplainPrompt_TraceType(t *testing.T) {
 	}
 	out := buildExplainPrompt(req)
 
-	mustContain(t, out, "call chain")
+	mustContain(t, out, "execution flow")
 	mustContain(t, out, req.UserQuery)
 }
 

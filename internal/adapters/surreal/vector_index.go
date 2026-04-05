@@ -22,6 +22,8 @@ type vecRow struct {
 	Signature  string           `json:"signature"`
 	Docstring  string           `json:"docstring"`
 	Body       string           `json:"body"`
+	StartLine  int              `json:"start_line"`
+	EndLine    int              `json:"end_line"`
 	Centrality int              `json:"centrality"`
 	VecDist    float64          `json:"vec_dist"` // raw cosine distance from vector::distance::knn()
 }
@@ -80,6 +82,8 @@ func (a *SurrealAdapter) VectorSearch(ctx context.Context, query []float32, opts
 					Signature: r.Signature,
 					Docstring: r.Docstring,
 					Body:      r.Body,
+					StartLine: r.StartLine,
+					EndLine:   r.EndLine,
 				},
 				VectorScore: score,
 				Centrality:  r.Centrality,
@@ -121,8 +125,8 @@ SELECT %s,
     vector::distance::knn() AS vec_dist
 FROM %s
 WHERE embedding <|%d,%d|> $q
-  AND repo = type::record($repo_ref);`, cols, escaped, topK, effort)
-		params["repo_ref"] = fmt.Sprintf("repo:%s", repoSlug)
+  AND repo = $repo_ref;`, cols, escaped, topK, effort)
+		params["repo_ref"] = models.NewRecordID("repo", repoSlug)
 	} else {
 		q = fmt.Sprintf(`
 SELECT %s,

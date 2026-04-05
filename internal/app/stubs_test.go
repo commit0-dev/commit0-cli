@@ -23,6 +23,9 @@ type stubGraphStore struct {
 	upsertBatchFn  func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
 	traceHops      []types.TraceHop
 	affected       []types.AffectedNode
+	neighborhood   *domain.Neighborhood
+	dataFlowHops   []types.TraceHop
+	nodeIDs        []string
 }
 
 func newStubGraphStore() *stubGraphStore {
@@ -175,6 +178,33 @@ func (s *stubGraphStore) ListRepos(ctx context.Context) ([]types.Repo, error) {
 	return result, nil
 }
 
+func (s *stubGraphStore) GetNeighborhood(ctx context.Context, nodeID string) (*domain.Neighborhood, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.neighborhood != nil {
+		return s.neighborhood, nil
+	}
+	return &domain.Neighborhood{}, nil
+}
+
+func (s *stubGraphStore) TraceDataFlow(ctx context.Context, startID string, depth int, direction string) ([]types.TraceHop, error) {
+	if s.traceErr != nil {
+		return nil, s.traceErr
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.dataFlowHops, nil
+}
+
+func (s *stubGraphStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.nodeIDs, nil
+}
+
 func (s *stubGraphStore) ApplySchema(ctx context.Context) error {
 	return nil
 }
@@ -273,7 +303,12 @@ func (s *stubParser) Parse(ctx context.Context, file domain.FileEntry) (*domain.
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.result, nil
+	// Return a shallow copy so concurrent parse goroutines don't share the same
+	// Nodes slice — the production code stamps RepoSlug onto each node in-place.
+	cp := *s.result
+	cp.Nodes = make([]types.CodeNode, len(s.result.Nodes))
+	copy(cp.Nodes, s.result.Nodes)
+	return &cp, nil
 }
 
 func (s *stubParser) SupportedLanguages() []string {

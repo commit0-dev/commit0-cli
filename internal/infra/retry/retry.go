@@ -67,7 +67,9 @@ func isRetryable(err error) bool {
 	// Check if it's a DomainError with retryable error code
 	var domainErr *domain.DomainError
 	if errors.As(err, &domainErr) {
-		return domainErr.Code == domain.ErrRateLimit || domainErr.Code == domain.ErrTimeout
+		return domainErr.Code == domain.ErrRateLimit ||
+			domainErr.Code == domain.ErrTimeout ||
+			domainErr.Code == domain.ErrConflict
 	}
 
 	return false

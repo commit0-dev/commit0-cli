@@ -62,8 +62,11 @@ type QueryConfig struct {
 
 // Load reads configuration via Viper (env vars, optional config file).
 // If cfgPath is non-empty, that file is loaded (YAML, JSON, TOML supported).
-// Environment variables take precedence over file values.
+// A .env file is auto-discovered by walking up from the working directory;
+// real environment variables always take precedence over .env values.
 func Load(cfgPath string) (*Config, error) {
+	LoadDotEnv()
+
 	v := viper.New()
 
 	// --- Key bindings and defaults ---
@@ -141,7 +144,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("index.max_workers_parse", 0) // 0 = GOMAXPROCS
 	v.SetDefault("index.max_workers_embed", 4)
-	v.SetDefault("index.max_workers_store", 8)
+	v.SetDefault("index.max_workers_store", 4)
 	v.SetDefault("index.max_file_kb", 10000)
 	v.SetDefault("index.batch_size", 100)
 

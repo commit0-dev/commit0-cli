@@ -41,10 +41,14 @@ var traceCmd = &cobra.Command{
 			return fmt.Errorf("trace: %w", err)
 		}
 
-		fmt.Printf("Trace %s from %s (%dms)\n\n", result.Direction, result.Root.Qualified, result.Timing.TotalMS)
+		fmt.Printf("%s %s %s %s\n\n",
+			bold("Trace"),
+			cyan(result.Direction),
+			bold("from"),
+			bold(result.Root.Qualified)+gray(fmt.Sprintf(" (%dms)", result.Timing.TotalMS)))
 		printHops(result.Tree, 0)
 		if result.Explanation != "" {
-			fmt.Printf("\nExplanation:\n%s\n", result.Explanation)
+			fmt.Printf("\n%s\n%s\n", bold("Explanation:"), result.Explanation)
 		}
 		return nil
 	},
@@ -53,11 +57,11 @@ var traceCmd = &cobra.Command{
 func printHops(hops []types.TraceHop, indent int) {
 	prefix := strings.Repeat("  ", indent)
 	for _, hop := range hops {
-		fmt.Printf("%s-> %s (%s:%d)\n",
+		fmt.Printf("%s%s %s %s\n",
 			prefix,
-			hop.Node.Qualified,
-			hop.Node.FilePath,
-			hop.Node.StartLine,
+			dim(cyan("->")),
+			bold(hop.Node.Qualified),
+			gray(fmt.Sprintf("(%s:%d)", hop.Node.FilePath, hop.Node.StartLine)),
 		)
 		if len(hop.Children) > 0 {
 			printHops(hop.Children, indent+1)

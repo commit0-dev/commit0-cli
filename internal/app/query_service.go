@@ -29,6 +29,7 @@ type QueryService struct {
 	textIdx   domain.TextIndex
 	store     domain.GraphStore
 	explainer domain.LLMExplainer
+	flowSvc   *DataFlowService // optional: enriches LLM context with data-flow paths
 	cfg       *config.Config
 	log       *slog.Logger
 }
@@ -42,7 +43,7 @@ func NewQueryService(
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
 ) *QueryService {
-	return &QueryService{
+	qs := &QueryService{
 		embedder:  embedder,
 		vectorIdx: vectorIdx,
 		textIdx:   textIdx,
@@ -51,6 +52,10 @@ func NewQueryService(
 		cfg:       cfg,
 		log:       slog.Default().With("service", "query"),
 	}
+	if store != nil {
+		qs.flowSvc = NewDataFlowService(store)
+	}
+	return qs
 }
 
 // Query executes a semantic code search.
@@ -135,14 +140,21 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 		})
 	}
 
+	// Build data-flow graph context for the top results (non-fatal if unavailable).
+	graphContext := ""
+	if qs.flowSvc != nil {
+		graphContext = qs.flowSvc.BuildFlowContext(ctx, fused)
+	}
+
 	// Generate explanation (non-fatal if fails)
 	explainStart := time.Now()
 	explanation := ""
 	if qs.explainer != nil {
 		chunks, err := qs.explainer.Explain(ctx, domain.ExplainRequest{
-			QueryType:   "search",
-			UserQuery:   req.Question,
-			CodeContext: excerpts,
+			QueryType:    "search",
+			UserQuery:    req.Question,
+			GraphContext: graphContext,
+			CodeContext:  excerpts,
 		})
 		if err != nil {
 			qs.log.Warn("explain failed", "err", err)
