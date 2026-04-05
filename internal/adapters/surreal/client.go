@@ -114,6 +114,16 @@ func nodeTable(kind string) string {
 	}
 }
 
+// selectCols returns the SELECT column list for search queries.
+// The module table lacks "qualified", "body", "signature", "centrality" —
+// we alias "path" so it maps to the same struct fields as other tables.
+func selectCols(table string) string {
+	if table == "module" {
+		return "id, name, path AS qualified, path AS file_path, language, docstring, 0 AS centrality"
+	}
+	return "id, name, qualified, file_path, repo_slug, language, body, signature, docstring, centrality"
+}
+
 // recordID builds a models.RecordID from a table + opaque ID string.
 // SurrealDB stores IDs like "function:myPkg.Handler.ServeHTTP".
 func recordID(table, id string) models.RecordID {

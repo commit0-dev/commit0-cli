@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -30,4 +32,21 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().String("config", "", "Path to a JSON config file (optional, overridden by env vars)")
+	rootCmd.PersistentFlags().String("log-level", "INFO", "Log level: DEBUG, INFO, WARN, ERROR")
+
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		lvl, _ := cmd.Flags().GetString("log-level")
+		var level slog.Level
+		switch strings.ToUpper(lvl) {
+		case "DEBUG":
+			level = slog.LevelDebug
+		case "WARN":
+			level = slog.LevelWarn
+		case "ERROR":
+			level = slog.LevelError
+		default:
+			level = slog.LevelInfo
+		}
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	}
 }

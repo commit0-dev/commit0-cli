@@ -113,29 +113,26 @@ func (a *SurrealAdapter) ftsSearchTable(
 
 	// "function" is a reserved keyword in SurrealDB v3 — backtick-escape all table names.
 	escaped := fmt.Sprintf("`%s`", table)
+	cols := selectCols(table)
 
 	var q string
 	if repoSlug != "" {
 		q = fmt.Sprintf(`
-SELECT
-    id, name, qualified, language, body, signature, docstring,
-    search::score(1) AS fts_score,
-    centrality
+SELECT %s,
+    search::score(1) AS fts_score
 FROM %s
 WHERE (%s) AND repo = type::record($repo_ref)
 ORDER BY fts_score DESC
-LIMIT $topk;`, escaped, whereClause)
+LIMIT $topk;`, cols, escaped, whereClause)
 		params["repo_ref"] = fmt.Sprintf("repo:%s", repoSlug)
 	} else {
 		q = fmt.Sprintf(`
-SELECT
-    id, name, qualified, language, body, signature, docstring,
-    search::score(1) AS fts_score,
-    centrality
+SELECT %s,
+    search::score(1) AS fts_score
 FROM %s
 WHERE %s
 ORDER BY fts_score DESC
-LIMIT $topk;`, escaped, whereClause)
+LIMIT $topk;`, cols, escaped, whereClause)
 	}
 
 	results, err := surrealdb.Query[[]ftsRow](ctx, a.db, q, params)

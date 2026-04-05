@@ -33,6 +33,12 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("surreal: %w", err)
 	}
 
+	// Apply schema DDL (idempotent — safe to call on every startup).
+	if err := db.ApplySchema(ctx); err != nil {
+		db.Close(ctx)
+		return nil, nil, fmt.Errorf("apply schema: %w", err)
+	}
+
 	// 2. Shared Gemini client
 	genaiClient, err := gemini.NewGeminiClient(ctx, &cfg.Gemini)
 	if err != nil {

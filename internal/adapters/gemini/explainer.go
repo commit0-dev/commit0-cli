@@ -121,16 +121,24 @@ func buildExplainPrompt(req domain.ExplainRequest) string {
 	sb.WriteString("You are commit0, an expert code analyst. ")
 	switch req.QueryType {
 	case "search":
-		sb.WriteString("Answer the developer's question using the code excerpts below. ")
-		sb.WriteString("Be precise, cite file paths and line ranges where relevant.\n\n")
+		sb.WriteString("Answer the developer's question using the code excerpts below.\n")
+		sb.WriteString("Start with a short '## Overview' section (2-3 sentences) that directly answers the question.\n")
+		sb.WriteString("Then provide details with file paths and line ranges where relevant.\n")
+		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
 	case "trace":
-		sb.WriteString("Explain the call chain shown in the code excerpts below. ")
-		sb.WriteString("Walk through each hop in execution order and summarize what each step does.\n\n")
+		sb.WriteString("Explain the call chain shown in the code excerpts below.\n")
+		sb.WriteString("Start with a short '## Overview' section (2-3 sentences) summarizing the call flow.\n")
+		sb.WriteString("Then walk through each hop in execution order.\n")
+		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
 	case "blast":
-		sb.WriteString("Describe the blast radius of the change indicated by the code excerpts below. ")
-		sb.WriteString("List affected components, explain why each is impacted, and suggest safe migration steps.\n\n")
+		sb.WriteString("Describe the blast radius of the change indicated by the code excerpts below.\n")
+		sb.WriteString("Start with a short '## Overview' section (2-3 sentences) on the impact scope.\n")
+		sb.WriteString("Then list affected components and suggest safe migration steps.\n")
+		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
 	default:
-		sb.WriteString("Analyze the code excerpts below and answer the developer's question.\n\n")
+		sb.WriteString("Analyze the code excerpts below and answer the developer's question.\n")
+		sb.WriteString("Start with a short '## Overview' section, then provide details.\n")
+		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
 	}
 
 	// --- User question ---

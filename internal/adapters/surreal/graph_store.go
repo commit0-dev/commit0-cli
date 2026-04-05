@@ -89,6 +89,18 @@ func nodeParams(node *types.CodeNode) map[string]any {
 	repoRef := fmt.Sprintf("repo:%s", node.RepoSlug)
 	fileRef := fmt.Sprintf("file:%s", node.FilePath)
 
+	// SurrealDB 3.0 strict mode: option<T> fields need NONE (not NULL)
+	// when the value is absent. The Go SDK's models.None serializes correctly.
+	var embedding any = models.None
+	if len(node.Embedding) > 0 {
+		embedding = node.Embedding
+	}
+
+	var docstring any = models.None
+	if node.Docstring != "" {
+		docstring = node.Docstring
+	}
+
 	return map[string]any{
 		"record_id":    models.NewRecordID(table, localID),
 		"name":         node.Name,
@@ -99,10 +111,10 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		"start_line":   node.StartLine,
 		"end_line":     node.EndLine,
 		"signature":    node.Signature,
-		"docstring":    node.Docstring,
+		"docstring":    docstring,
 		"body":         node.Body,
 		"content_hash": node.ContentHash,
-		"embedding":    node.Embedding,
+		"embedding":    embedding,
 		"visibility":   defaultVisibility(node.Visibility),
 		"repo_ref":     repoRef,
 		"file_ref":     fileRef,

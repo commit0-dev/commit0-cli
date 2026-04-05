@@ -3,6 +3,7 @@ package surreal
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	surrealdb "github.com/surrealdb/surrealdb.go"
 
@@ -23,9 +24,14 @@ func (a *SurrealAdapter) ApplySchema(ctx context.Context) error {
 	}
 
 	// Surface any per-statement errors from the multi-statement DDL.
+	// "already exists" errors are expected when re-applying — skip them.
 	if results != nil {
 		for i, r := range *results {
 			if r.Status == "ERR" {
+				errMsg := fmt.Sprintf("%v", r.Error)
+				if isSchemaAlreadyExistsErr(errMsg) {
+					continue
+				}
 				return fmt.Errorf("apply schema statement %d: %v", i, r.Error)
 			}
 		}
@@ -33,6 +39,13 @@ func (a *SurrealAdapter) ApplySchema(ctx context.Context) error {
 
 	a.log.Info("schema applied", "version", schemaVersion)
 	return nil
+}
+
+// isSchemaAlreadyExistsErr returns true if the error is a benign "already exists"
+// from DEFINE statements on an existing schema.
+func isSchemaAlreadyExistsErr(msg string) bool {
+	return strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "Transaction write conflict")
 }
 
 // GetSchemaVersion returns the current schema version stored in SurrealDB.
