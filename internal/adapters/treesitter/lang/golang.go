@@ -91,7 +91,9 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 
 		// ── import_declaration ─────────────────────────────────────────────
 		case "import_declaration":
-			edges = append(edges, extractGoImports(n, src, file.Path)...)
+			imports := extractGoImports(n, src, file.Path)
+			nodes = append(nodes, imports.Nodes...)
+			edges = append(edges, imports.Edges...)
 
 		// ── call_expression ────────────────────────────────────────────────
 		case "call_expression":
@@ -196,9 +198,16 @@ func extractGoTypeSpec(n *sitter.Node, src []byte, filePath, pkgName string) *ty
 	}
 }
 
-func extractGoImports(n *sitter.Node, src []byte, filePath string) []types.CodeEdge {
-	var edges []types.CodeEdge
+// goImportResult holds module nodes and import edges extracted from an import block.
+type goImportResult struct {
+	Nodes []types.CodeNode
+	Edges []types.CodeEdge
+}
+
+func extractGoImports(n *sitter.Node, src []byte, filePath string) goImportResult {
+	var result goImportResult
 	fileID := makeNodeID(string(types.NodeFile), filePath)
+	seen := make(map[string]bool) // deduplicate modules within one file
 
 	// Walk children looking for import_spec nodes.
 	queue := []*sitter.Node{n}
@@ -209,19 +218,43 @@ func extractGoImports(n *sitter.Node, src []byte, filePath string) []types.CodeE
 			pathNode := cur.ChildByFieldName("path")
 			if pathNode != nil {
 				importPath := strings.Trim(nodeText(pathNode, src), `"`)
-				edges = append(edges, types.CodeEdge{
+				moduleID := makeNodeID(string(types.NodeModule), importPath)
+
+				result.Edges = append(result.Edges, types.CodeEdge{
 					Kind:     types.EdgeImports,
 					FromID:   fileID,
-					ToID:     makeNodeID(string(types.NodeModule), importPath),
+					ToID:     moduleID,
 					CallSite: fmt.Sprintf("%s:%d", filePath, cur.StartPoint().Row+1),
 				})
+
+				// Create module node (deduplicated within this file).
+				if !seen[importPath] {
+					seen[importPath] = true
+					result.Nodes = append(result.Nodes, types.CodeNode{
+						ID:        moduleID,
+						Kind:      types.NodeModule,
+						Name:      goModuleName(importPath),
+						Qualified: importPath,
+						FilePath:  importPath,
+						Language:  "go",
+					})
+				}
 			}
 		}
 		for i := 0; i < int(cur.ChildCount()); i++ {
 			queue = append(queue, cur.Child(i))
 		}
 	}
-	return edges
+	return result
+}
+
+// goModuleName returns the last path segment of an import path.
+// e.g. "golang.org/x/sync/errgroup" → "errgroup", "fmt" → "fmt".
+func goModuleName(importPath string) string {
+	if idx := strings.LastIndex(importPath, "/"); idx >= 0 {
+		return importPath[idx+1:]
+	}
+	return importPath
 }
 
 func extractGoCall(n *sitter.Node, src []byte, filePath, scopeQual string) *types.CodeEdge {

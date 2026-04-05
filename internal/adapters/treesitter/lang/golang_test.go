@@ -210,6 +210,53 @@ func F() { fmt.Println("x") }`
 	}
 }
 
+// ── TestGoExtractor_ImportCreatesModuleNodes ─────────────────────────────────
+
+func TestGoExtractor_ImportCreatesModuleNodes(t *testing.T) {
+	src := `package main
+import (
+	"fmt"
+	"golang.org/x/sync/errgroup"
+)`
+
+	root := parseGoAST(t, src)
+	e := &GoExtractor{}
+	fe := domain.FileEntry{Path: "main.go", Language: "go", Content: []byte(src)}
+	nodes, edges := e.Extract(root, fe)
+
+	// Verify module nodes exist.
+	moduleNodes := map[string]*types.CodeNode{}
+	for i := range nodes {
+		if nodes[i].Kind == types.NodeModule {
+			moduleNodes[nodes[i].Qualified] = &nodes[i]
+		}
+	}
+	if _, ok := moduleNodes["fmt"]; !ok {
+		t.Error("missing module node for 'fmt'")
+	}
+	if m, ok := moduleNodes["golang.org/x/sync/errgroup"]; !ok {
+		t.Error("missing module node for 'golang.org/x/sync/errgroup'")
+	} else {
+		if m.Name != "errgroup" {
+			t.Errorf("module Name = %q; want %q", m.Name, "errgroup")
+		}
+		if m.Language != "go" {
+			t.Errorf("module Language = %q; want %q", m.Language, "go")
+		}
+	}
+
+	// Verify corresponding import edges exist.
+	importCount := 0
+	for _, e := range edges {
+		if e.Kind == types.EdgeImports {
+			importCount++
+		}
+	}
+	if importCount != 2 {
+		t.Errorf("import edge count = %d; want 2", importCount)
+	}
+}
+
 // ── TestGoExtractor_CallExpression ────────────────────────────────────────────
 
 func TestGoExtractor_CallExpression(t *testing.T) {

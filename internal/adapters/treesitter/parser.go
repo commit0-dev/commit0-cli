@@ -55,7 +55,8 @@ func NewParser(log *slog.Logger) *TreeSitterParser {
 
 // SupportedLanguages returns the list of language names this parser handles.
 func (p *TreeSitterParser) SupportedLanguages() []string {
-	langs := make([]string, 0, len(p.extractors))
+	langs := make([]string, 0, len(p.extractors)+1)
+	langs = append(langs, "gomod")
 	for l := range p.extractors {
 		langs = append(langs, l)
 	}
@@ -77,6 +78,11 @@ func (p *TreeSitterParser) Parse(ctx context.Context, file domain.FileEntry) (*d
 	}
 	if len(file.Content) == 0 {
 		return nil, domain.Validation(fmt.Sprintf("file %q has empty content", file.Path))
+	}
+
+	// go.mod uses a dedicated text parser (no tree-sitter grammar).
+	if file.Language == "gomod" {
+		return ParseGoMod(ctx, file)
 	}
 
 	ext, ok := p.extractors[file.Language]

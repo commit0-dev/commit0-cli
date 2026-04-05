@@ -22,6 +22,12 @@ var extensionLanguage = map[string]string{
 	".jsx": "javascript",
 }
 
+// filenameLanguage maps exact filenames (no extension match) to language names.
+// These are special project files that contain dependency/module metadata.
+var filenameLanguage = map[string]string{
+	"go.mod": "gomod",
+}
+
 // FSWalker implements domain.FileWalker using filepath.WalkDir.
 // It respects .gitignore (simple pattern matching), skips VCS/vendor
 // directories, and enforces optional language and size filters.
@@ -105,13 +111,20 @@ func (w *FSWalker) Walk(ctx context.Context, repoPath string, opts domain.WalkOp
 			}
 
 			// ── Language detection ────────────────────────────────────────
-			ext := strings.ToLower(filepath.Ext(path))
-			langName, ok := extensionLanguage[ext]
+			baseName := filepath.Base(path)
+			langName, ok := filenameLanguage[baseName]
 			if !ok {
-				return nil
+				ext := strings.ToLower(filepath.Ext(path))
+				langName, ok = extensionLanguage[ext]
+				if !ok {
+					return nil
+				}
 			}
 			if len(langFilter) > 0 && !langFilter[langName] {
-				return nil
+				// gomod files are always included when "go" language is selected.
+				if !(langName == "gomod" && langFilter["go"]) {
+					return nil
+				}
 			}
 
 			// ── Size limit ────────────────────────────────────────────────
