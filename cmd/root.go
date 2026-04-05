@@ -32,7 +32,7 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().String("config", "", "Path to a JSON config file (optional, overridden by env vars)")
-	rootCmd.PersistentFlags().String("log-level", "INFO", "Log level: DEBUG, INFO, WARN, ERROR")
+	rootCmd.PersistentFlags().String("log-level", "WARN", "Log level: DEBUG, INFO, WARN, ERROR")
 
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
 		lvl, _ := cmd.Flags().GetString("log-level")
