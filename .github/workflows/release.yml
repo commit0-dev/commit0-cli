@@ -35,7 +35,7 @@ jobs:
 
       # Cache Go modules on the host so the goreleaser-cross container can
       # reuse them via the mount below.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
