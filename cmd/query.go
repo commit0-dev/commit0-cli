@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/tw"
 	"github.com/spf13/cobra"
 
 	"github.com/commit0-dev/commit0/internal/app"
@@ -52,29 +55,41 @@ var queryCmd = &cobra.Command{
 			len(result.Nodes), gray(fmt.Sprintf("embed:%dms search:%dms explain:%dms",
 				result.Timing.EmbedMS, result.Timing.SearchMS, result.Timing.ExplainMS)))
 
+		tbl := tablewriter.NewTable(os.Stdout,
+			tablewriter.WithHeaderAlignment(tw.AlignLeft),
+			tablewriter.WithConfig(tablewriter.Config{
+				Row: tw.CellConfig{
+					Formatting: tw.CellFormatting{AutoWrap: tw.WrapNone},
+				},
+			}),
+		)
+		tbl.Header([]string{"#", "Kind", "Qualified Name", "Location", "Score"})
 		for i, node := range result.Nodes {
 			n := node.Node
+			var kind, name, location string
 			switch n.Kind {
 			case types.NodeModule:
 				version := ""
 				if n.Docstring != "" {
 					version = " " + n.Docstring
 				}
-				fmt.Printf("%s %s %s\n   %s\n\n",
-					gray(fmt.Sprintf("%d.", i+1)),
-					kindBadge("MODULE"),
-					bold(n.Name+version),
-					gray(fmt.Sprintf("import %q  score:%s", n.Qualified, yellow(fmt.Sprintf("%.3f", node.FusedScore)))))
+				kind = "MODULE"
+				name = n.Name + version
+				location = fmt.Sprintf("import %q", n.Qualified)
 			default:
-				label := strings.ToUpper(string(n.Kind))
-				fmt.Printf("%s %s %s %s\n   %s\n\n",
-					gray(fmt.Sprintf("%d.", i+1)),
-					kindBadge(label),
-					bold(n.Qualified),
-					yellow(fmt.Sprintf("%.3f", node.FusedScore)),
-					gray(fmt.Sprintf("%s:%d", n.FilePath, n.StartLine)))
+				kind = strings.ToUpper(string(n.Kind))
+				name = n.Qualified
+				location = fmt.Sprintf("%s:%d", n.FilePath, n.StartLine)
 			}
+			tbl.Append([]string{
+				fmt.Sprintf("%d", i+1),
+				kind,
+				name,
+				location,
+				fmt.Sprintf("%.3f", node.FusedScore),
+			})
 		}
+		tbl.Render() //nolint:errcheck
 
 		if result.Explanation != "" {
 			fmt.Println(cyan("─────────────────────────────────────"))
