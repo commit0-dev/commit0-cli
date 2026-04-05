@@ -73,7 +73,8 @@ builds:
 kos:
   - id: commit0
     build: linux
-    repository: ghcr.io/{{.Env.GITHUB_REPOSITORY_OWNER}}/commit0
+    repositories:
+      - ghcr.io/{{.Env.GITHUB_REPOSITORY_OWNER}}/commit0
     base_image: gcr.io/distroless/cc-debian12
     platforms:
       - linux/amd64

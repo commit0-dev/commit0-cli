@@ -5,6 +5,11 @@ on:
     tags:
       - "v*.*.*"
 
+# One release at a time — a second tag push waits rather than racing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 # goreleaser-cross bundles every cross-compiler needed:
 #   linux/arm64  → aarch64-linux-gnu-gcc
 #   darwin/amd64 → o64-clang   (osxcross)
@@ -33,18 +38,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Write ghcr.io credentials into the workspace so ko (running inside
-      # goreleaser-cross) can authenticate without a Docker daemon.
-      # goreleaser-cross doesn't ship the Docker CLI, so docker/login-action
-      # cannot be used here.
-      - name: Write ghcr.io auth for ko
+      # Pass registry credentials via DOCKER_CONFIG env var — the idiomatic
+      # way for tools like ko that read Docker credential files without
+      # requiring a Docker daemon. Avoids writing credentials to the workspace.
+      - name: Configure ghcr.io credentials
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/.docker"
+          mkdir -p "$RUNNER_TEMP/.docker"
           AUTH=$(printf '%s:%s' '${{ github.actor }}' "${GITHUB_TOKEN}" | base64 -w0)
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "${AUTH}" \
-            > "$GITHUB_WORKSPACE/.docker/config.json"
+            > "$RUNNER_TEMP/.docker/config.json"
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/.docker" >> "$GITHUB_ENV"
 
       # Run goreleaser inside goreleaser-cross.
       # Mounts:
@@ -58,15 +63,9 @@ jobs:
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/workspace" \
             -v "$HOME/go:/root/go" \
-            -v "$GITHUB_WORKSPACE/.docker:/root/.docker:ro" \
+            -v "$RUNNER_TEMP/.docker:/root/.docker:ro" \
             -w /workspace \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e GITHUB_REPOSITORY_OWNER="${{ github.repository_owner }}" \
             "${{ env.GORELEASER_CROSS_IMAGE }}" \
             goreleaser release --clean
-
-      # The .docker/config.json contains the GITHUB_TOKEN — remove it so it
-      # is never accidentally uploaded as an artifact.
-      - name: Remove registry credentials
-        if: always()
-        run: rm -rf "$GITHUB_WORKSPACE/.docker"

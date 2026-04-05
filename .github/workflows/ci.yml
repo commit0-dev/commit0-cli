@@ -10,6 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege baseline — individual jobs escalate only what they need.
+permissions:
+  contents: read
+
 env:
   CGO_ENABLED: "1"
 
@@ -17,6 +21,9 @@ jobs:
   # ── Lint ──────────────────────────────────────────────────────────────────
   # Uses golangci-lint with .golangci.yml — the same config and tool that
   # runs in the pre-push git hook, guaranteeing local ↔ CI parity.
+  # install-mode: goinstall compiles golangci-lint with the active Go toolchain,
+  # avoiding a version mismatch when go.mod targets a newer Go than the
+  # pre-built binary was compiled with.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -31,16 +38,18 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
           install-mode: goinstall
           args: --timeout=5m
 
-  # ── Unit tests ────────────────────────────────────────────────────────────
+  # ── Unit tests + coverage ─────────────────────────────────────────────────
+  # Single go test invocation: race detector on all packages, coverage
+  # collected only for internal/app (adapters need live external services).
   test:
     name: Test
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # ncruces/go-coverage-report writes to the repo Wiki
     steps:
       - uses: actions/checkout@v4
 
@@ -49,20 +58,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Full suite: race detector + correctness across all packages.
-      - name: Run unit tests
-        run: go test -race -count=1 -timeout=5m ./...
-
-      # Coverage pass: scoped to internal/app where the 99.8 % threshold applies.
-      # Adapters (surreal, gemini) require live external services and are tested
-      # via the integration build tag — they are intentionally excluded here.
-      - name: Measure coverage (internal/app)
+      - name: Run tests with coverage
         run: |
-          go test -count=1 -timeout=5m \
+          go test -race -count=1 -timeout=5m \
             -coverprofile=coverage.out \
             -covermode=atomic \
             -coverpkg=./internal/app/... \
-            ./internal/app/...
+            ./...
 
       - name: Enforce 99.8 % coverage threshold
         run: |
@@ -115,6 +117,7 @@ jobs:
   # Uses goreleaser-action on ubuntu-latest with arm64 cross-compiler.
   # Builds --id linux only (darwin requires osxcross, available only in
   # goreleaser-cross — see release.yml for the full multi-platform build).
+  # Runs on push only — PRs get lint + test feedback without the heavy build.
   goreleaser:
     name: GoReleaser snapshot
     runs-on: ubuntu-latest
