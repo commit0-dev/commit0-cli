@@ -11,16 +11,16 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// EmbedBatcher accumulates embedding inputs and batches API calls
+// EmbedBatcher accumulates embedding inputs and batches API calls.
 type EmbedBatcher struct {
 	embedder  domain.Embedder
-	batchSize int
-	seen      map[string]bool            // SHA-256 dedup within a flush cycle
+	seen      map[string]bool
 	pending   []domain.EmbedInput
+	batchSize int
 	mu        sync.Mutex
 }
 
-// NewEmbedBatcher creates a new embedding batcher
+// NewEmbedBatcher creates a new embedding batcher.
 func NewEmbedBatcher(embedder domain.Embedder, batchSize int) *EmbedBatcher {
 	if batchSize <= 0 {
 		batchSize = 100
@@ -33,7 +33,7 @@ func NewEmbedBatcher(embedder domain.Embedder, batchSize int) *EmbedBatcher {
 	}
 }
 
-// Add adds an input to the batcher, auto-flushing if needed
+// Add adds an input to the batcher, auto-flushing if needed.
 func (eb *EmbedBatcher) Add(ctx context.Context, input domain.EmbedInput) (bool, error) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
@@ -64,7 +64,7 @@ func (eb *EmbedBatcher) Add(ctx context.Context, input domain.EmbedInput) (bool,
 	return true, nil
 }
 
-// Flush explicitly flushes pending inputs
+// Flush explicitly flushes pending inputs.
 func (eb *EmbedBatcher) Flush(ctx context.Context) ([]domain.EmbedResult, error) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
@@ -72,7 +72,7 @@ func (eb *EmbedBatcher) Flush(ctx context.Context) ([]domain.EmbedResult, error)
 	return eb.flushLocked(ctx)
 }
 
-// flushLocked flushes without acquiring lock (caller must hold lock)
+// flushLocked flushes without acquiring lock (caller must hold lock).
 func (eb *EmbedBatcher) flushLocked(ctx context.Context) ([]domain.EmbedResult, error) {
 	if len(eb.pending) == 0 {
 		return []domain.EmbedResult{}, nil
@@ -87,7 +87,7 @@ func (eb *EmbedBatcher) flushLocked(ctx context.Context) ([]domain.EmbedResult, 
 	return results, err
 }
 
-// Process is a convenience method to embed a batch of nodes
+// Process is a convenience method to embed a batch of nodes.
 func (eb *EmbedBatcher) Process(ctx context.Context, nodes []types.CodeNode, builder *ContextBuilder) ([]types.CodeNode, error) {
 	// Build inputs from nodes (use ForNodeCtx for graph-neighborhood enrichment
 	// when a GraphStore is attached to the builder; falls back to ForNode otherwise)

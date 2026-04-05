@@ -10,7 +10,7 @@ import (
 	"github.com/commit0-dev/commit0/internal/domain"
 )
 
-// WithRetry executes a function with exponential backoff retry logic
+// WithRetry executes a function with exponential backoff retry logic.
 func WithRetry(ctx context.Context, maxAttempts int, fn func() error) error {
 	if maxAttempts <= 0 {
 		maxAttempts = 1
@@ -20,7 +20,7 @@ func WithRetry(ctx context.Context, maxAttempts int, fn func() error) error {
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		// Check context before attempting
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("context cancelled: %w", err)
+			return fmt.Errorf("context canceled: %w", err)
 		}
 
 		// Execute function
@@ -51,14 +51,14 @@ func WithRetry(ctx context.Context, maxAttempts int, fn func() error) error {
 		case <-time.After(totalSleep):
 			// Continue to next attempt
 		case <-ctx.Done():
-			return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			return fmt.Errorf("context canceled during retry: %w", ctx.Err())
 		}
 	}
 
 	return fmt.Errorf("failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
-// isRetryable checks if an error is retryable
+// isRetryable checks if an error is retryable.
 func isRetryable(err error) bool {
 	if err == nil {
 		return false

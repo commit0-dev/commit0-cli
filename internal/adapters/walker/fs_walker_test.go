@@ -296,7 +296,7 @@ func TestWalk_GitignorePatterns(t *testing.T) {
 func TestWalk_ContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create enough files to give the goroutine a chance to see the cancelled context.
+	// Create enough files to give the goroutine a chance to see the canceled context.
 	for i := range 10 {
 		name := filepath.Join(dir, "file_"+string(rune('a'+i))+".go")
 		if err := os.WriteFile(name, []byte("package main"), 0o644); err != nil {
@@ -315,7 +315,7 @@ func TestWalk_ContextCancellation(t *testing.T) {
 }
 
 // TestWalk_ContextCancelDuringEmit triggers the ctx.Done() case inside the
-// emit select by filling the 64-slot fileCh buffer and then cancelling the
+// emit select by filling the 64-slot fileCh buffer and then canceling the
 // context so the goroutine's next send picks the Done branch instead.
 func TestWalk_ContextCancelDuringEmit(t *testing.T) {
 	dir := t.TempDir()
@@ -347,7 +347,7 @@ func TestWalk_ContextCancelDuringEmit(t *testing.T) {
 
 // TestWalk_NonExistentPath verifies that the walker doesn't panic or hang on a
 // missing root path. The entry-level OS error is logged and swallowed (the
-// callback returns nil), so errCh receives nil — this is intentional behaviour.
+// callback returns nil), so errCh receives nil — this is intentional behavior.
 func TestWalk_NonExistentPath(t *testing.T) {
 	w := NewFSWalker(nil)
 	fileCh, errCh := w.Walk(context.Background(), "/no/such/path/xyz123", domain.WalkOpts{})
@@ -409,20 +409,20 @@ func TestGitignorePatterns_Match(t *testing.T) {
 
 	tests := []struct {
 		rel     string
-		wantHit bool
 		desc    string
+		wantHit bool
 	}{
 		// Glob match via base name.
-		{"app.log", true, "glob *.log matches base"},
+		{"app.log", "glob *.log matches base", true},
 		// Literal match against base name.
-		{"secret.go", true, "literal match base"},
+		{"secret.go", "literal match base", true},
 		// Directory prefix match (trailing slash stripped, prefix check).
-		{"dist/bundle.js", true, "directory prefix match"},
+		{"dist/bundle.js", "directory prefix match", true},
 		// Full rel path matches literal.
-		{"pkg/secret.go", true, "glob match against base in subdir"},
+		{"pkg/secret.go", "glob match against base in subdir", true},
 		// No match.
-		{"main.go", false, "no match"},
-		{"src/main.go", false, "no match in subdir"},
+		{"main.go", "no match", false},
+		{"src/main.go", "no match in subdir", false},
 	}
 
 	for _, tt := range tests {
@@ -488,14 +488,14 @@ func TestWalk_AllLanguages(t *testing.T) {
 	dir := t.TempDir()
 
 	files := map[string]string{
-		"app.go":    "go",
-		"app.py":    "python",
-		"app.ts":    "typescript",
-		"app.tsx":   "typescript",
-		"app.js":    "javascript",
-		"app.jsx":   "javascript",
-		"app.rb":    "", // not supported
-		"app.c":     "", // not supported
+		"app.go":  "go",
+		"app.py":  "python",
+		"app.ts":  "typescript",
+		"app.tsx": "typescript",
+		"app.js":  "javascript",
+		"app.jsx": "javascript",
+		"app.rb":  "", // not supported
+		"app.c":   "", // not supported
 	}
 
 	for name := range files {

@@ -7,9 +7,10 @@ import (
 
 	"google.golang.org/genai"
 
+	"log/slog"
+
 	"github.com/commit0-dev/commit0/internal/config"
 	"github.com/commit0-dev/commit0/internal/domain"
-	"log/slog"
 )
 
 // ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ func TestBuildExplainPrompt_UnknownType(t *testing.T) {
 	}
 	out := buildExplainPrompt(req)
 
-	mustContain(t, out, "Analyse the code excerpts")
+	mustContain(t, out, "Analyze the code excerpts")
 	mustContain(t, out, req.UserQuery)
 }
 

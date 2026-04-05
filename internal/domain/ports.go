@@ -6,40 +6,40 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// VectorSearchOpts configures vector similarity search
+// VectorSearchOpts configures vector similarity search.
 type VectorSearchOpts struct {
 	RepoSlug  string
+	NodeKinds []types.NodeKind
 	TopK      int
 	MinScore  float64
-	NodeKinds []types.NodeKind
-	Effort    int // effort level for ANN search
+	Effort    int
 }
 
-// TextSearchOpts configures full-text search
+// TextSearchOpts configures full-text search.
 type TextSearchOpts struct {
 	RepoSlug  string
-	TopK      int
 	Fields    []string
 	NodeKinds []types.NodeKind
+	TopK      int
 }
 
-// EmbedInput represents data to be embedded
+// EmbedInput represents data to be embedded.
 type EmbedInput struct {
 	ID          string
 	Text        string
+	ContentHash string
 	Images      [][]byte
 	ImageMIMEs  []string
-	ContentHash string
 }
 
-// EmbedResult represents the result of embedding operation
+// EmbedResult represents the result of embedding operation.
 type EmbedResult struct {
 	ID     string
 	Vector []float32 // 3072-dimensional
 	Cached bool
 }
 
-// CodeExcerpt represents a code snippet with relevance info
+// CodeExcerpt represents a code snippet with relevance info.
 type CodeExcerpt struct {
 	Qualified string
 	FilePath  string
@@ -48,22 +48,22 @@ type CodeExcerpt struct {
 	Score     float64
 }
 
-// ExplainRequest configures an explanation request
+// ExplainRequest configures an explanation request.
 type ExplainRequest struct {
-	QueryType    string        // "search" | "trace" | "blast"
+	QueryType    string
 	UserQuery    string
-	CodeContext  []CodeExcerpt
 	GraphContext string
+	CodeContext  []CodeExcerpt
 }
 
-// ExplainChunk represents a streamed chunk of explanation
+// ExplainChunk represents a streamed chunk of explanation.
 type ExplainChunk struct {
+	Error error
 	Text  string
 	Done  bool
-	Error error
 }
 
-// FileEntry represents a single file in the walk
+// FileEntry represents a single file in the walk.
 type FileEntry struct {
 	Path     string
 	AbsPath  string
@@ -71,7 +71,7 @@ type FileEntry struct {
 	Content  []byte
 }
 
-// ParsedFile represents the result of parsing a source file
+// ParsedFile represents the result of parsing a source file.
 type ParsedFile struct {
 	Path        string
 	Language    string
@@ -82,14 +82,14 @@ type ParsedFile struct {
 	SizeBytes   int
 }
 
-// WalkOpts configures file system walking
+// WalkOpts configures file system walking.
 type WalkOpts struct {
 	Languages []string
 	Exclude   []string
 	MaxFileKB int
 }
 
-// GraphStore provides CRUD operations and graph traversal
+// GraphStore provides CRUD operations and graph traversal.
 type GraphStore interface {
 	UpsertNode(ctx context.Context, node *types.CodeNode) error
 	GetNode(ctx context.Context, id string) (*types.CodeNode, error)
@@ -109,34 +109,34 @@ type GraphStore interface {
 	GetSchemaVersion(ctx context.Context) (int, error)
 }
 
-// VectorIndex provides approximate nearest neighbor search over embeddings
+// VectorIndex provides approximate nearest neighbor search over embeddings.
 type VectorIndex interface {
 	Search(ctx context.Context, query []float32, opts VectorSearchOpts) ([]types.ScoredNode, error)
 }
 
-// TextIndex provides full-text search capabilities
+// TextIndex provides full-text search capabilities.
 type TextIndex interface {
 	Search(ctx context.Context, query string, opts TextSearchOpts) ([]types.ScoredNode, error)
 }
 
-// Embedder converts text and images to embeddings
+// Embedder converts text and images to embeddings.
 type Embedder interface {
 	EmbedBatch(ctx context.Context, inputs []EmbedInput) ([]EmbedResult, error)
 	EmbedQuery(ctx context.Context, query string) ([]float32, error)
 }
 
-// LLMExplainer generates natural language explanations
+// LLMExplainer generates natural language explanations.
 type LLMExplainer interface {
 	Explain(ctx context.Context, req ExplainRequest) (<-chan ExplainChunk, error)
 }
 
-// Parser extracts code structure from source files
+// Parser extracts code structure from source files.
 type Parser interface {
 	Parse(ctx context.Context, file FileEntry) (*ParsedFile, error)
 	SupportedLanguages() []string
 }
 
-// FileWalker traverses a repository file system
+// FileWalker traverses a repository file system.
 type FileWalker interface {
 	Walk(ctx context.Context, repoPath string, opts WalkOpts) (<-chan FileEntry, <-chan error)
 }

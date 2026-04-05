@@ -12,14 +12,14 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// BlastRequest represents a blast radius analysis request
+// BlastRequest represents a blast radius analysis request.
 type BlastRequest struct {
 	Symbol   string
 	RepoSlug string
 	MaxDepth int
 }
 
-// BlastService analyzes code change impact
+// BlastService analyzes code change impact.
 type BlastService struct {
 	store     domain.GraphStore
 	explainer domain.LLMExplainer
@@ -27,7 +27,7 @@ type BlastService struct {
 	log       *slog.Logger
 }
 
-// NewBlastService creates a new blast service
+// NewBlastService creates a new blast service.
 func NewBlastService(
 	store domain.GraphStore,
 	explainer domain.LLMExplainer,
@@ -41,7 +41,7 @@ func NewBlastService(
 	}
 }
 
-// Blast analyzes the impact of changing a code element
+// Blast analyzes the impact of changing a code element.
 func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.BlastResult, error) {
 	startTime := time.Now()
 
@@ -117,9 +117,9 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	}
 
 	return &types.BlastResult{
-		Target:    *target,
-		Affected:  affected,
-		Summary:   explanation,
+		Target:   *target,
+		Affected: affected,
+		Summary:  explanation,
 		Timing: types.TimingInfo{
 			GraphMS: time.Since(graphStart).Milliseconds(),
 			TotalMS: time.Since(startTime).Milliseconds(),
@@ -127,7 +127,7 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	}, nil
 }
 
-// deduplicateAffected removes duplicate nodes, keeping lowest hop count
+// deduplicateAffected removes duplicate nodes, keeping lowest hop count.
 func deduplicateAffected(affected []types.AffectedNode) []types.AffectedNode {
 	seen := make(map[string]types.AffectedNode)
 	for _, a := range affected {
@@ -147,7 +147,7 @@ func deduplicateAffected(affected []types.AffectedNode) []types.AffectedNode {
 	return result
 }
 
-// sortAffectedByHopCount sorts affected nodes by hop count ascending
+// sortAffectedByHopCount sorts affected nodes by hop count ascending.
 func sortAffectedByHopCount(affected []types.AffectedNode) {
 	sort.Slice(affected, func(i, j int) bool {
 		if affected[i].HopCount != affected[j].HopCount {
@@ -157,7 +157,7 @@ func sortAffectedByHopCount(affected []types.AffectedNode) {
 	})
 }
 
-// minInt returns the smaller of two integers
+// minInt returns the smaller of two integers.
 func minInt(a, b int) int {
 	if a < b {
 		return a

@@ -16,8 +16,8 @@ import (
 // server-sent streaming via GenerateContentStream.
 type GeminiExplainer struct {
 	client *genai.Client
-	model  string
 	log    *slog.Logger
+	model  string
 }
 
 // Compile-time interface check.
@@ -87,7 +87,7 @@ func (e *GeminiExplainer) Explain(ctx context.Context, req domain.ExplainRequest
 					case <-ctx.Done():
 						select {
 						case ch <- domain.ExplainChunk{
-							Error: fmt.Errorf("gemini: Explain: context cancelled: %w", ctx.Err()),
+							Error: fmt.Errorf("gemini: Explain: context canceled: %w", ctx.Err()),
 							Done:  true,
 						}:
 						default:
@@ -125,12 +125,12 @@ func buildExplainPrompt(req domain.ExplainRequest) string {
 		sb.WriteString("Be precise, cite file paths and line ranges where relevant.\n\n")
 	case "trace":
 		sb.WriteString("Explain the call chain shown in the code excerpts below. ")
-		sb.WriteString("Walk through each hop in execution order and summarise what each step does.\n\n")
+		sb.WriteString("Walk through each hop in execution order and summarize what each step does.\n\n")
 	case "blast":
 		sb.WriteString("Describe the blast radius of the change indicated by the code excerpts below. ")
 		sb.WriteString("List affected components, explain why each is impacted, and suggest safe migration steps.\n\n")
 	default:
-		sb.WriteString("Analyse the code excerpts below and answer the developer's question.\n\n")
+		sb.WriteString("Analyze the code excerpts below and answer the developer's question.\n\n")
 	}
 
 	// --- User question ---

@@ -127,14 +127,14 @@ func (p *TreeSitterParser) Parse(ctx context.Context, file domain.FileEntry) (*d
 func makeFileNode(file domain.FileEntry) types.CodeNode {
 	qualified := file.Path
 	return types.CodeNode{
-		ID:        makeNodeID(string(types.NodeFile), qualified),
-		Kind:      types.NodeFile,
-		Name:      lastPathSegment(file.Path),
-		Qualified: qualified,
-		FilePath:  file.Path,
-		Language:  file.Language,
-		StartLine: 1,
-		EndLine:   countLines(file.Content),
+		ID:         makeNodeID(string(types.NodeFile), qualified),
+		Kind:       types.NodeFile,
+		Name:       lastPathSegment(file.Path),
+		Qualified:  qualified,
+		FilePath:   file.Path,
+		Language:   file.Language,
+		StartLine:  1,
+		EndLine:    countLines(file.Content),
 		Visibility: "public",
 	}
 }

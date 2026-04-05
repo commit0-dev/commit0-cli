@@ -40,10 +40,10 @@ func NewGeminiClient(ctx context.Context, cfg *config.GeminiConfig) (*genai.Clie
 // GeminiEmbedder implements domain.Embedder using the Gemini Embedding 2 model.
 type GeminiEmbedder struct {
 	client *genai.Client
+	log    *slog.Logger
 	model  string
 	dim    int
 	batch  int
-	log    *slog.Logger
 }
 
 // Compile-time interface check.

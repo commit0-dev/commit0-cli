@@ -97,10 +97,10 @@ func TestContextBuilderForClassSmallBodyLimit(t *testing.T) {
 	cb := NewContextBuilder(50)
 	longBody := strings.Repeat("x", 200)
 	node := &types.CodeNode{
-		Kind:     types.NodeClass,
+		Kind:      types.NodeClass,
 		Qualified: "pkg.BigClass",
-		Language: "go",
-		Body:     longBody,
+		Language:  "go",
+		Body:      longBody,
 	}
 
 	result := cb.ForNode(node)
@@ -301,10 +301,10 @@ func TestContextBuilderWithStoreNonFunctionFallsBack(t *testing.T) {
 	store := newStubGraphStore()
 	cb := NewContextBuilderWithStore(1000, store)
 	node := &types.CodeNode{
-		Kind:     types.NodeClass,
+		Kind:      types.NodeClass,
 		Qualified: "pkg.MyClass",
-		Language: "go",
-		FilePath: "pkg.go",
+		Language:  "go",
+		FilePath:  "pkg.go",
 	}
 	result := cb.ForNodeCtx(context.Background(), node)
 	if !strings.Contains(result, "[CLASS]") {

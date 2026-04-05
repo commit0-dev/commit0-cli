@@ -7,19 +7,19 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// RRFWeights configures the Reciprocal Rank Fusion scoring
+// RRFWeights configures the Reciprocal Rank Fusion scoring.
 type RRFWeights struct {
 	Vector float64 // Weight for vector similarity scores
 	FTS    float64 // Weight for full-text search scores
 	K      float64 // Smoothing constant to prevent division by small ranks
 }
 
-// DefaultRRFWeights returns recommended RRF configuration
+// DefaultRRFWeights returns recommended RRF configuration.
 func DefaultRRFWeights() RRFWeights {
 	return RRFWeights{Vector: 1.0, FTS: 1.0, K: 60}
 }
 
-// ReciprocalRankFusion merges vector and FTS search results using RRF formula
+// ReciprocalRankFusion merges vector and FTS search results using RRF formula.
 func ReciprocalRankFusion(vector []types.ScoredNode, fts []types.ScoredNode, w RRFWeights) []types.ScoredNode {
 	if w.K < 0 {
 		w.K = 60

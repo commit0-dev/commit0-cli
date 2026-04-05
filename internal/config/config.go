@@ -13,15 +13,15 @@ import (
 type Config struct {
 	Surreal SurrealConfig
 	Gemini  GeminiConfig
+	Server  ServerConfig
 	Index   IndexConfig
 	Query   QueryConfig
-	Server  ServerConfig
 }
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port            int
 	CORSOrigins     []string
+	Port            int
 	ReadTimeoutSec  int
 	WriteTimeoutSec int
 }
@@ -177,8 +177,8 @@ func bindEnvs(v *viper.Viper) {
 		"index.batch_size":        "INDEX_BATCH_SIZE",
 
 		"query.default_top_k":  "QUERY_DEFAULT_TOP_K",
-		"query.min_score":       "QUERY_MIN_SCORE",
-		"query.rrf_k_constant":  "QUERY_RRF_K",
+		"query.min_score":      "QUERY_MIN_SCORE",
+		"query.rrf_k_constant": "QUERY_RRF_K",
 
 		"server.port":              "SERVER_PORT",
 		"server.cors_origins":      "SERVER_CORS_ORIGINS",

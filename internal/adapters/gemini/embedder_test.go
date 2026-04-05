@@ -7,9 +7,10 @@ import (
 
 	"google.golang.org/genai"
 
+	"log/slog"
+
 	"github.com/commit0-dev/commit0/internal/config"
 	"github.com/commit0-dev/commit0/internal/domain"
-	"log/slog"
 )
 
 // ---------------------------------------------------------------------------
@@ -170,7 +171,7 @@ func TestClassifyError_Timeout_DeadlineExceededCamelCase(t *testing.T) {
 }
 
 func TestClassifyError_Generic(t *testing.T) {
-	original := errors.New("some unrecognised error")
+	original := errors.New("some unrecognized error")
 	got := classifyError(original)
 	// Should be returned as-is, not wrapped in a DomainError.
 	if got != original {
@@ -189,7 +190,7 @@ func TestClassifyError_Generic(t *testing.T) {
 // API call is made.
 // ---------------------------------------------------------------------------
 
-// zeroClient returns a non-nil *genai.Client without dialling the network.
+// zeroClient returns a non-nil *genai.Client without dialing the network.
 func zeroClient() *genai.Client {
 	return &genai.Client{}
 }
@@ -281,7 +282,7 @@ func TestExplainEmptyUserQuery(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// EmbedBatch — cancelled context covers content-building + error return paths
+// EmbedBatch — canceled context covers content-building + error return paths
 // ---------------------------------------------------------------------------
 
 func TestEmbedBatchCancelledContext(t *testing.T) {
@@ -294,7 +295,7 @@ func TestEmbedBatchCancelledContext(t *testing.T) {
 	}
 	_, err := emb.EmbedBatch(ctx, inputs)
 	if err == nil {
-		t.Fatal("expected error for cancelled context, got nil")
+		t.Fatal("expected error for canceled context, got nil")
 	}
 }
 
@@ -314,7 +315,7 @@ func TestEmbedBatchCancelledContextWithImages(t *testing.T) {
 	}
 	_, err := emb.EmbedBatch(ctx, inputs)
 	if err == nil {
-		t.Fatal("expected error for cancelled context, got nil")
+		t.Fatal("expected error for canceled context, got nil")
 	}
 }
 
@@ -334,12 +335,12 @@ func TestEmbedBatchCancelledContextImageDefaultMIME(t *testing.T) {
 	}
 	_, err := emb.EmbedBatch(ctx, inputs)
 	if err == nil {
-		t.Fatal("expected error for cancelled context, got nil")
+		t.Fatal("expected error for canceled context, got nil")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// EmbedQuery — cancelled context covers content-building + error return paths
+// EmbedQuery — canceled context covers content-building + error return paths
 // ---------------------------------------------------------------------------
 
 func TestEmbedQueryCancelledContext(t *testing.T) {
@@ -349,7 +350,7 @@ func TestEmbedQueryCancelledContext(t *testing.T) {
 
 	_, err := emb.EmbedQuery(ctx, "valid query")
 	if err == nil {
-		t.Fatal("expected error for cancelled context, got nil")
+		t.Fatal("expected error for canceled context, got nil")
 	}
 }
 
@@ -421,4 +422,3 @@ func TestNewGeminiEmbedderCustomValues(t *testing.T) {
 		t.Errorf("batch = %d; want 50", emb.batch)
 	}
 }
-

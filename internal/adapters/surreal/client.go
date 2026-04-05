@@ -37,9 +37,9 @@ func (a *SurrealAdapter) AsTextIndex() domain.TextIndex { return &TextAdapter{a}
 // using SurrealDB 3.0 via WebSocket.
 type SurrealAdapter struct {
 	db     *surrealdb.DB
+	log    *slog.Logger
 	ns     string
 	dbName string
-	log    *slog.Logger
 }
 
 // NewSurrealAdapter dials SurrealDB, authenticates, and selects the

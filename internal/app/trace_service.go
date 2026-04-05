@@ -11,15 +11,15 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// TraceRequest represents a code trace request
+// TraceRequest represents a code trace request.
 type TraceRequest struct {
 	Symbol    string
 	RepoSlug  string
+	Direction string
 	Depth     int
-	Direction string // "forward" | "reverse"
 }
 
-// TraceService traces code flow paths
+// TraceService traces code flow paths.
 type TraceService struct {
 	store     domain.GraphStore
 	embedder  domain.Embedder
@@ -29,7 +29,7 @@ type TraceService struct {
 	log       *slog.Logger
 }
 
-// NewTraceService creates a new trace service
+// NewTraceService creates a new trace service.
 func NewTraceService(
 	store domain.GraphStore,
 	embedder domain.Embedder,
@@ -47,7 +47,7 @@ func NewTraceService(
 	}
 }
 
-// Trace traces code flow starting from a symbol
+// Trace traces code flow starting from a symbol.
 func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.TraceResult, error) {
 	startTime := time.Now()
 
@@ -127,7 +127,7 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 	}, nil
 }
 
-// resolveSymbol resolves a symbol to a code node
+// resolveSymbol resolves a symbol to a code node.
 func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) (*types.CodeNode, error) {
 	// Try direct lookup
 	node, err := ts.store.GetNodeByQualified(ctx, repo, symbol)
@@ -159,7 +159,7 @@ func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) 
 	return nil, domain.NotFound(fmt.Sprintf("symbol %s not found", symbol))
 }
 
-// collectHopExcerpts recursively collects code excerpts from trace hops
+// collectHopExcerpts recursively collects code excerpts from trace hops.
 func (ts *TraceService) collectHopExcerpts(hops []types.TraceHop, excerpts *[]domain.CodeExcerpt) {
 	for _, hop := range hops {
 		*excerpts = append(*excerpts, domain.CodeExcerpt{

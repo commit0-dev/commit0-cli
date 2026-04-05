@@ -26,14 +26,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false   # golangci-lint-action manages its own cache
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
-          # Pass --fix in CI only when you want auto-fixable issues to block the build.
-          # Remove --fix to just report without modifying files.
+          version: v1.64.8
           args: --timeout=5m
 
   # ── Unit tests ────────────────────────────────────────────────────────────

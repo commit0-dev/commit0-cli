@@ -18,33 +18,33 @@ import (
 // ---------------------------------------------------------------------------
 
 type nodeRow struct {
-	ID           *models.RecordID `json:"id"`
-	Name         string           `json:"name"`
-	Qualified    string           `json:"qualified"`
-	FilePath     string           `json:"file_path"`
-	RepoSlug     string           `json:"repo_slug"`
-	Language     string           `json:"language"`
-	StartLine    int              `json:"start_line"`
-	EndLine      int              `json:"end_line"`
-	Signature    string           `json:"signature"`
-	Docstring    string           `json:"docstring"`
-	Body         string           `json:"body"`
-	ContentHash  string           `json:"content_hash"`
-	Embedding    []float32        `json:"embedding"`
-	Visibility   string           `json:"visibility"`
-	Centrality   int              `json:"centrality"`
+	ID          *models.RecordID `json:"id"`
+	Docstring   string           `json:"docstring"`
+	Signature   string           `json:"signature"`
+	FilePath    string           `json:"file_path"`
+	RepoSlug    string           `json:"repo_slug"`
+	Language    string           `json:"language"`
+	Visibility  string           `json:"visibility"`
+	ContentHash string           `json:"content_hash"`
+	Qualified   string           `json:"qualified"`
+	Name        string           `json:"name"`
+	Body        string           `json:"body"`
+	Embedding   []float32        `json:"embedding"`
+	EndLine     int              `json:"end_line"`
+	StartLine   int              `json:"start_line"`
+	Centrality  int              `json:"centrality"`
 }
 
 type repoRow struct {
+	CreatedAt     time.Time        `json:"created_at"`
 	ID            *models.RecordID `json:"id"`
+	LastIndexedAt *time.Time       `json:"last_indexed_at"`
 	Slug          string           `json:"slug"`
 	Path          string           `json:"path"`
 	RemoteURL     string           `json:"remote_url"`
 	DefaultBranch string           `json:"default_branch"`
-	Languages     []string         `json:"languages"`
 	LastCommit    string           `json:"last_commit"`
-	LastIndexedAt *time.Time       `json:"last_indexed_at"`
-	CreatedAt     time.Time        `json:"created_at"`
+	Languages     []string         `json:"languages"`
 }
 
 // ---------------------------------------------------------------------------
@@ -309,8 +309,8 @@ func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified
 
 	for _, table := range tables {
 		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, map[string]any{
-			"table":    models.Table(table),
-			"repo_ref": fmt.Sprintf("repo:%s", repo),
+			"table":     models.Table(table),
+			"repo_ref":  fmt.Sprintf("repo:%s", repo),
 			"qualified": qualified,
 		})
 		if err != nil {

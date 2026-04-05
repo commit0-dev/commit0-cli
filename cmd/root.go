@@ -14,6 +14,12 @@ var rootCmd = &cobra.Command{
 trace, and blast-radius analyze it using AI-powered semantic search.`,
 }
 
+// SetVersion wires the build-time version and commit into the root command.
+// Called from main() with values injected by -ldflags.
+func SetVersion(version, commit string) {
+	rootCmd.Version = fmt.Sprintf("%s (commit %s)", version, commit)
+}
+
 // Execute is the entry point called from main.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {

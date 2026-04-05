@@ -300,8 +300,8 @@ func TestIndexServiceCustomChannelBuffers(t *testing.T) {
 		},
 	}
 	svc := NewIndexService(walker, parser, embedder, store, cfg)
-	svc.parsedChBuf = 8  // positive → parsedCap = 8
-	svc.embedChBuf = 4   // positive → embedCap = 4
+	svc.parsedChBuf = 8 // positive → parsedCap = 8
+	svc.embedChBuf = 4  // positive → embedCap = 4
 
 	result, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/repo", RepoSlug: "r"})
 	if err != nil {
@@ -340,7 +340,7 @@ func TestIndexServiceDefaultMaxWorkersParse(t *testing.T) {
 
 // TestIndexServiceStoreContextCancelled covers the store-goroutine context-cancel path (lines
 // added during refactor: `if err := storeCtx.Err(); err != nil { return err }`).
-// We use a pre-cancelled context so that storeCtx is immediately Done, and set the channel
+// We use a pre-canceled context so that storeCtx is immediately Done, and set the channel
 // buffers to large values so the pipeline can fill before the store goroutines run.
 func TestIndexServiceStoreContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -372,16 +372,16 @@ func TestIndexServiceStoreContextCancelled(t *testing.T) {
 
 	svc := NewIndexService(walker, parser, embedder, store, cfg)
 
-	// Cancel ctx BEFORE calling Index so all derived contexts (storeCtx) are also cancelled.
+	// Cancel ctx BEFORE calling Index so all derived contexts (storeCtx) are also canceled.
 	cancel()
 
-	// The result may be an error (store cancelled) or success (empty pipeline);
+	// The result may be an error (store canceled) or success (empty pipeline);
 	// both are acceptable — the key is that no panic occurs and all goroutines exit cleanly.
 	svc.Index(ctx, IndexRequest{RepoPath: "/repo", RepoSlug: "my-repo"})
 }
 
 // TestIndexServiceParseContextCancelled exercises the parse-stage context-cancel select branch.
-// We use an unbuffered parsedCh (parsedChBuf = -1) + pre-cancelled context so the select
+// We use an unbuffered parsedCh (parsedChBuf = -1) + pre-canceled context so the select
 // always picks the Done case (send would block, Done is immediately ready).
 func TestIndexServiceParseContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -455,7 +455,7 @@ func TestIndexServiceStoreStageFatalError(t *testing.T) {
 	cfg := &config.Config{
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 2,
-			MaxWorkersStore: 1, // serialise store goroutines: 1st cancels, 2nd sees Err()
+			MaxWorkersStore: 1, // serialize store goroutines: 1st cancels, 2nd sees Err()
 			BatchSize:       1, // flush every node so both files produce store calls
 		},
 	}

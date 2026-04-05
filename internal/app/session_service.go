@@ -10,30 +10,30 @@ import (
 	"github.com/commit0-dev/commit0/internal/domain"
 )
 
-// Session represents a multi-turn conversation session
+// Session represents a multi-turn conversation session.
 type Session struct {
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	ID        string
 	RepoSlug  string
 	Messages  []Message
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
-// Message represents a single message in a session
+// Message represents a single message in a session.
 type Message struct {
-	Role      string    // "user" | "assistant"
-	Content   string
 	Timestamp time.Time
+	Role      string
+	Content   string
 }
 
-// SessionService manages conversation sessions
+// SessionService manages conversation sessions.
 type SessionService struct {
-	mu       sync.RWMutex
 	sessions map[string]*Session
-	counter  int64 // monotonic ID counter
+	counter  int64
+	mu       sync.RWMutex
 }
 
-// NewSessionService creates a new session service
+// NewSessionService creates a new session service.
 func NewSessionService() *SessionService {
 	return &SessionService{
 		sessions: make(map[string]*Session),
@@ -41,7 +41,7 @@ func NewSessionService() *SessionService {
 	}
 }
 
-// CreateSession creates a new conversation session
+// CreateSession creates a new conversation session.
 func (ss *SessionService) CreateSession(ctx context.Context, repoSlug string) (*Session, error) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -62,7 +62,7 @@ func (ss *SessionService) CreateSession(ctx context.Context, repoSlug string) (*
 	return session, nil
 }
 
-// AppendMessage adds a message to a session
+// AppendMessage adds a message to a session.
 func (ss *SessionService) AppendMessage(ctx context.Context, sessionID, role, content string) (*Session, error) {
 	// Validate role
 	if role != "user" && role != "assistant" {
@@ -90,7 +90,7 @@ func (ss *SessionService) AppendMessage(ctx context.Context, sessionID, role, co
 	return session, nil
 }
 
-// GetSession retrieves a session by ID
+// GetSession retrieves a session by ID.
 func (ss *SessionService) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
@@ -110,7 +110,7 @@ func (ss *SessionService) GetSession(ctx context.Context, sessionID string) (*Se
 	}, nil
 }
 
-// ListSessions lists sessions, optionally filtered by repo
+// ListSessions lists sessions, optionally filtered by repo.
 func (ss *SessionService) ListSessions(ctx context.Context, repoSlug string) ([]Session, error) {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
@@ -139,7 +139,7 @@ func (ss *SessionService) ListSessions(ctx context.Context, repoSlug string) ([]
 	return result, nil
 }
 
-// DeleteSession removes a session
+// DeleteSession removes a session.
 func (ss *SessionService) DeleteSession(ctx context.Context, sessionID string) error {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -152,7 +152,7 @@ func (ss *SessionService) DeleteSession(ctx context.Context, sessionID string) e
 	return nil
 }
 
-// timeNow is a helper to get current time (used for testing)
+// timeNow is a helper to get current time (used for testing).
 func timeNow() time.Time {
 	return time.Now()
 }

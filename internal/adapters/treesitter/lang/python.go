@@ -301,8 +301,7 @@ func pyVisibility(name string) string {
 	return "public"
 }
 
-// pyModuleFromPath converts a file path to a dotted module name.
-// e.g. "myapp/utils/helpers.py" → "myapp.utils.helpers"
+// e.g. "myapp/utils/helpers.py" → "myapp.utils.helpers".
 func pyModuleFromPath(path string) string {
 	path = strings.TrimSuffix(path, ".py")
 	return strings.ReplaceAll(path, "/", ".")

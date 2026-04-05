@@ -10,17 +10,17 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// RepoService manages repository operations
+// RepoService manages repository operations.
 type RepoService struct {
 	store domain.GraphStore
 }
 
-// NewRepoService creates a new repository service
+// NewRepoService creates a new repository service.
 func NewRepoService(store domain.GraphStore) *RepoService {
 	return &RepoService{store: store}
 }
 
-// CreateRepoRequest represents a request to create a repository
+// CreateRepoRequest represents a request to create a repository.
 type CreateRepoRequest struct {
 	Slug      string
 	Path      string
@@ -28,7 +28,7 @@ type CreateRepoRequest struct {
 	Languages []string
 }
 
-// CreateRepo creates a new repository
+// CreateRepo creates a new repository.
 func (rs *RepoService) CreateRepo(ctx context.Context, req CreateRepoRequest) (*types.Repo, error) {
 	// Validate inputs
 	if req.Slug == "" {
@@ -62,7 +62,7 @@ func (rs *RepoService) CreateRepo(ctx context.Context, req CreateRepoRequest) (*
 	return repo, nil
 }
 
-// GetRepo retrieves a repository by slug
+// GetRepo retrieves a repository by slug.
 func (rs *RepoService) GetRepo(ctx context.Context, slug string) (*types.Repo, error) {
 	repo, err := rs.store.GetRepo(ctx, slug)
 	if err != nil {
@@ -75,7 +75,7 @@ func (rs *RepoService) GetRepo(ctx context.Context, slug string) (*types.Repo, e
 	return repo, nil
 }
 
-// ListRepos lists all repositories
+// ListRepos lists all repositories.
 func (rs *RepoService) ListRepos(ctx context.Context) ([]types.Repo, error) {
 	repos, err := rs.store.ListRepos(ctx)
 	if err != nil {
@@ -84,7 +84,7 @@ func (rs *RepoService) ListRepos(ctx context.Context) ([]types.Repo, error) {
 	return repos, nil
 }
 
-// DeleteRepo deletes a repository by slug
+// DeleteRepo deletes a repository by slug.
 func (rs *RepoService) DeleteRepo(ctx context.Context, slug string) (*types.Repo, error) {
 	// Get repo first to return it
 	repo, err := rs.GetRepo(ctx, slug)
@@ -100,15 +100,15 @@ func (rs *RepoService) DeleteRepo(ctx context.Context, slug string) (*types.Repo
 	return repo, nil
 }
 
-// UpdateRepoRequest represents a request to update a repository
+// UpdateRepoRequest represents a request to update a repository.
 type UpdateRepoRequest struct {
-	Slug          string
-	Languages     []string
-	LastCommit    string
 	LastIndexedAt *types.Repo
+	Slug          string
+	LastCommit    string
+	Languages     []string
 }
 
-// UpdateRepo updates repository metadata
+// UpdateRepo updates repository metadata.
 func (rs *RepoService) UpdateRepo(ctx context.Context, req UpdateRepoRequest) (*types.Repo, error) {
 	// Get existing repo
 	repo, err := rs.GetRepo(ctx, req.Slug)

@@ -329,8 +329,7 @@ func goVisibility(name string) string {
 	return "private"
 }
 
-// goPackageFromPath extracts a best-guess package name from the file path.
-// e.g. "internal/adapters/surreal/client.go" → "surreal"
+// e.g. "internal/adapters/surreal/client.go" → "surreal".
 func goPackageFromPath(path string) string {
 	parts := strings.Split(path, "/")
 	if len(parts) >= 2 {

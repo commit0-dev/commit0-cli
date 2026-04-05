@@ -10,5 +10,6 @@ var (
 )
 
 func main() {
+	cmd.SetVersion(version, commit)
 	cmd.Execute()
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// IndexRequest represents a request to index a repository
+// IndexRequest represents a request to index a repository.
 type IndexRequest struct {
 	RepoPath  string
 	RepoSlug  string
@@ -23,15 +23,15 @@ type IndexRequest struct {
 	Force     bool
 }
 
-// IndexResult represents the result of an indexing operation
+// IndexResult represents the result of an indexing operation.
 type IndexResult struct {
-	FilesIndexed  int
-	NodesCreated  int
-	EdgesCreated  int
-	Timing        types.TimingInfo
+	FilesIndexed int
+	NodesCreated int
+	EdgesCreated int
+	Timing       types.TimingInfo
 }
 
-// IndexService orchestrates the indexing pipeline
+// IndexService orchestrates the indexing pipeline.
 type IndexService struct {
 	walker      domain.FileWalker
 	parser      domain.Parser
@@ -44,7 +44,7 @@ type IndexService struct {
 	embedChBuf  int // channel buffer override: <0 = unbuffered, 0 = default (32), >0 = exact size
 }
 
-// NewIndexService creates a new index service
+// NewIndexService creates a new index service.
 func NewIndexService(
 	walker domain.FileWalker,
 	parser domain.Parser,
@@ -63,7 +63,7 @@ func NewIndexService(
 	}
 }
 
-// Index executes the 4-stage indexing pipeline
+// Index executes the 4-stage indexing pipeline.
 func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResult, error) {
 	startTime := time.Now()
 	run := &indexRun{}
@@ -113,7 +113,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 				return nil
 			})
 		}
-		parseGroup.Wait()
+		_ = parseGroup.Wait() // individual worker errors are non-fatal: logged and skipped
 	}()
 
 	// Stage 3: Embed (Gemini API, limit to 4 concurrent)
@@ -148,7 +148,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 				return nil
 			})
 		}
-		embedGroup.Wait()
+		_ = embedGroup.Wait() // individual worker errors are non-fatal: logged and skipped
 	}()
 
 	// Stage 4: Store (SurrealDB, limit to 8 concurrent)
@@ -189,13 +189,13 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	}, nil
 }
 
-// indexRun tracks statistics during indexing
+// indexRun tracks statistics during indexing.
 type indexRun struct {
-	mu            sync.Mutex
-	filesIndexed  int
-	nodesCreated  int
-	edgesCreated  int
-	errors        int
+	mu           sync.Mutex
+	filesIndexed int
+	nodesCreated int
+	edgesCreated int
+	errors       int
 }
 
 func (r *indexRun) addFilesIndexed(n int) {
@@ -222,7 +222,7 @@ func (r *indexRun) addError() {
 	r.errors++
 }
 
-// embeddedFile holds nodes with embeddings and edges
+// embeddedFile holds nodes with embeddings and edges.
 type embeddedFile struct {
 	Nodes []types.CodeNode
 	Edges []types.CodeEdge

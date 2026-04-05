@@ -382,8 +382,7 @@ func tsVisibility(n *sitter.Node, src []byte) string {
 	return "private"
 }
 
-// tsModuleFromPath converts a file path to a dotted module name.
-// e.g. "src/services/auth.ts" → "src.services.auth"
+// e.g. "src/services/auth.ts" → "src.services.auth".
 func tsModuleFromPath(path string) string {
 	path = strings.TrimSuffix(path, ".ts")
 	path = strings.TrimSuffix(path, ".tsx")

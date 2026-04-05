@@ -13,16 +13,16 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// QueryRequest represents a natural language query
+// QueryRequest represents a natural language query.
 type QueryRequest struct {
 	Question  string
 	RepoSlug  string
-	TopK      int
 	NodeKinds []types.NodeKind
+	TopK      int
 	MinScore  float64
 }
 
-// QueryService handles semantic code search
+// QueryService handles semantic code search.
 type QueryService struct {
 	embedder  domain.Embedder
 	vectorIdx domain.VectorIndex
@@ -33,7 +33,7 @@ type QueryService struct {
 	log       *slog.Logger
 }
 
-// NewQueryService creates a new query service
+// NewQueryService creates a new query service.
 func NewQueryService(
 	embedder domain.Embedder,
 	vectorIdx domain.VectorIndex,
@@ -53,7 +53,7 @@ func NewQueryService(
 	}
 }
 
-// Query executes a semantic code search
+// Query executes a semantic code search.
 func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.QueryResult, error) {
 	startTime := time.Now()
 

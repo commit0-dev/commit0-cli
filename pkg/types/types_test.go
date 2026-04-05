@@ -260,6 +260,9 @@ func TestTraceResult_Instantiation(t *testing.T) {
 	if tr.Timing.GraphMS != 20 {
 		t.Errorf("Timing.GraphMS mismatch: got %d", tr.Timing.GraphMS)
 	}
+	if tr.Explanation != "root calls child." {
+		t.Errorf("Explanation mismatch: got %q", tr.Explanation)
+	}
 }
 
 // ── BlastResult ───────────────────────────────────────────────────────────────
@@ -294,6 +297,9 @@ func TestBlastResult_Instantiation(t *testing.T) {
 	if br.Affected[0].Path != "pkg/caller.go" {
 		t.Errorf("Path mismatch: got %q", br.Affected[0].Path)
 	}
+	if br.Summary != "1 node affected." {
+		t.Errorf("Summary mismatch: got %q", br.Summary)
+	}
 }
 
 // ── AffectedNode ─────────────────────────────────────────────────────────────
@@ -314,6 +320,9 @@ func TestAffectedNode_Instantiation(t *testing.T) {
 	}
 	if an.Module != "auth" {
 		t.Errorf("Module mismatch: got %q", an.Module)
+	}
+	if an.Path != "auth/foo.go" {
+		t.Errorf("Path mismatch: got %q", an.Path)
 	}
 }
 
@@ -381,11 +390,17 @@ func TestRepo_Instantiation(t *testing.T) {
 	if r.LastIndexedAt == nil {
 		t.Error("expected non-nil LastIndexedAt")
 	}
+	if r.CreatedAt.IsZero() {
+		t.Error("expected non-zero CreatedAt")
+	}
 }
 
 func TestRepo_NilLastIndexedAt(t *testing.T) {
 	r := Repo{
 		Slug: "new-repo",
+	}
+	if r.Slug != "new-repo" {
+		t.Errorf("Slug mismatch: got %q", r.Slug)
 	}
 	if r.LastIndexedAt != nil {
 		t.Errorf("expected nil LastIndexedAt, got %v", r.LastIndexedAt)

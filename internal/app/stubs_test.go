@@ -10,25 +10,19 @@ import (
 // Stub implementations for testing
 
 type stubGraphStore struct {
-	nodes    map[string]*types.CodeNode
-	nodesByQ map[string]*types.CodeNode // keyed by "slug::qualified"
-	repos    map[string]*types.Repo
-	traceHops []types.TraceHop
-	affected  []types.AffectedNode
-
-	// Global error — returned by all methods unless overridden below.
-	err error
-
-	// Per-method error overrides (take priority over err when non-nil).
-	deleteNodesErr error // DeleteNodesByRepo
-	upsertRepoErr  error // UpsertRepo
-	listReposErr   error // ListRepos
-	traceErr       error // TraceForward / TraceReverse
-	blastRadiusErr error // BlastRadius
-	upsertBatchErr error // UpsertFileBatch
-
-	// Optional hook called at the start of UpsertFileBatch (before error checks).
-	upsertBatchFn func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
+	traceErr       error
+	err            error
+	deleteNodesErr error
+	upsertRepoErr  error
+	listReposErr   error
+	blastRadiusErr error
+	upsertBatchErr error
+	nodesByQ       map[string]*types.CodeNode
+	repos          map[string]*types.Repo
+	nodes          map[string]*types.CodeNode
+	upsertBatchFn  func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
+	traceHops      []types.TraceHop
+	affected       []types.AffectedNode
 }
 
 func newStubGraphStore() *stubGraphStore {
@@ -192,8 +186,8 @@ func (s *stubGraphStore) GetSchemaVersion(ctx context.Context) (int, error) {
 // ----- vector index -----
 
 type stubVectorIndex struct {
-	results []types.ScoredNode
 	err     error
+	results []types.ScoredNode
 }
 
 func (s *stubVectorIndex) Search(ctx context.Context, query []float32, opts domain.VectorSearchOpts) ([]types.ScoredNode, error) {
@@ -206,8 +200,8 @@ func (s *stubVectorIndex) Search(ctx context.Context, query []float32, opts doma
 // ----- text index -----
 
 type stubTextIndex struct {
-	results []types.ScoredNode
 	err     error
+	results []types.ScoredNode
 }
 
 func (s *stubTextIndex) Search(ctx context.Context, query string, opts domain.TextSearchOpts) ([]types.ScoredNode, error) {
@@ -220,11 +214,11 @@ func (s *stubTextIndex) Search(ctx context.Context, query string, opts domain.Te
 // ----- embedder -----
 
 type stubEmbedder struct {
+	err       error
+	batchErr  error
+	queryErr  error
 	queryVec  []float32
 	batchRes  []domain.EmbedResult
-	err       error // returned by both EmbedBatch and EmbedQuery
-	batchErr  error // returned only by EmbedBatch (takes priority over err)
-	queryErr  error // returned only by EmbedQuery (takes priority over err)
 	callCount int
 }
 
@@ -252,8 +246,8 @@ func (s *stubEmbedder) EmbedQuery(ctx context.Context, query string) ([]float32,
 // ----- explainer -----
 
 type stubExplainer struct {
+	err    error
 	chunks []domain.ExplainChunk
-	err    error // returned by Explain() itself (not a chunk error)
 }
 
 func (s *stubExplainer) Explain(ctx context.Context, req domain.ExplainRequest) (<-chan domain.ExplainChunk, error) {
@@ -289,8 +283,8 @@ func (s *stubParser) SupportedLanguages() []string {
 // ----- file walker -----
 
 type stubFileWalker struct {
-	files []domain.FileEntry
 	err   error
+	files []domain.FileEntry
 }
 
 func (s *stubFileWalker) Walk(ctx context.Context, repoPath string, opts domain.WalkOpts) (<-chan domain.FileEntry, <-chan error) {

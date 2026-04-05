@@ -71,9 +71,9 @@ func StopSurrealDB(ctx context.Context, proc *Process) error {
 	}
 
 	// Send interrupt signal for a graceful shutdown.
-	if err := proc.cmd.Process.Signal(interruptSignal()); err != nil {
-		// Process may have already exited.
-		return nil
+	// Signal returns an error only when the process has already exited — not an error condition.
+	if proc.cmd.Process.Signal(interruptSignal()) != nil {
+		return nil //nolint:nilerr // process already exited — not an error condition
 	}
 
 	done := make(chan error, 1)
@@ -84,12 +84,9 @@ func StopSurrealDB(ctx context.Context, proc *Process) error {
 	select {
 	case <-ctx.Done():
 		_ = proc.cmd.Process.Kill()
-		return fmt.Errorf("stop surrealdb: context cancelled while waiting: %w", ctx.Err())
-	case err := <-done:
-		if err != nil {
-			// Exit code != 0 is expected after SIGTERM.
-			return nil
-		}
+		return fmt.Errorf("stop surrealdb: context canceled while waiting: %w", ctx.Err())
+	case <-done:
+		// Non-zero exit is expected after SIGTERM; treat as success.
 		return nil
 	}
 }

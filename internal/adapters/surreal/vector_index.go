@@ -13,17 +13,17 @@ import (
 
 // vecRow is the raw result row from an HNSW ANN query.
 type vecRow struct {
-	ID        *models.RecordID `json:"id"`
-	Name      string           `json:"name"`
-	Qualified string           `json:"qualified"`
-	FilePath  string           `json:"file_path"`
-	RepoSlug  string           `json:"repo_slug"`
-	Language  string           `json:"language"`
-	Signature string           `json:"signature"`
-	Docstring string           `json:"docstring"`
-	Body      string           `json:"body"`
-	Centrality int             `json:"centrality"`
-	VecDist   float64          `json:"vec_dist"` // raw cosine distance from vector::distance::knn()
+	ID         *models.RecordID `json:"id"`
+	Name       string           `json:"name"`
+	Qualified  string           `json:"qualified"`
+	FilePath   string           `json:"file_path"`
+	RepoSlug   string           `json:"repo_slug"`
+	Language   string           `json:"language"`
+	Signature  string           `json:"signature"`
+	Docstring  string           `json:"docstring"`
+	Body       string           `json:"body"`
+	Centrality int              `json:"centrality"`
+	VecDist    float64          `json:"vec_dist"` // raw cosine distance from vector::distance::knn()
 }
 
 // Search implements domain.VectorIndex on the VectorAdapter wrapper.
@@ -31,7 +31,7 @@ func (v *VectorAdapter) Search(ctx context.Context, query []float32, opts domain
 	return v.SurrealAdapter.VectorSearch(ctx, query, opts)
 }
 
-// VectorSearch performs HNSW approximate nearest-neighbour vector search across
+// VectorSearch performs HNSW approximate nearest-neighbor vector search across
 // the relevant node tables. Results are filtered by MinScore and ranked by
 // VectorScore = 1 - vec_dist (cosine similarity, higher is better).
 func (a *SurrealAdapter) VectorSearch(ctx context.Context, query []float32, opts domain.VectorSearchOpts) ([]types.ScoredNode, error) {

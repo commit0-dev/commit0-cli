@@ -9,10 +9,10 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// ContextBuilder constructs embedding-ready context text from code nodes
+// ContextBuilder constructs embedding-ready context text from code nodes.
 type ContextBuilder struct {
+	store        domain.GraphStore
 	maxBodyRunes int
-	store        domain.GraphStore // optional; nil = no graph-neighborhood enrichment
 }
 
 // NewContextBuilder creates a new context builder with a max body size in runes.
@@ -81,7 +81,7 @@ func hopNames(hops []types.TraceHop) []string {
 	return names
 }
 
-// ForNode generates embedding input text from a code node
+// ForNode generates embedding input text from a code node.
 func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 	if node == nil {
 		return ""
@@ -144,12 +144,12 @@ func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 	return sb.String()
 }
 
-// ForQuery generates embedding input text for a user query
+// ForQuery generates embedding input text for a user query.
 func (cb *ContextBuilder) ForQuery(question string) string {
 	return fmt.Sprintf("task: search query | query: %s", question)
 }
 
-// truncate safely truncates a string to maxRunes runes, counting Unicode properly
+// truncate safely truncates a string to maxRunes runes, counting Unicode properly.
 func (cb *ContextBuilder) truncate(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return ""

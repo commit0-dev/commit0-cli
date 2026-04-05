@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	sitter "github.com/smacker/go-tree-sitter"
-	tssitter "github.com/smacker/go-tree-sitter/typescript/typescript"
 	jssitter "github.com/smacker/go-tree-sitter/javascript"
+	tssitter "github.com/smacker/go-tree-sitter/typescript/typescript"
 
 	"github.com/commit0-dev/commit0/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"

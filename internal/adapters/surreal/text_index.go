@@ -13,17 +13,17 @@ import (
 
 // ftsRow is the raw result row returned by a BM25 full-text search query.
 type ftsRow struct {
-	ID        *models.RecordID `json:"id"`
-	Name      string           `json:"name"`
-	Qualified string           `json:"qualified"`
-	FilePath  string           `json:"file_path"`
-	RepoSlug  string           `json:"repo_slug"`
-	Language  string           `json:"language"`
-	Signature string           `json:"signature"`
-	Docstring string           `json:"docstring"`
-	Body      string           `json:"body"`
-	Centrality int             `json:"centrality"`
-	FTSScore  float64          `json:"fts_score"` // from search::score()
+	ID         *models.RecordID `json:"id"`
+	Name       string           `json:"name"`
+	Qualified  string           `json:"qualified"`
+	FilePath   string           `json:"file_path"`
+	RepoSlug   string           `json:"repo_slug"`
+	Language   string           `json:"language"`
+	Signature  string           `json:"signature"`
+	Docstring  string           `json:"docstring"`
+	Body       string           `json:"body"`
+	Centrality int              `json:"centrality"`
+	FTSScore   float64          `json:"fts_score"` // from search::score()
 }
 
 // Search implements domain.TextIndex on the TextAdapter wrapper.

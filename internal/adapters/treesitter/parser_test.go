@@ -239,7 +239,7 @@ func TestParse_ContextCancelled(t *testing.T) {
 		Content:  []byte("package main\n"),
 	})
 	if err == nil {
-		t.Fatal("expected error for cancelled context, got nil")
+		t.Fatal("expected error for canceled context, got nil")
 	}
 	if !strings.Contains(err.Error(), "cancel") && !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context cancellation error, got: %v", err)

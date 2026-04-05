@@ -92,11 +92,11 @@ func TestWithRetryContextCancelled(t *testing.T) {
 	})
 
 	if err == nil {
-		t.Errorf("WithRetry should fail with cancelled context")
+		t.Errorf("WithRetry should fail with canceled context")
 	}
 
 	if attempts != 0 {
-		t.Errorf("attempts = %d, want 0 (context cancelled before execution)", attempts)
+		t.Errorf("attempts = %d, want 0 (context canceled before execution)", attempts)
 	}
 }
 

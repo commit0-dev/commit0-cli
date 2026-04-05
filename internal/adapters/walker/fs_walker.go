@@ -42,7 +42,7 @@ func NewFSWalker(log *slog.Logger) *FSWalker {
 
 // Walk traverses repoPath, emitting accepted FileEntry values on the returned
 // channel. Any terminal error is sent on the error channel. Both channels are
-// closed when the walk completes or the context is cancelled.
+// closed when the walk completes or the context is canceled.
 //
 // The caller must drain fileCh to avoid blocking the walk goroutine.
 func (w *FSWalker) Walk(ctx context.Context, repoPath string, opts domain.WalkOpts) (<-chan domain.FileEntry, <-chan error) {
@@ -81,11 +81,9 @@ func (w *FSWalker) Walk(ctx context.Context, repoPath string, opts domain.WalkOp
 			}
 
 			// ── Relative path ──────────────────────────────────────────────
-			rel, relErr := filepath.Rel(repoPath, path)
-			if relErr != nil {
-				// Should not happen; skip the file.
-				return nil
-			}
+			// filepath.Rel only errors when paths are not both absolute or both
+			// relative — unreachable here because we always pass absolute paths.
+			rel, _ := filepath.Rel(repoPath, path)
 			// Normalise path separators to forward slashes for portability.
 			rel = filepath.ToSlash(rel)
 
@@ -118,9 +116,9 @@ func (w *FSWalker) Walk(ctx context.Context, repoPath string, opts domain.WalkOp
 
 			// ── Size limit ────────────────────────────────────────────────
 			if opts.MaxFileKB > 0 {
-				info, infoErr := d.Info()
-				if infoErr != nil {
-					return nil
+				info, err := d.Info()
+				if err != nil || info == nil {
+					return nil //nolint:nilerr // stat failure skips the file; walk continues
 				}
 				if info.Size() > int64(opts.MaxFileKB)*1024 {
 					w.log.Debug("walk: skipping oversized file",

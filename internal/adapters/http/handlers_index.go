@@ -15,21 +15,21 @@ import (
 
 // IndexJob represents the state of an asynchronous index operation.
 type IndexJob struct {
+	StartedAt    time.Time  `json:"started_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 	ID           string     `json:"id"`
-	Status       string     `json:"status"` // "indexing" | "completed" | "failed"
+	Status       string     `json:"status"`
 	RepoSlug     string     `json:"repo_slug"`
+	Error        string     `json:"error,omitempty"`
 	FilesIndexed int        `json:"files_indexed"`
 	NodesCreated int        `json:"nodes_created"`
 	Errors       int        `json:"errors"`
-	Error        string     `json:"error,omitempty"`
-	StartedAt    time.Time  `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 }
 
 // indexJobStore is an in-memory store for async index jobs.
 type indexJobStore struct {
-	mu   sync.RWMutex
 	jobs map[string]*IndexJob
+	mu   sync.RWMutex
 }
 
 func newIndexJobStore() *indexJobStore {
@@ -75,8 +75,8 @@ func newJobID() (string, error) {
 }
 
 type startIndexRequest struct {
-	RepoPath string   `json:"repo_path"`
-	RepoSlug string   `json:"repo_slug"`
+	RepoPath  string   `json:"repo_path"`
+	RepoSlug  string   `json:"repo_slug"`
 	Languages []string `json:"languages"`
 	Exclude   []string `json:"exclude"`
 }
@@ -108,7 +108,7 @@ func (s *Server) handleStartIndex(c echo.Context) error {
 	}
 	s.jobs.set(job)
 
-	// Run indexing in background; use a detached context so cancelling the
+	// Run indexing in background; use a detached context so canceling the
 	// HTTP request does not abort the index job.
 	go func() {
 		result, indexErr := s.indexSvc.Index(context.Background(), app.IndexRequest{

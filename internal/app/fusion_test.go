@@ -12,9 +12,9 @@ func TestReciprocalRankFusion(t *testing.T) {
 		name      string
 		vector    []types.ScoredNode
 		fts       []types.ScoredNode
+		wantOrder []string
 		weights   RRFWeights
 		wantCount int
-		wantOrder []string // node IDs in expected order
 	}{
 		{
 			name:      "empty both lists",

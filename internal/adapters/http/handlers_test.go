@@ -24,16 +24,16 @@ import (
 // ---------------------------------------------------------------------------
 
 type httpTestGraphStore struct {
-	repo       *types.Repo
-	repos      []types.Repo
-	node       *types.CodeNode
-	upsertErr  error
-	getErr     error
-	listErr    error
-	deleteErr  error
-	blastErr   error
-	traceHops  []types.TraceHop
-	affected   []types.AffectedNode
+	repo      *types.Repo
+	repos     []types.Repo
+	node      *types.CodeNode
+	upsertErr error
+	getErr    error
+	listErr   error
+	deleteErr error
+	blastErr  error
+	traceHops []types.TraceHop
+	affected  []types.AffectedNode
 }
 
 func (s *httpTestGraphStore) UpsertNode(ctx context.Context, n *types.CodeNode) error {
@@ -48,10 +48,12 @@ func (s *httpTestGraphStore) GetNodeByQualified(ctx context.Context, repo, q str
 	}
 	return nil, domain.NotFound("not found")
 }
-func (s *httpTestGraphStore) DeleteNode(ctx context.Context, id string) error           { return nil }
-func (s *httpTestGraphStore) DeleteNodesByRepo(ctx context.Context, r string) error      { return nil }
-func (s *httpTestGraphStore) UpsertEdge(ctx context.Context, e *types.CodeEdge) error   { return nil }
-func (s *httpTestGraphStore) DeleteEdgesForNode(ctx context.Context, id string) error   { return nil }
+func (s *httpTestGraphStore) DeleteNode(ctx context.Context, id string) error { return s.deleteErr }
+func (s *httpTestGraphStore) DeleteNodesByRepo(ctx context.Context, r string) error {
+	return s.deleteErr
+}
+func (s *httpTestGraphStore) UpsertEdge(ctx context.Context, e *types.CodeEdge) error { return nil }
+func (s *httpTestGraphStore) DeleteEdgesForNode(ctx context.Context, id string) error { return nil }
 func (s *httpTestGraphStore) TraceForward(ctx context.Context, id string, d int) ([]types.TraceHop, error) {
 	return s.traceHops, nil
 }
@@ -76,12 +78,12 @@ func (s *httpTestGraphStore) GetRepo(ctx context.Context, slug string) (*types.R
 func (s *httpTestGraphStore) ListRepos(ctx context.Context) ([]types.Repo, error) {
 	return s.repos, s.listErr
 }
-func (s *httpTestGraphStore) ApplySchema(ctx context.Context) error           { return nil }
+func (s *httpTestGraphStore) ApplySchema(ctx context.Context) error             { return nil }
 func (s *httpTestGraphStore) GetSchemaVersion(ctx context.Context) (int, error) { return 1, nil }
 
 type httpTestVectorIndex struct {
-	results []types.ScoredNode
 	err     error
+	results []types.ScoredNode
 }
 
 func (s *httpTestVectorIndex) Search(ctx context.Context, q []float32, opts domain.VectorSearchOpts) ([]types.ScoredNode, error) {
@@ -89,8 +91,8 @@ func (s *httpTestVectorIndex) Search(ctx context.Context, q []float32, opts doma
 }
 
 type httpTestTextIndex struct {
-	results []types.ScoredNode
 	err     error
+	results []types.ScoredNode
 }
 
 func (s *httpTestTextIndex) Search(ctx context.Context, q string, opts domain.TextSearchOpts) ([]types.ScoredNode, error) {
@@ -98,8 +100,8 @@ func (s *httpTestTextIndex) Search(ctx context.Context, q string, opts domain.Te
 }
 
 type httpTestEmbedder struct {
-	vec []float32
 	err error
+	vec []float32
 }
 
 func (s *httpTestEmbedder) EmbedBatch(ctx context.Context, inputs []domain.EmbedInput) ([]domain.EmbedResult, error) {
@@ -110,8 +112,8 @@ func (s *httpTestEmbedder) EmbedQuery(ctx context.Context, q string) ([]float32,
 }
 
 type httpTestExplainer struct {
-	chunks []domain.ExplainChunk
 	err    error
+	chunks []domain.ExplainChunk
 }
 
 func (s *httpTestExplainer) Explain(ctx context.Context, req domain.ExplainRequest) (<-chan domain.ExplainChunk, error) {
