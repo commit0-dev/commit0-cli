@@ -1,13 +1,15 @@
 package config
 
 import (
-	"os"
-	"strconv"
+	"fmt"
+	"strings"
+
+	"github.com/spf13/viper"
 
 	"github.com/commit0-dev/commit0/internal/domain"
 )
 
-// Config holds all application configuration
+// Config holds all application configuration.
 type Config struct {
 	Surreal SurrealConfig
 	Gemini  GeminiConfig
@@ -16,86 +18,108 @@ type Config struct {
 	Server  ServerConfig
 }
 
-// ServerConfig holds HTTP server settings
+// ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port           int
-	CORSOrigins    []string
-	ReadTimeoutSec int
+	Port            int
+	CORSOrigins     []string
+	ReadTimeoutSec  int
 	WriteTimeoutSec int
 }
 
-// SurrealConfig holds SurrealDB connection settings
+// SurrealConfig holds SurrealDB connection settings.
 type SurrealConfig struct {
-	URL       string `mapstructure:"SURREAL_URL"`
-	User      string `mapstructure:"SURREAL_USER"`
-	Pass      string `mapstructure:"SURREAL_PASS"`
-	Namespace string `mapstructure:"SURREAL_NAMESPACE"`
-	Database  string `mapstructure:"SURREAL_DATABASE"`
+	URL       string
+	User      string
+	Pass      string
+	Namespace string
+	Database  string
 }
 
-// GeminiConfig holds Gemini API settings
+// GeminiConfig holds Gemini API settings.
 type GeminiConfig struct {
-	APIKey         string `mapstructure:"GEMINI_API_KEY"`
-	EmbedModel     string `mapstructure:"GEMINI_EMBED_MODEL"`
-	ExplainModel   string `mapstructure:"GEMINI_EXPLAIN_MODEL"`
-	EmbedDimension int    `mapstructure:"GEMINI_EMBED_DIM"`
-	MaxBatchSize   int    `mapstructure:"GEMINI_BATCH_SIZE"`
+	APIKey         string
+	EmbedModel     string
+	ExplainModel   string
+	EmbedDimension int
+	MaxBatchSize   int
 }
 
-// IndexConfig holds indexing configuration
+// IndexConfig holds indexing configuration.
 type IndexConfig struct {
-	MaxWorkersParse  int
-	MaxWorkersEmbed  int
-	MaxWorkersStore  int
-	MaxFileKB        int
-	BatchSize        int
+	MaxWorkersParse int
+	MaxWorkersEmbed int
+	MaxWorkersStore int
+	MaxFileKB       int
+	BatchSize       int
 }
 
-// QueryConfig holds query configuration
+// QueryConfig holds query configuration.
 type QueryConfig struct {
-	DefaultTopK       int
-	MinScore          float64
-	RRFKConstant      int
+	DefaultTopK  int
+	MinScore     float64
+	RRFKConstant int
 }
 
-// Load loads configuration from environment variables with defaults
-func Load() (*Config, error) {
+// Load reads configuration via Viper (env vars, optional config file).
+// If cfgPath is non-empty, that file is loaded (YAML, JSON, TOML supported).
+// Environment variables take precedence over file values.
+func Load(cfgPath string) (*Config, error) {
+	v := viper.New()
+
+	// --- Key bindings and defaults ---
+	setDefaults(v)
+
+	// Env vars: automatic binding with the same key names.
+	// Viper normalises keys to lowercase; env vars are uppercased via SetEnvKeyReplacer.
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	// Explicit env bindings (Viper key → env var name).
+	bindEnvs(v)
+
+	// --- Optional config file ---
+	if cfgPath != "" {
+		v.SetConfigFile(cfgPath)
+		if err := v.ReadInConfig(); err != nil {
+			return nil, fmt.Errorf("read config file %q: %w", cfgPath, err)
+		}
+	}
+
 	cfg := &Config{
 		Surreal: SurrealConfig{
-			URL:       getEnv("SURREAL_URL", "ws://localhost:8000"),
-			User:      getEnv("SURREAL_USER", "root"),
-			Pass:      getEnv("SURREAL_PASS", "root"),
-			Namespace: getEnv("SURREAL_NAMESPACE", "commit0"),
-			Database:  getEnv("SURREAL_DATABASE", "codebase"),
+			URL:       v.GetString("surreal.url"),
+			User:      v.GetString("surreal.user"),
+			Pass:      v.GetString("surreal.pass"),
+			Namespace: v.GetString("surreal.namespace"),
+			Database:  v.GetString("surreal.database"),
 		},
 		Gemini: GeminiConfig{
-			APIKey:         getEnv("GEMINI_API_KEY", ""),
-			EmbedModel:     getEnv("GEMINI_EMBED_MODEL", "gemini-embedding-2-preview"),
-			ExplainModel:   getEnv("GEMINI_EXPLAIN_MODEL", "gemini-2.0-flash"),
-			EmbedDimension: getEnvInt("GEMINI_EMBED_DIM", 3072),
-			MaxBatchSize:   getEnvInt("GEMINI_BATCH_SIZE", 100),
+			APIKey:         v.GetString("gemini.api_key"),
+			EmbedModel:     v.GetString("gemini.embed_model"),
+			ExplainModel:   v.GetString("gemini.explain_model"),
+			EmbedDimension: v.GetInt("gemini.embed_dimension"),
+			MaxBatchSize:   v.GetInt("gemini.max_batch_size"),
 		},
 		Index: IndexConfig{
-			MaxWorkersParse: getEnvInt("INDEX_WORKERS_PARSE", 0), // 0 = GOMAXPROCS
-			MaxWorkersEmbed: getEnvInt("INDEX_WORKERS_EMBED", 4),
-			MaxWorkersStore: getEnvInt("INDEX_WORKERS_STORE", 8),
-			MaxFileKB:       getEnvInt("INDEX_MAX_FILE_KB", 10000),
-			BatchSize:       getEnvInt("INDEX_BATCH_SIZE", 100),
+			MaxWorkersParse: v.GetInt("index.max_workers_parse"),
+			MaxWorkersEmbed: v.GetInt("index.max_workers_embed"),
+			MaxWorkersStore: v.GetInt("index.max_workers_store"),
+			MaxFileKB:       v.GetInt("index.max_file_kb"),
+			BatchSize:       v.GetInt("index.batch_size"),
 		},
 		Query: QueryConfig{
-			DefaultTopK:  getEnvInt("QUERY_DEFAULT_TOP_K", 10),
-			MinScore:     getEnvFloat("QUERY_MIN_SCORE", 0.5),
-			RRFKConstant: getEnvInt("QUERY_RRF_K", 60),
+			DefaultTopK:  v.GetInt("query.default_top_k"),
+			MinScore:     v.GetFloat64("query.min_score"),
+			RRFKConstant: v.GetInt("query.rrf_k_constant"),
 		},
 		Server: ServerConfig{
-			Port:            getEnvInt("SERVER_PORT", 8080),
-			CORSOrigins:     []string{getEnv("SERVER_CORS_ORIGINS", "*")},
-			ReadTimeoutSec:  getEnvInt("SERVER_READ_TIMEOUT", 30),
-			WriteTimeoutSec: getEnvInt("SERVER_WRITE_TIMEOUT", 120),
+			Port:            v.GetInt("server.port"),
+			CORSOrigins:     v.GetStringSlice("server.cors_origins"),
+			ReadTimeoutSec:  v.GetInt("server.read_timeout_sec"),
+			WriteTimeoutSec: v.GetInt("server.write_timeout_sec"),
 		},
 	}
 
-	// Validate required fields
 	if cfg.Gemini.APIKey == "" {
 		return nil, domain.Validation("GEMINI_API_KEY is required")
 	}
@@ -103,30 +127,65 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// getEnv retrieves an environment variable or returns a default value
-func getEnv(key, defaultVal string) string {
-	if val, ok := os.LookupEnv(key); ok {
-		return val
-	}
-	return defaultVal
+func setDefaults(v *viper.Viper) {
+	v.SetDefault("surreal.url", "ws://localhost:8000")
+	v.SetDefault("surreal.user", "root")
+	v.SetDefault("surreal.pass", "root")
+	v.SetDefault("surreal.namespace", "commit0")
+	v.SetDefault("surreal.database", "codebase")
+
+	v.SetDefault("gemini.embed_model", "gemini-embedding-2-preview")
+	v.SetDefault("gemini.explain_model", "gemini-2.0-flash")
+	v.SetDefault("gemini.embed_dimension", 3072)
+	v.SetDefault("gemini.max_batch_size", 100)
+
+	v.SetDefault("index.max_workers_parse", 0) // 0 = GOMAXPROCS
+	v.SetDefault("index.max_workers_embed", 4)
+	v.SetDefault("index.max_workers_store", 8)
+	v.SetDefault("index.max_file_kb", 10000)
+	v.SetDefault("index.batch_size", 100)
+
+	v.SetDefault("query.default_top_k", 10)
+	v.SetDefault("query.min_score", 0.5)
+	v.SetDefault("query.rrf_k_constant", 60)
+
+	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.cors_origins", []string{"*"})
+	v.SetDefault("server.read_timeout_sec", 30)
+	v.SetDefault("server.write_timeout_sec", 120)
 }
 
-// getEnvInt retrieves an environment variable as integer or returns a default value
-func getEnvInt(key string, defaultVal int) int {
-	if val, ok := os.LookupEnv(key); ok {
-		if intVal, err := strconv.Atoi(val); err == nil {
-			return intVal
-		}
-	}
-	return defaultVal
-}
+// bindEnvs maps Viper keys to their canonical environment variable names.
+func bindEnvs(v *viper.Viper) {
+	envMap := map[string]string{
+		"surreal.url":       "SURREAL_URL",
+		"surreal.user":      "SURREAL_USER",
+		"surreal.pass":      "SURREAL_PASS",
+		"surreal.namespace": "SURREAL_NAMESPACE",
+		"surreal.database":  "SURREAL_DATABASE",
 
-// getEnvFloat retrieves an environment variable as float or returns a default value
-func getEnvFloat(key string, defaultVal float64) float64 {
-	if val, ok := os.LookupEnv(key); ok {
-		if floatVal, err := strconv.ParseFloat(val, 64); err == nil {
-			return floatVal
-		}
+		"gemini.api_key":         "GEMINI_API_KEY",
+		"gemini.embed_model":     "GEMINI_EMBED_MODEL",
+		"gemini.explain_model":   "GEMINI_EXPLAIN_MODEL",
+		"gemini.embed_dimension": "GEMINI_EMBED_DIM",
+		"gemini.max_batch_size":  "GEMINI_BATCH_SIZE",
+
+		"index.max_workers_parse": "INDEX_WORKERS_PARSE",
+		"index.max_workers_embed": "INDEX_WORKERS_EMBED",
+		"index.max_workers_store": "INDEX_WORKERS_STORE",
+		"index.max_file_kb":       "INDEX_MAX_FILE_KB",
+		"index.batch_size":        "INDEX_BATCH_SIZE",
+
+		"query.default_top_k":  "QUERY_DEFAULT_TOP_K",
+		"query.min_score":       "QUERY_MIN_SCORE",
+		"query.rrf_k_constant":  "QUERY_RRF_K",
+
+		"server.port":              "SERVER_PORT",
+		"server.cors_origins":      "SERVER_CORS_ORIGINS",
+		"server.read_timeout_sec":  "SERVER_READ_TIMEOUT",
+		"server.write_timeout_sec": "SERVER_WRITE_TIMEOUT",
 	}
-	return defaultVal
+	for key, env := range envMap {
+		v.MustBindEnv(key, env)
+	}
 }

@@ -19,50 +19,31 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the HTTP API server",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := config.Load(configPath(cmd))
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
 
+		// Apply --port flag override.
+		if port, _ := cmd.Flags().GetInt("port"); port > 0 {
+			cfg.Server.Port = port
+		}
+
 		ctx := cmd.Context()
 
-		// Wire all services.
-		indexSvc, indexCleanup, err := wireIndexService(ctx, cfg)
+		// Wire all services from a single shared deps instance.
+		svcs, err := wireServeServices(ctx, cfg)
 		if err != nil {
-			return fmt.Errorf("wire index service: %w", err)
+			return fmt.Errorf("wire services: %w", err)
 		}
-		defer indexCleanup()
-
-		querySvc, queryCleanup, err := wireQueryService(ctx, cfg)
-		if err != nil {
-			return fmt.Errorf("wire query service: %w", err)
-		}
-		defer queryCleanup()
-
-		traceSvc, traceCleanup, err := wireTraceService(ctx, cfg)
-		if err != nil {
-			return fmt.Errorf("wire trace service: %w", err)
-		}
-		defer traceCleanup()
-
-		blastSvc, blastCleanup, err := wireBlastService(ctx, cfg)
-		if err != nil {
-			return fmt.Errorf("wire blast service: %w", err)
-		}
-		defer blastCleanup()
-
-		repoSvc, repoCleanup, err := wireRepoService(ctx, cfg)
-		if err != nil {
-			return fmt.Errorf("wire repo service: %w", err)
-		}
-		defer repoCleanup()
+		defer svcs.cleanup()
 
 		server := httpAdapter.NewServer(
-			indexSvc,
-			querySvc,
-			traceSvc,
-			blastSvc,
-			repoSvc,
+			svcs.index,
+			svcs.query,
+			svcs.trace,
+			svcs.blast,
+			svcs.repo,
 			&cfg.Server,
 		)
 

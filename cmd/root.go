@@ -23,6 +23,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().String("repo", "", "Repository slug")
-	rootCmd.PersistentFlags().String("config", "", "Config file path (optional)")
+	rootCmd.PersistentFlags().String("config", "", "Path to a JSON config file (optional, overridden by env vars)")
 }

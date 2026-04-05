@@ -16,7 +16,7 @@ var traceCmd = &cobra.Command{
 	Short: "Trace code flow from a symbol",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := config.Load(configPath(cmd))
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}

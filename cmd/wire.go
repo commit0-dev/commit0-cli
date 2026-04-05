@@ -117,3 +117,30 @@ func wireRepoService(ctx context.Context, cfg *config.Config) (*app.RepoService,
 	svc := app.NewRepoService(d.db)
 	return svc, cleanup, nil
 }
+
+// serveServices holds all services wired from a single shared deps instance.
+type serveServices struct {
+	index   *app.IndexService
+	query   *app.QueryService
+	trace   *app.TraceService
+	blast   *app.BlastService
+	repo    *app.RepoService
+	cleanup func()
+}
+
+// wireServeServices builds all services from one shared deps instance so the
+// serve command opens only a single SurrealDB connection.
+func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices, error) {
+	d, cleanup, err := wireDeps(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &serveServices{
+		index:   app.NewIndexService(d.walker, d.parser, d.embedder, d.db, cfg),
+		query:   app.NewQueryService(d.embedder, d.db.AsVectorIndex(), d.db.AsTextIndex(), d.db, d.explainer, cfg),
+		trace:   app.NewTraceService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg),
+		blast:   app.NewBlastService(d.db, d.explainer, cfg),
+		repo:    app.NewRepoService(d.db),
+		cleanup: cleanup,
+	}, nil
+}

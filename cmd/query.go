@@ -14,7 +14,7 @@ var queryCmd = &cobra.Command{
 	Short: "Semantic code search",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := config.Load(configPath(cmd))
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}

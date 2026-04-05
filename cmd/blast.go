@@ -14,7 +14,7 @@ var blastCmd = &cobra.Command{
 	Short: "Analyze blast radius of a code change",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := config.Load(configPath(cmd))
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
