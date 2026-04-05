@@ -118,27 +118,40 @@ func buildExplainPrompt(req domain.ExplainRequest) string {
 	var sb strings.Builder
 
 	// --- System preamble ---
-	sb.WriteString("You are commit0, an expert code analyst. ")
+	sb.WriteString("You are commit0, a senior software engineer and code intelligence agent. ")
+	sb.WriteString("You analyze codebases deeply — understanding not just what the code does, ")
+	sb.WriteString("but why it exists, how it fits into the architecture, and what a developer ")
+	sb.WriteString("needs to know to work with it effectively.\n\n")
+	sb.WriteString("Your audience is experienced engineers who need actionable insights, not tutorials. ")
+	sb.WriteString("Be direct, technically precise, and opinionated when the code warrants it. ")
+	sb.WriteString("Reference specific files, functions, and line numbers.\n\n")
+
 	switch req.QueryType {
 	case "search":
-		sb.WriteString("Answer the developer's question using the code excerpts below.\n")
-		sb.WriteString("Start with a short '## Overview' section (2-3 sentences) that directly answers the question.\n")
-		sb.WriteString("Then provide details with file paths and line ranges where relevant.\n")
-		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
+		sb.WriteString("Answer the developer's question using the code excerpts and graph context below.\n")
+		sb.WriteString("- Lead with a direct answer in 2-3 sentences under '## Overview'.\n")
+		sb.WriteString("- Then provide supporting evidence: relevant code paths, signatures, and architectural context.\n")
+		sb.WriteString("- Highlight call relationships and data flow when they clarify behavior.\n")
+		sb.WriteString("- Note design decisions or trade-offs if they are relevant to the question.\n")
+		sb.WriteString("- Do NOT end with a summary, conclusion, or offer to help further.\n\n")
 	case "trace":
-		sb.WriteString("Explain the call chain shown in the code excerpts below.\n")
-		sb.WriteString("Start with a short '## Overview' section (2-3 sentences) summarizing the call flow.\n")
-		sb.WriteString("Then walk through each hop in execution order.\n")
-		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
+		sb.WriteString("Explain the execution flow shown in the code excerpts below.\n")
+		sb.WriteString("- Start with '## Overview' (2-3 sentences) summarizing the call chain end-to-end.\n")
+		sb.WriteString("- Walk through each hop in execution order, explaining what it does and why control flows there.\n")
+		sb.WriteString("- Note where data is transformed, validated, or persisted along the path.\n")
+		sb.WriteString("- Call out branching points, error handling, and side effects.\n")
+		sb.WriteString("- Do NOT end with a summary, conclusion, or offer to help further.\n\n")
 	case "blast":
-		sb.WriteString("Describe the blast radius of the change indicated by the code excerpts below.\n")
-		sb.WriteString("Start with a short '## Overview' section (2-3 sentences) on the impact scope.\n")
-		sb.WriteString("Then list affected components and suggest safe migration steps.\n")
-		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
+		sb.WriteString("Assess the blast radius of the change indicated by the code excerpts below.\n")
+		sb.WriteString("- Start with '## Overview' (2-3 sentences) on impact scope and severity.\n")
+		sb.WriteString("- Organize affected components by distance: direct callers → transitive dependents.\n")
+		sb.WriteString("- For each affected area, explain what could break and how.\n")
+		sb.WriteString("- Suggest a safe migration order if the change is non-trivial.\n")
+		sb.WriteString("- Do NOT end with a summary, conclusion, or offer to help further.\n\n")
 	default:
 		sb.WriteString("Analyze the code excerpts below and answer the developer's question.\n")
-		sb.WriteString("Start with a short '## Overview' section, then provide details.\n")
-		sb.WriteString("Do NOT end with a summary or conclusion section.\n\n")
+		sb.WriteString("- Start with '## Overview', then provide details with file references.\n")
+		sb.WriteString("- Do NOT end with a summary, conclusion, or offer to help further.\n\n")
 	}
 
 	// --- User question ---
@@ -150,16 +163,16 @@ func buildExplainPrompt(req domain.ExplainRequest) string {
 	if len(req.CodeContext) > 0 {
 		sb.WriteString("## Relevant Code\n")
 		for _, exc := range req.CodeContext {
-			sb.WriteString(fmt.Sprintf("### %s\n", exc.Qualified))
+			fmt.Fprintf(&sb, "### %s\n", exc.Qualified)
 			if exc.FilePath != "" {
 				if exc.Lines != "" {
-					sb.WriteString(fmt.Sprintf("*File:* `%s` *Lines:* %s\n", exc.FilePath, exc.Lines))
+					fmt.Fprintf(&sb, "*File:* `%s` *Lines:* %s\n", exc.FilePath, exc.Lines)
 				} else {
-					sb.WriteString(fmt.Sprintf("*File:* `%s`\n", exc.FilePath))
+					fmt.Fprintf(&sb, "*File:* `%s`\n", exc.FilePath)
 				}
 			}
 			if exc.Score > 0 {
-				sb.WriteString(fmt.Sprintf("*Relevance score:* %.3f\n", exc.Score))
+				fmt.Fprintf(&sb, "*Relevance score:* %.3f\n", exc.Score)
 			}
 			if exc.Snippet != "" {
 				sb.WriteString("```\n")

@@ -10,6 +10,13 @@ import (
 )
 
 // ContextBuilder constructs embedding-ready context text from code nodes.
+//
+// Output follows the Gemini Embedding 2 document format:
+//
+//	title: [KIND] {Qualified} | text: {structured description}\n---\n{body}
+//
+// The embedder does NOT prepend an additional prefix — this builder produces
+// the complete text sent to the embedding API.
 type ContextBuilder struct {
 	store        domain.GraphStore
 	maxBodyRunes int
@@ -64,16 +71,20 @@ func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNo
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("task: search result | query: [FUNCTION] %s\n", node.Qualified))
-	sb.WriteString(fmt.Sprintf("Language: %s  File: %s:%d-%d\n", node.Language, node.FilePath, node.StartLine, node.EndLine))
+	fmt.Fprintf(&sb, "title: [FUNCTION] %s | text: ", node.Qualified)
+	fmt.Fprintf(&sb, "%s function defined in %s, lines %d–%d.", node.Language, node.FilePath, node.StartLine, node.EndLine)
 	if node.Signature != "" {
-		sb.WriteString(fmt.Sprintf("Signature: %s\n", node.Signature))
+		fmt.Fprintf(&sb, " Signature: %s.", node.Signature)
 	}
+	if node.Docstring != "" {
+		fmt.Fprintf(&sb, " %s.", node.Docstring)
+	}
+	sb.WriteByte('\n')
 	if len(nb.Callees) > 0 {
-		sb.WriteString(fmt.Sprintf("Calls: %s\n", strings.Join(neighborSigs(nb.Callees), ", ")))
+		fmt.Fprintf(&sb, "Calls: %s\n", strings.Join(neighborSigs(nb.Callees), ", "))
 	}
 	if len(nb.Callers) > 0 {
-		sb.WriteString(fmt.Sprintf("Called by: %s\n", strings.Join(neighborSigs(nb.Callers), ", ")))
+		fmt.Fprintf(&sb, "Called by: %s\n", strings.Join(neighborSigs(nb.Callers), ", "))
 	}
 	if len(nb.DataSinks) > 0 {
 		parts := make([]string, 0, len(nb.DataSinks))
@@ -86,7 +97,7 @@ func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNo
 			}
 			parts = append(parts, part)
 		}
-		sb.WriteString(fmt.Sprintf("Data flows to: %s\n", strings.Join(parts, ", ")))
+		fmt.Fprintf(&sb, "Data flows to: %s\n", strings.Join(parts, ", "))
 	}
 	if len(nb.DataSources) > 0 {
 		parts := make([]string, 0, len(nb.DataSources))
@@ -97,16 +108,13 @@ func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNo
 			}
 			parts = append(parts, part)
 		}
-		sb.WriteString(fmt.Sprintf("Data flows from: %s\n", strings.Join(parts, ", ")))
+		fmt.Fprintf(&sb, "Data flows from: %s\n", strings.Join(parts, ", "))
 	}
 	if len(nb.Reads) > 0 {
-		sb.WriteString(fmt.Sprintf("Reads: %s\n", strings.Join(nb.Reads, ", ")))
+		fmt.Fprintf(&sb, "Reads fields: %s\n", strings.Join(nb.Reads, ", "))
 	}
 	if len(nb.Writes) > 0 {
-		sb.WriteString(fmt.Sprintf("Writes: %s\n", strings.Join(nb.Writes, ", ")))
-	}
-	if node.Docstring != "" {
-		sb.WriteString(fmt.Sprintf("Doc: %s\n", node.Docstring))
+		fmt.Fprintf(&sb, "Writes fields: %s\n", strings.Join(nb.Writes, ", "))
 	}
 	sb.WriteString("---\n")
 	sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
@@ -122,17 +130,18 @@ func (cb *ContextBuilder) forClassCtx(ctx context.Context, node *types.CodeNode)
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("task: search result | query: [CLASS] %s\n", node.Qualified))
-	sb.WriteString(fmt.Sprintf("Language: %s  File: %s\n", node.Language, node.FilePath))
+	fmt.Fprintf(&sb, "title: [CLASS] %s | text: ", node.Qualified)
+	fmt.Fprintf(&sb, "%s type defined in %s.", node.Language, node.FilePath)
+	if node.Docstring != "" {
+		fmt.Fprintf(&sb, " %s.", node.Docstring)
+	}
+	sb.WriteByte('\n')
 	// Callers for a class node are functions that call its methods (uses edges).
 	if len(nb.Callers) > 0 {
-		sb.WriteString(fmt.Sprintf("Used by: %s\n", strings.Join(neighborNames(nb.Callers), ", ")))
+		fmt.Fprintf(&sb, "Used by: %s\n", strings.Join(neighborNames(nb.Callers), ", "))
 	}
 	if len(nb.Callees) > 0 {
-		sb.WriteString(fmt.Sprintf("Calls: %s\n", strings.Join(neighborNames(nb.Callees), ", ")))
-	}
-	if node.Docstring != "" {
-		sb.WriteString(fmt.Sprintf("Doc: %s\n", node.Docstring))
+		fmt.Fprintf(&sb, "Calls: %s\n", strings.Join(neighborNames(nb.Callees), ", "))
 	}
 	sb.WriteString("---\n")
 	classBodyLimit := min(2048, cb.maxBodyRunes)
@@ -148,13 +157,14 @@ func (cb *ContextBuilder) forFileCtx(ctx context.Context, node *types.CodeNode) 
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("task: search result | query: [FILE] %s\n", node.FilePath))
-	sb.WriteString(fmt.Sprintf("Language: %s\n", node.Language))
+	fmt.Fprintf(&sb, "title: [FILE] %s | text: ", node.FilePath)
+	fmt.Fprintf(&sb, "%s source file.", node.Language)
+	sb.WriteByte('\n')
 	if len(nb.Callees) > 0 {
-		sb.WriteString(fmt.Sprintf("Imports: %s\n", strings.Join(neighborNames(nb.Callees), ", ")))
+		fmt.Fprintf(&sb, "Imports: %s\n", strings.Join(neighborNames(nb.Callees), ", "))
 	}
 	if len(nb.Callers) > 0 {
-		sb.WriteString(fmt.Sprintf("Defines: %s\n", strings.Join(neighborNames(nb.Callers), ", ")))
+		fmt.Fprintf(&sb, "Defines: %s\n", strings.Join(neighborNames(nb.Callers), ", "))
 	}
 	sb.WriteString("---\n")
 	fileBodyLimit := min(4096, cb.maxBodyRunes)
@@ -167,16 +177,16 @@ func (cb *ContextBuilder) forModuleCtx(ctx context.Context, node *types.CodeNode
 	nb, _ := cb.store.GetNeighborhood(ctx, node.ID)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("task: search result | query: [MODULE] %s\n", node.Name))
-	sb.WriteString(fmt.Sprintf("Import path: %s\n", node.Qualified))
-	sb.WriteString(fmt.Sprintf("Language: %s\n", node.Language))
+	fmt.Fprintf(&sb, "title: [MODULE] %s | text: ", node.Name)
+	fmt.Fprintf(&sb, "External %s package imported as %q.", node.Language, node.Qualified)
 	if node.Docstring != "" {
-		sb.WriteString(fmt.Sprintf("Version: %s\n", node.Docstring))
+		fmt.Fprintf(&sb, " Version: %s.", node.Docstring)
 	}
+	sb.WriteByte('\n')
 	if nb != nil && len(nb.Callers) > 0 {
-		sb.WriteString(fmt.Sprintf("Imported by: %s\n", strings.Join(neighborNames(nb.Callers), ", ")))
+		fmt.Fprintf(&sb, "Imported by: %s\n", strings.Join(neighborNames(nb.Callers), ", "))
 	}
-	sb.WriteString(fmt.Sprintf("Module dependency used in the codebase. Package %s provides functionality imported via \"%s\".\n", node.Name, node.Qualified))
+	fmt.Fprintf(&sb, "Package %s provides functionality imported via %q.\n", node.Name, node.Qualified)
 	return sb.String()
 }
 
@@ -205,7 +215,8 @@ func neighborNames(nodes []domain.NeighborNode) []string {
 	return out
 }
 
-// ForNode generates embedding input text from a code node.
+// ForNode generates embedding input text from a code node, formatted for the
+// Gemini Embedding 2 document convention: title: {title} | text: {description}.
 func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 	if node == nil {
 		return ""
@@ -215,24 +226,24 @@ func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 
 	switch node.Kind {
 	case types.NodeFunction:
-		sb.WriteString(fmt.Sprintf("task: search result | query: [FUNCTION] %s\n", node.Qualified))
-		sb.WriteString(fmt.Sprintf("Language: %s  File: %s:%d-%d\n", node.Language, node.FilePath, node.StartLine, node.EndLine))
+		fmt.Fprintf(&sb, "title: [FUNCTION] %s | text: ", node.Qualified)
+		fmt.Fprintf(&sb, "%s function defined in %s, lines %d–%d.", node.Language, node.FilePath, node.StartLine, node.EndLine)
 		if node.Signature != "" {
-			sb.WriteString(fmt.Sprintf("Signature: %s\n", node.Signature))
+			fmt.Fprintf(&sb, " Signature: %s.", node.Signature)
 		}
 		if node.Docstring != "" {
-			sb.WriteString(fmt.Sprintf("Doc: %s\n", node.Docstring))
+			fmt.Fprintf(&sb, " %s.", node.Docstring)
 		}
-		sb.WriteString("---\n")
+		sb.WriteString("\n---\n")
 		sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
 
 	case types.NodeClass:
-		sb.WriteString(fmt.Sprintf("task: search result | query: [CLASS] %s\n", node.Qualified))
-		sb.WriteString(fmt.Sprintf("Language: %s  File: %s\n", node.Language, node.FilePath))
+		fmt.Fprintf(&sb, "title: [CLASS] %s | text: ", node.Qualified)
+		fmt.Fprintf(&sb, "%s type defined in %s.", node.Language, node.FilePath)
 		if node.Docstring != "" {
-			sb.WriteString(fmt.Sprintf("Doc: %s\n", node.Docstring))
+			fmt.Fprintf(&sb, " %s.", node.Docstring)
 		}
-		sb.WriteString("---\n")
+		sb.WriteString("\n---\n")
 		// Cap class bodies at 2048 runes (512 tokens equivalent)
 		classBodyLimit := 2048
 		if cb.maxBodyRunes < classBodyLimit {
@@ -241,9 +252,9 @@ func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 		sb.WriteString(cb.truncate(node.Body, classBodyLimit))
 
 	case types.NodeFile:
-		sb.WriteString(fmt.Sprintf("task: search result | query: [FILE] %s\n", node.FilePath))
-		sb.WriteString(fmt.Sprintf("Language: %s\n", node.Language))
-		sb.WriteString("---\n")
+		fmt.Fprintf(&sb, "title: [FILE] %s | text: ", node.FilePath)
+		fmt.Fprintf(&sb, "%s source file.", node.Language)
+		sb.WriteString("\n---\n")
 		// Cap file bodies at 4096 runes
 		fileBodyLimit := 4096
 		if cb.maxBodyRunes < fileBodyLimit {
@@ -252,26 +263,26 @@ func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 		sb.WriteString(cb.truncate(node.Body, fileBodyLimit))
 
 	case types.NodeModule:
-		sb.WriteString(fmt.Sprintf("task: search result | query: [MODULE] %s\n", node.Name))
-		sb.WriteString(fmt.Sprintf("Import path: %s\n", node.Qualified))
-		sb.WriteString(fmt.Sprintf("Language: %s\n", node.Language))
+		fmt.Fprintf(&sb, "title: [MODULE] %s | text: ", node.Name)
+		fmt.Fprintf(&sb, "External %s package imported as %q.", node.Language, node.Qualified)
 		if node.Docstring != "" {
-			sb.WriteString(fmt.Sprintf("Version: %s\n", node.Docstring))
+			fmt.Fprintf(&sb, " Version: %s.", node.Docstring)
 		}
-		sb.WriteString(fmt.Sprintf("Module dependency used in the codebase. Package %s provides functionality imported via \"%s\".\n", node.Name, node.Qualified))
+		sb.WriteByte('\n')
+		fmt.Fprintf(&sb, "Package %s provides functionality imported via %q.\n", node.Name, node.Qualified)
 
 	default:
-		// Unknown kind - just use prefix + body
-		sb.WriteString("task: search result | query: ")
+		sb.WriteString("title: code | text: ")
 		sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
 	}
 
 	return sb.String()
 }
 
-// ForQuery generates embedding input text for a user query.
+// ForQuery generates embedding input text for a user query using the
+// Gemini Embedding 2 code-retrieval task prefix.
 func (cb *ContextBuilder) ForQuery(question string) string {
-	return fmt.Sprintf("task: search query | query: %s", question)
+	return "task: code retrieval | query: " + question
 }
 
 // truncate safely truncates a string to maxRunes runes, counting Unicode properly.

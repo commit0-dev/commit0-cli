@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"strings"
 )
@@ -44,20 +43,3 @@ func dim(s string) string    { return colorize(ansiDim, s) }
 func gray(s string) string   { return colorize(ansiGray, s) }
 func yellow(s string) string { return colorize(ansiYellow, s) }
 func cyan(s string) string   { return colorize(ansiCyan, s) }
-
-// kindBadge returns a colored [KIND] badge based on the node kind string.
-func kindBadge(kind string) string {
-	badge := fmt.Sprintf("[%s]", kind)
-	switch kind {
-	case "FUNCTION", "METHOD":
-		return colorize(ansiBold+ansiCyan, badge)
-	case "CLASS", "INTERFACE", "STRUCT":
-		return colorize(ansiBold+ansiMagenta, badge)
-	case "MODULE":
-		return colorize(ansiBold+ansiMagenta, badge)
-	case "FILE":
-		return colorize(ansiBold+ansiGreen, badge)
-	default:
-		return colorize(ansiBold+ansiCyan, badge)
-	}
-}

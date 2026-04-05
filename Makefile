@@ -57,7 +57,7 @@ test-cover:
 	@COVERAGE=$$(go tool cover -func=coverage.out \
 		| grep -E "^total:" | awk '{print $$3}' | tr -d '%'); \
 	echo "Coverage: $${COVERAGE}%"; \
-	awk "BEGIN{exit !($${COVERAGE} < 98)}" || \
+	awk "BEGIN{exit ($${COVERAGE} < 98)}" || \
 		{ echo "FAIL: coverage $${COVERAGE}% < 98%"; exit 1; }; \
 	echo "PASS: $${COVERAGE}% >= 98%"
 

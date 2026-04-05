@@ -54,8 +54,8 @@ Use `HNSW` (not `MTREE`), `COMPUTED` (not `<future>`), `LET $var`, `type::record
 
 ## Gemini Embedding 2
 
-- Index prefix: `"task: search result | query: {content}"`
-- Query prefix: `"task: search query | query: {user_question}"`
+- **Index (documents):** `"title: [KIND] {Qualified} | text: {description}"` — produced by `ContextBuilder`, sent as-is to `EmbedBatch` (no prefix added by the embedder).
+- **Query:** `"task: code retrieval | query: {user_question}"` — prepended by `GeminiEmbedder.EmbedQuery`.
 - SDK: `google.golang.org/genai` → `client.Models.EmbedContent(ctx, "gemini-embedding-2-preview", ...)`
 
 ## Custom Skills

@@ -81,7 +81,7 @@ var queryCmd = &cobra.Command{
 				name = n.Qualified
 				location = fmt.Sprintf("%s:%d", n.FilePath, n.StartLine)
 			}
-			tbl.Append([]string{
+			tbl.Append([]string{ //nolint:errcheck
 				fmt.Sprintf("%d", i+1),
 				kind,
 				name,

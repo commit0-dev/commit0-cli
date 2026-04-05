@@ -25,17 +25,14 @@ func TestContextBuilderForFunction(t *testing.T) {
 
 	result := cb.ForNode(node)
 
-	if !strings.Contains(result, "task: search result | query: [FUNCTION]") {
-		t.Errorf("result missing task prefix")
+	if !strings.Contains(result, "title: [FUNCTION] pkg.Handler | text:") {
+		t.Errorf("result missing title prefix, got: %q", result)
 	}
-	if !strings.Contains(result, "pkg.Handler") {
-		t.Errorf("result missing qualified name")
+	if !strings.Contains(result, "go function defined in main.go") {
+		t.Errorf("result missing natural language description")
 	}
-	if !strings.Contains(result, "go") {
-		t.Errorf("result missing language")
-	}
-	if !strings.Contains(result, "main.go:10-20") {
-		t.Errorf("result missing file path and line numbers")
+	if !strings.Contains(result, "lines 10") {
+		t.Errorf("result missing line numbers")
 	}
 	if !strings.Contains(result, "Signature:") {
 		t.Errorf("result missing signature")
@@ -60,12 +57,9 @@ func TestContextBuilderForFunctionNoSignatureNoDoc(t *testing.T) {
 	if !strings.Contains(result, "[FUNCTION]") {
 		t.Errorf("result missing [FUNCTION] prefix")
 	}
-	// No Signature and no Docstring → those lines should be absent
+	// No Signature and no Docstring → those phrases should be absent
 	if strings.Contains(result, "Signature:") {
-		t.Errorf("result should not have Signature: line when signature is empty")
-	}
-	if strings.Contains(result, "Doc:") {
-		t.Errorf("result should not have Doc: line when docstring is empty")
+		t.Errorf("result should not have Signature: when signature is empty")
 	}
 }
 
@@ -82,11 +76,11 @@ func TestContextBuilderForClass(t *testing.T) {
 
 	result := cb.ForNode(node)
 
-	if !strings.Contains(result, "[CLASS]") {
-		t.Errorf("result missing [CLASS] prefix")
+	if !strings.Contains(result, "title: [CLASS] pkg.User | text:") {
+		t.Errorf("result missing title prefix")
 	}
-	if !strings.Contains(result, "pkg.User") {
-		t.Errorf("result missing qualified name")
+	if !strings.Contains(result, "python type defined in models.py") {
+		t.Errorf("result missing natural language description")
 	}
 	if !strings.Contains(result, "User class") {
 		t.Errorf("result missing docstring")
@@ -121,11 +115,11 @@ func TestContextBuilderForFile(t *testing.T) {
 
 	result := cb.ForNode(node)
 
-	if !strings.Contains(result, "[FILE]") {
-		t.Errorf("result missing [FILE] prefix")
+	if !strings.Contains(result, "title: [FILE] main.go | text:") {
+		t.Errorf("result missing title prefix")
 	}
-	if !strings.Contains(result, "main.go") {
-		t.Errorf("result missing file path")
+	if !strings.Contains(result, "go source file") {
+		t.Errorf("result missing natural language description")
 	}
 }
 
@@ -149,29 +143,33 @@ func TestContextBuilderForFileSmallBodyLimit(t *testing.T) {
 func TestContextBuilderForModule(t *testing.T) {
 	cb := NewContextBuilder(1000)
 	node := &types.CodeNode{
-		Kind:     types.NodeModule,
-		Name:     "utils",
-		FilePath: "utils/",
-		Body:     "module content",
+		Kind:      types.NodeModule,
+		Name:      "utils",
+		Qualified: "github.com/org/utils",
+		Language:  "go",
+		FilePath:  "utils/",
+		Body:      "module content",
 	}
 
 	result := cb.ForNode(node)
 
-	if !strings.Contains(result, "[MODULE]") {
-		t.Errorf("result missing [MODULE] prefix")
+	if !strings.Contains(result, "title: [MODULE] utils | text:") {
+		t.Errorf("result missing title prefix")
 	}
-	if !strings.Contains(result, "utils") {
-		t.Errorf("result missing module name")
+	if !strings.Contains(result, "External go package") {
+		t.Errorf("result missing natural language description")
 	}
 }
 
 func TestContextBuilderForModuleNoBody(t *testing.T) {
 	cb := NewContextBuilder(1000)
 	node := &types.CodeNode{
-		Kind:     types.NodeModule,
-		Name:     "empty-module",
-		FilePath: "empty/",
-		Body:     "", // no body
+		Kind:      types.NodeModule,
+		Name:      "empty-module",
+		Qualified: "empty",
+		Language:  "go",
+		FilePath:  "empty/",
+		Body:      "", // no body
 	}
 
 	result := cb.ForNode(node)
@@ -179,9 +177,9 @@ func TestContextBuilderForModuleNoBody(t *testing.T) {
 	if !strings.Contains(result, "[MODULE]") {
 		t.Errorf("result missing [MODULE] prefix")
 	}
-	// No body → no "---" separator
+	// Module format doesn't use "---" separator
 	if strings.Contains(result, "---") {
-		t.Errorf("result should not have separator for empty module body")
+		t.Errorf("result should not have separator for module")
 	}
 }
 
@@ -195,8 +193,8 @@ func TestContextBuilderForDefaultKind(t *testing.T) {
 
 	result := cb.ForNode(node)
 
-	if !strings.Contains(result, "task: search result | query: ") {
-		t.Errorf("default kind should still have task prefix, got: %q", result)
+	if !strings.Contains(result, "title: code | text:") {
+		t.Errorf("default kind should have title: code prefix, got: %q", result)
 	}
 	if !strings.Contains(result, "some content") {
 		t.Errorf("default kind result should contain body")
@@ -207,8 +205,8 @@ func TestContextBuilderForQuery(t *testing.T) {
 	cb := NewContextBuilder(1000)
 	result := cb.ForQuery("where is the error handler?")
 
-	if !strings.Contains(result, "task: search query | query:") {
-		t.Errorf("result missing query task prefix")
+	if !strings.Contains(result, "task: code retrieval | query:") {
+		t.Errorf("result missing code retrieval task prefix")
 	}
 
 	if !strings.Contains(result, "where is the error handler?") {
@@ -261,9 +259,10 @@ func TestContextBuilderEmptyDocstring(t *testing.T) {
 
 	result := cb.ForNode(node)
 
-	// Should not have "Doc:" line if docstring is empty
-	if strings.Contains(result, "Doc:") && !strings.Contains(result, "Doc: \n") {
-		t.Errorf("result should not have Doc: line for empty docstring")
+	// The docstring text should not appear in the output
+	// (no trailing ". ." or empty sentence from empty docstring)
+	if strings.Count(result, "..") > 0 {
+		t.Errorf("result should not have double dots for empty docstring")
 	}
 }
 
@@ -442,10 +441,10 @@ func TestContextBuilderForNodeCtxSignatureAndDocstring(t *testing.T) {
 	result := cb.ForNodeCtx(context.Background(), node)
 
 	if !strings.Contains(result, "Signature:") {
-		t.Error("ForNodeCtx should include Signature line when set")
+		t.Error("ForNodeCtx should include Signature when set")
 	}
-	if !strings.Contains(result, "Doc:") {
-		t.Error("ForNodeCtx should include Doc line when set")
+	if !strings.Contains(result, "F does something") {
+		t.Error("ForNodeCtx should include docstring when set")
 	}
 	if !strings.Contains(result, "pkg.G") {
 		t.Error("ForNodeCtx should include neighbor qualified name")
@@ -491,11 +490,11 @@ func TestContextBuilderForNodeCtxDataFlow(t *testing.T) {
 	if !strings.Contains(result, `via "req.User"`) {
 		t.Error("expected arg expr in source")
 	}
-	if !strings.Contains(result, "Reads: User.Email") {
-		t.Error("expected Reads: line")
+	if !strings.Contains(result, "Reads fields: User.Email") {
+		t.Error("expected Reads fields: line")
 	}
-	if !strings.Contains(result, "Writes: User.UpdatedAt") {
-		t.Error("expected Writes: line")
+	if !strings.Contains(result, "Writes fields: User.UpdatedAt") {
+		t.Error("expected Writes fields: line")
 	}
 }
 
@@ -582,7 +581,7 @@ func TestContextBuilderForNodeCtxModuleKind(t *testing.T) {
 		t.Error("expected module name")
 	}
 	if !strings.Contains(result, "Version:") {
-		t.Error("expected Version: line from Docstring")
+		t.Error("expected Version: from Docstring")
 	}
 	if !strings.Contains(result, "Imported by:") {
 		t.Error("expected Imported by: line")
@@ -610,9 +609,9 @@ func TestContextBuilderForNodeCtxModuleNoDocstring(t *testing.T) {
 	if !strings.Contains(result, "[MODULE]") {
 		t.Error("expected [MODULE] prefix")
 	}
-	// No docstring → no Version: line
+	// No docstring → no Version: phrase
 	if strings.Contains(result, "Version:") {
-		t.Error("should not have Version: line when docstring is empty")
+		t.Error("should not have Version: when docstring is empty")
 	}
 	// Empty callers → no Imported by: line
 	if strings.Contains(result, "Imported by:") {
