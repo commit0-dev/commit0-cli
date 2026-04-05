@@ -47,16 +47,57 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Full suite: race detector + correctness across all packages.
       - name: Run unit tests
         run: go test -race -count=1 -timeout=5m ./...
 
-      - name: Upload coverage
+      # Coverage pass: scoped to internal/app where the 99.8 % threshold applies.
+      # Adapters (surreal, gemini) require live external services and are tested
+      # via the integration build tag — they are intentionally excluded here.
+      - name: Measure coverage (internal/app)
+        run: |
+          go test -count=1 -timeout=5m \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            -coverpkg=./internal/app/... \
+            ./internal/app/...
+
+      - name: Enforce 99.8 % coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out \
+            | grep -E "^total:" | awk '{print $3}' | tr -d '%')
+          echo "coverage=${COVERAGE}" >> "$GITHUB_ENV"
+          THRESHOLD=99.8
+          if awk "BEGIN{exit !($COVERAGE < $THRESHOLD)}"; then
+            echo "::error::Coverage ${COVERAGE}% is below the required ${THRESHOLD}%"
+            exit 1
+          fi
+          echo "Coverage ${COVERAGE}% >= ${THRESHOLD}% ✓"
+
+      - name: Write coverage summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage report — \`internal/app\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Total** | **${coverage}%** |"
+            echo "| Threshold | 99.8% |"
+            echo ""
+            echo "### Per-function breakdown"
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage
-          path: coverage*.out
-          retention-days: 7
+          path: coverage.out
+          retention-days: 14
 
   # ── GoReleaser: validate config + linux snapshot build ────────────────────
   # Uses goreleaser-action on ubuntu-latest with arm64 cross-compiler.

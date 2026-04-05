@@ -1,4 +1,5 @@
 **/*.out
+coverage.*
 
 .DS_Store
 
