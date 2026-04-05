@@ -1,0 +1,26 @@
+# ko configuration — https://ko.build/configuration/
+#
+# FOR STANDALONE ko USE ONLY (e.g. local dev: ko build .).
+# Production container images are built by GoReleaser via the `kos` section
+# in .goreleaser.yaml, which does not read this file.
+#
+# CGO note: smacker/go-tree-sitter embeds tree-sitter C sources and requires
+# CGO_ENABLED=1. The resulting binary is dynamically linked against glibc, so
+# we use distroless/cc (contains glibc + libgcc) instead of distroless/static.
+#
+# Version injection: set VERSION and COMMIT env vars before running ko build.
+# ko substitutes {{.Env.X}} in ldflags at build time.
+defaultBaseImage: gcr.io/distroless/cc-debian12
+
+builds:
+  - id: commit0
+    main: .
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.version={{.Env.VERSION}}
+      - -X main.commit={{.Env.COMMIT}}

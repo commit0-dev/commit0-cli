@@ -14,7 +14,8 @@
       "Bash(grep -h \"^func New\" /Volumes/DATA/Coding/commit0/commit0/internal/app/*.go)",
       "Read(//private/tmp/**)",
       "Bash(go list:*)",
-      "Bash(ls /Volumes/DATA/Coding/commit0/commit0/internal/adapters/surreal/*_test.go)"
+      "Bash(ls /Volumes/DATA/Coding/commit0/commit0/internal/adapters/surreal/*_test.go)",
+      "Read(//Users/thomas.nguyen/.claude/plugins/marketplaces/claude-code-skills/engineering/ci-cd-pipeline-builder/**)"
     ]
   }
 }
