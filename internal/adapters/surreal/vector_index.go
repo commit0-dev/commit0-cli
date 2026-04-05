@@ -121,8 +121,8 @@ SELECT %s,
     vector::distance::knn() AS vec_dist
 FROM %s
 WHERE embedding <|%d,%d|> $q
-  AND repo = type::record($repo_ref);`, cols, escaped, topK, effort)
-		params["repo_ref"] = fmt.Sprintf("repo:%s", repoSlug)
+  AND repo = $repo_ref;`, cols, escaped, topK, effort)
+		params["repo_ref"] = models.NewRecordID("repo", repoSlug)
 	} else {
 		q = fmt.Sprintf(`
 SELECT %s,

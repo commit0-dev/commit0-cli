@@ -68,6 +68,25 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	startTime := time.Now()
 	run := &indexRun{}
 
+	// Force re-index: cascade-delete all existing nodes via the repo record so
+	// stale records (functions/files removed from the codebase) don't persist.
+	if req.Force {
+		if err := is.store.DeleteNodesByRepo(ctx, req.RepoSlug); err != nil {
+			return nil, fmt.Errorf("delete existing nodes: %w", err)
+		}
+		is.log.Info("deleted existing nodes", "repo", req.RepoSlug)
+	}
+
+	// Ensure the repo record exists — nodes reference it via record<repo>.
+	// Must run after the force delete so the repo is recreated if it was wiped.
+	if err := is.store.UpsertRepo(ctx, &types.Repo{
+		Slug:      req.RepoSlug,
+		Path:      req.RepoPath,
+		Languages: []string{},
+	}); err != nil {
+		return nil, fmt.Errorf("upsert repo: %w", err)
+	}
+
 	// Stage 1: Walk filesystem
 	is.log.Info("starting walk", "repo", req.RepoSlug, "path", req.RepoPath)
 	fileCh, walkErrCh := is.walker.Walk(ctx, req.RepoPath, domain.WalkOpts{

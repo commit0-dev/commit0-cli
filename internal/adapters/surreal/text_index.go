@@ -121,10 +121,10 @@ func (a *SurrealAdapter) ftsSearchTable(
 SELECT %s,
     search::score(1) AS fts_score
 FROM %s
-WHERE (%s) AND repo = type::record($repo_ref)
+WHERE (%s) AND repo = $repo_ref
 ORDER BY fts_score DESC
 LIMIT $topk;`, cols, escaped, whereClause)
-		params["repo_ref"] = fmt.Sprintf("repo:%s", repoSlug)
+		params["repo_ref"] = models.NewRecordID("repo", repoSlug)
 	} else {
 		q = fmt.Sprintf(`
 SELECT %s,

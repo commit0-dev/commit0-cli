@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -50,34 +48,36 @@ var queryCmd = &cobra.Command{
 			return fmt.Errorf("query: %w", err)
 		}
 
-		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			fmt.Printf(bold("Found %d results")+" %s\n\n",
-				len(result.Nodes), gray(fmt.Sprintf("(%dms)", result.Timing.TotalMS)))
-			for i, node := range result.Nodes {
-				n := node.Node
-				switch n.Kind {
-				case types.NodeModule:
-					version := ""
-					if n.Docstring != "" {
-						version = " " + n.Docstring
-					}
-					fmt.Printf("%s %s %s\n   %s\n\n",
-						gray(fmt.Sprintf("%d.", i+1)),
-						kindBadge("MODULE"),
-						bold(n.Name+version),
-						gray(fmt.Sprintf("import %q  %s", n.Qualified, yellow(fmt.Sprintf("%.3f", node.FusedScore)))))
-				default:
-					label := strings.ToUpper(string(n.Kind))
-					fmt.Printf("%s %s %s %s\n   %s\n\n",
-						gray(fmt.Sprintf("%d.", i+1)),
-						kindBadge(label),
-						bold(n.Qualified),
-						yellow(fmt.Sprintf("%.3f", node.FusedScore)),
-						gray(fmt.Sprintf("%s:%d", n.FilePath, n.StartLine)))
+		fmt.Printf(bold("Found %d results")+" %s\n\n",
+			len(result.Nodes), gray(fmt.Sprintf("embed:%dms search:%dms explain:%dms",
+				result.Timing.EmbedMS, result.Timing.SearchMS, result.Timing.ExplainMS)))
+
+		for i, node := range result.Nodes {
+			n := node.Node
+			switch n.Kind {
+			case types.NodeModule:
+				version := ""
+				if n.Docstring != "" {
+					version = " " + n.Docstring
 				}
+				fmt.Printf("%s %s %s\n   %s\n\n",
+					gray(fmt.Sprintf("%d.", i+1)),
+					kindBadge("MODULE"),
+					bold(n.Name+version),
+					gray(fmt.Sprintf("import %q  score:%s", n.Qualified, yellow(fmt.Sprintf("%.3f", node.FusedScore)))))
+			default:
+				label := strings.ToUpper(string(n.Kind))
+				fmt.Printf("%s %s %s %s\n   %s\n\n",
+					gray(fmt.Sprintf("%d.", i+1)),
+					kindBadge(label),
+					bold(n.Qualified),
+					yellow(fmt.Sprintf("%.3f", node.FusedScore)),
+					gray(fmt.Sprintf("%s:%d", n.FilePath, n.StartLine)))
 			}
 		}
+
 		if result.Explanation != "" {
+			fmt.Println(cyan("─────────────────────────────────────"))
 			fmt.Println(result.Explanation)
 		}
 		return nil

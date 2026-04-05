@@ -59,10 +59,13 @@ Examples:
 
 		fmt.Printf("Indexing %s as %q...\n", repoPath, repoSlug)
 
+		force, _ := cmd.Flags().GetBool("force")
+
 		result, err := svc.Index(cmd.Context(), app.IndexRequest{
 			RepoPath:  repoPath,
 			RepoSlug:  repoSlug,
 			Languages: languages,
+			Force:     force,
 		})
 		if err != nil {
 			return fmt.Errorf("index: %w", err)
@@ -77,4 +80,5 @@ Examples:
 func init() {
 	rootCmd.AddCommand(indexCmd)
 	indexCmd.Flags().String("languages", "", "Comma-separated list of languages to index (e.g. go,python)")
+	indexCmd.Flags().Bool("force", false, "Delete existing nodes before indexing (removes stale data)")
 }

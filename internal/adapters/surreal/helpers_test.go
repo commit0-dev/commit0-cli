@@ -298,13 +298,13 @@ func TestNodeParams_FullNode(t *testing.T) {
 	if params["start_line"] != 10 {
 		t.Errorf("params[start_line] = %v; want 10", params["start_line"])
 	}
-	repoRef, _ := params["repo_ref"].(string)
-	if !strings.Contains(repoRef, "myrepo") {
-		t.Errorf("params[repo_ref] = %q; want it to contain 'myrepo'", repoRef)
+	repoRef, _ := params["repo_ref"].(models.RecordID)
+	if repoRef.Table != "repo" || repoRef.ID != "myrepo" {
+		t.Errorf("params[repo_ref] = %v; want repo:myrepo", repoRef)
 	}
-	fileRef, _ := params["file_ref"].(string)
-	if !strings.Contains(fileRef, "pkg/handler.go") {
-		t.Errorf("params[file_ref] = %q; want it to contain 'pkg/handler.go'", fileRef)
+	fileRef, _ := params["file_ref"].(models.RecordID)
+	if fileRef.Table != "file" || fileRef.ID != "pkg/handler.go" {
+		t.Errorf("params[file_ref] = %v; want file:pkg/handler.go", fileRef)
 	}
 }
 
@@ -404,9 +404,9 @@ func TestEdgeParams_Basic(t *testing.T) {
 	if params["call_type"] != "direct" {
 		t.Errorf("params[call_type] = %v; want 'direct'", params["call_type"])
 	}
-	repoRef, _ := params["repo_ref"].(string)
-	if !strings.Contains(repoRef, "myrepo") {
-		t.Errorf("params[repo_ref] = %q; want it to contain 'myrepo'", repoRef)
+	repoRef, _ := params["repo_ref"].(models.RecordID)
+	if repoRef.Table != "repo" || repoRef.ID != "myrepo" {
+		t.Errorf("params[repo_ref] = %v; want repo:myrepo", repoRef)
 	}
 }
 

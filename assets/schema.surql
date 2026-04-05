@@ -16,11 +16,13 @@ DEFINE FIELD OVERWRITE slug            ON repo TYPE string ASSERT string::len($v
 DEFINE FIELD OVERWRITE path            ON repo TYPE string;
 DEFINE FIELD OVERWRITE remote_url      ON repo TYPE option<string>;
 DEFINE FIELD OVERWRITE default_branch  ON repo TYPE string VALUE "main";
-DEFINE FIELD OVERWRITE languages       ON repo TYPE set<string>;
+DEFINE FIELD OVERWRITE languages       ON repo TYPE array<string>;
 DEFINE FIELD OVERWRITE last_commit     ON repo TYPE option<string>;
 DEFINE FIELD OVERWRITE last_indexed_at ON repo TYPE option<datetime>;
-DEFINE FIELD OVERWRITE stats           ON repo TYPE object
-    VALUE { files: 0, functions: 0, classes: 0, modules: 0, edges: 0 };
+
+-- Remove legacy stats object (OVERWRITE does not drop old field definitions).
+REMOVE FIELD IF EXISTS stats ON repo;
+UPDATE repo UNSET stats;
 
 DEFINE FIELD OVERWRITE is_stale ON repo COMPUTED
     last_indexed_at IS NONE OR time::now() - last_indexed_at > 24h;
@@ -32,6 +34,8 @@ DEFINE INDEX OVERWRITE repo_slug_idx ON repo FIELDS slug UNIQUE;
 DEFINE TABLE OVERWRITE file SCHEMAFULL CHANGEFEED 7d;
 
 DEFINE FIELD OVERWRITE path         ON file TYPE string;
+DEFINE FIELD OVERWRITE file_path    ON file TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON file TYPE string;
 DEFINE FIELD OVERWRITE repo         ON file TYPE record<repo> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD OVERWRITE language     ON file TYPE string;
 DEFINE FIELD OVERWRITE content_hash ON file TYPE string;
@@ -111,6 +115,8 @@ DEFINE TABLE OVERWRITE module SCHEMAFULL CHANGEFEED 7d;
 
 DEFINE FIELD OVERWRITE name       ON module TYPE string;
 DEFINE FIELD OVERWRITE path       ON module TYPE string;
+DEFINE FIELD OVERWRITE file_path  ON module TYPE string;
+DEFINE FIELD OVERWRITE repo_slug  ON module TYPE string;
 DEFINE FIELD OVERWRITE repo       ON module TYPE record<repo> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD OVERWRITE language   ON module TYPE string;
 DEFINE FIELD OVERWRITE docstring  ON module TYPE option<string>;

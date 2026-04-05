@@ -84,13 +84,14 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		localID = node.Qualified
 	}
 
-	// Build file and repo record IDs as param strings so SurrealQL can
-	// cast them to the correct record<...> type inside the query.
-	repoRef := fmt.Sprintf("repo:%s", node.RepoSlug)
-	fileRef := fmt.Sprintf("file:%s", node.FilePath)
+	// Pass repo/file as typed models.RecordID objects so the Go SDK serialises
+	// them via CBOR correctly — especially when slugs or paths contain '/' which
+	// type::record(string) may mis-parse as a division operator.
+	repoRef := models.NewRecordID("repo", node.RepoSlug)
+	fileRef := models.NewRecordID("file", node.FilePath)
 
 	// SurrealDB 3.0 strict mode: option<T> fields need NONE (not NULL)
-	// when the value is absent. The Go SDK's models.None serializes correctly.
+	// when the value is absent. The Go SDK's models.None serialises correctly.
 	var embedding any = models.None
 	if len(node.Embedding) > 0 {
 		embedding = node.Embedding
@@ -140,8 +141,8 @@ UPSERT type::record($record_id) CONTENT {
     qualified:    $qualified,
     file_path:    $file_path,
     repo_slug:    $repo_slug,
-    file:         type::record($file_ref),
-    repo:         type::record($repo_ref),
+    file:         $file_ref,
+    repo:         $repo_ref,
     language:     $language,
     start_line:   $start_line,
     end_line:     $end_line,
@@ -159,8 +160,8 @@ UPSERT type::record($record_id) CONTENT {
     qualified:    $qualified,
     file_path:    $file_path,
     repo_slug:    $repo_slug,
-    file:         type::record($file_ref),
-    repo:         type::record($repo_ref),
+    file:         $file_ref,
+    repo:         $repo_ref,
     language:     $language,
     start_line:   $start_line,
     end_line:     $end_line,
@@ -172,7 +173,9 @@ UPSERT type::record($record_id) CONTENT {
 		return `
 UPSERT type::record($record_id) CONTENT {
     path:         $file_path,
-    repo:         type::record($repo_ref),
+    file_path:    $file_path,
+    repo_slug:    $repo_slug,
+    repo:         $repo_ref,
     language:     $language,
     content_hash: $content_hash,
     embedding:    $embedding
@@ -182,7 +185,9 @@ UPSERT type::record($record_id) CONTENT {
 UPSERT type::record($record_id) CONTENT {
     name:      $name,
     path:      $file_path,
-    repo:      type::record($repo_ref),
+    file_path: $file_path,
+    repo_slug: $repo_slug,
+    repo:      $repo_ref,
     language:  $language,
     docstring: $docstring,
     embedding: $embedding
@@ -200,7 +205,7 @@ RELATE $from->calls->$to CONTENT {
     call_site:  $call_site,
     is_dynamic: $is_dynamic,
     call_type:  $call_type,
-    repo:       type::record($repo_ref)
+    repo:       $repo_ref
 };`
 	case types.EdgeImports:
 		return `
@@ -225,19 +230,19 @@ RELATE $from->data_flow->$to CONTENT {
     param_name: $param_name,
     arg_expr:   $arg_expr,
     arg_type:   $arg_type,
-    repo:       type::record($repo_ref)
+    repo:       $repo_ref
 };`
 	case types.EdgeReads:
 		return `
 RELATE $from->reads->$to CONTENT {
     field_name: $field_name,
-    repo:       type::record($repo_ref)
+    repo:       $repo_ref
 };`
 	case types.EdgeWrites:
 		return `
 RELATE $from->writes->$to CONTENT {
     field_name: $field_name,
-    repo:       type::record($repo_ref)
+    repo:       $repo_ref
 };`
 	}
 	return ""
@@ -282,7 +287,7 @@ func edgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
 		"call_site":    edge.CallSite,
 		"is_dynamic":   edge.IsDynamic,
 		"call_type":    callType,
-		"repo_ref":     fmt.Sprintf("repo:%s", repoSlug),
+		"repo_ref":     models.NewRecordID("repo", repoSlug),
 		"inherit_kind": inheritKind,
 		"usage_type":   usageType,
 		"param_name":   paramName,
@@ -371,12 +376,12 @@ func (a *SurrealAdapter) GetNode(ctx context.Context, id string) (*types.CodeNod
 func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified string) (*types.CodeNode, error) {
 	// Try each node table in priority order.
 	tables := []string{"function", "class", "module", "file"}
-	const q = `SELECT * FROM $table WHERE repo = type::record($repo_ref) AND qualified = $qualified LIMIT 1;`
+	const q = `SELECT * FROM $table WHERE repo = $repo_ref AND qualified = $qualified LIMIT 1;`
 
 	for _, table := range tables {
 		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, map[string]any{
 			"table":     models.Table(table),
-			"repo_ref":  fmt.Sprintf("repo:%s", repo),
+			"repo_ref":  models.NewRecordID("repo", repo),
 			"qualified": qualified,
 		})
 		if err != nil {
@@ -408,16 +413,15 @@ func (a *SurrealAdapter) DeleteNode(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteNodesByRepo removes all nodes (all tables) that belong to a repo.
+// DeleteNodesByRepo removes all nodes (all tables) that belong to a repo by
+// deleting the repo record — all node tables declare
+// `repo TYPE record<repo> REFERENCE ON DELETE CASCADE`, so the DB cascades the
+// delete to every function, class, file, and module in one round-trip. The repo
+// record is then re-created by UpsertRepo on the next indexing run.
 func (a *SurrealAdapter) DeleteNodesByRepo(ctx context.Context, repo string) error {
-	const q = `
-DELETE FROM ` + "`function`" + ` WHERE repo = type::record($repo_ref);
-DELETE FROM class     WHERE repo = type::record($repo_ref);
-DELETE FROM file      WHERE repo = type::record($repo_ref);
-DELETE FROM module    WHERE repo = type::record($repo_ref);`
-
+	const q = `DELETE type::record($repo_id);`
 	results, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
-		"repo_ref": fmt.Sprintf("repo:%s", repo),
+		"repo_id": models.NewRecordID("repo", repo),
 	})
 	if err != nil {
 		return fmt.Errorf("delete nodes for repo %s: %w", repo, err)
@@ -866,12 +870,12 @@ func (a *SurrealAdapter) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 	// separately to avoid UNION ALL cross-statement parsing issues in SurrealDB.
 	tables := []string{"`function`", "class", "file", "module"}
 	params := map[string]any{
-		"repo_ref": fmt.Sprintf("repo:%s", repoSlug),
+		"repo_ref": models.NewRecordID("repo", repoSlug),
 	}
 
 	var ids []string
 	for _, table := range tables {
-		q := fmt.Sprintf("SELECT id FROM %s WHERE repo = type::record($repo_ref);", table)
+		q := fmt.Sprintf("SELECT id FROM %s WHERE repo = $repo_ref;", table)
 		results, err := surrealdb.Query[[]idRow](ctx, a.db, q, params)
 		if err != nil {
 			return nil, fmt.Errorf("list node ids %s [%s]: %w", repoSlug, table, err)
@@ -962,15 +966,26 @@ UPSERT type::record($id) CONTENT {
     last_indexed_at: $last_indexed_at
 };`
 
+	// option<datetime> fields must be NONE (not NULL) when absent.
+	var lastIndexedAt any = models.None
+	if repo.LastIndexedAt != nil {
+		lastIndexedAt = repo.LastIndexedAt
+	}
+	// array<string> must not be nil — use empty slice.
+	languages := repo.Languages
+	if languages == nil {
+		languages = []string{}
+	}
+
 	results, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
 		"id":              models.NewRecordID("repo", repo.Slug),
 		"slug":            repo.Slug,
 		"path":            repo.Path,
 		"remote_url":      repo.RemoteURL,
 		"default_branch":  repo.DefaultBranch,
-		"languages":       repo.Languages,
+		"languages":       languages,
 		"last_commit":     repo.LastCommit,
-		"last_indexed_at": repo.LastIndexedAt,
+		"last_indexed_at": lastIndexedAt,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert repo %s: %w", repo.Slug, err)

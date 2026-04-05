@@ -33,10 +33,13 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("surreal: %w", err)
 	}
 
-	// Apply schema DDL (idempotent — safe to call on every startup).
-	if err := db.ApplySchema(ctx); err != nil {
-		db.Close(ctx)
-		return nil, nil, fmt.Errorf("apply schema: %w", err)
+	// Apply schema DDL only when the stored version is behind the binary version.
+	currentVersion, err := db.GetSchemaVersion(ctx)
+	if err != nil || currentVersion < surreal.SchemaVersion() {
+		if err := db.ApplySchema(ctx); err != nil {
+			db.Close(ctx)
+			return nil, nil, fmt.Errorf("apply schema: %w", err)
+		}
 	}
 
 	// 2. Shared Gemini client
