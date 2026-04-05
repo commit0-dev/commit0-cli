@@ -1,7 +1,15 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # commit0 — Claude Coding Guide
 
 > Graph-based source code analyzer with conversational query and blast radius analysis.
 > Single Go binary. SurrealDB 3.0 (graph + vector + FTS). Gemini Embedding 2. tree-sitter.
+
+## Project Status
+
+**Pre-implementation phase**: Architecture and domain design complete. No Go code yet. Start with `go mod init` and scaffold the directory layout per the Directory Layout section below.
 
 ## Quick Reference
 
@@ -118,9 +126,31 @@ Task instruction prefix (not enum-based):
 - Gemini: `google.golang.org/genai` (unified Google AI Go SDK)
 - tree-sitter: `github.com/smacker/go-tree-sitter`
 
+## Development Setup
+
+Before implementing, ensure:
+- Go 1.22+ installed
+- `go mod init github.com/yourorg/commit0` (or appropriate module path)
+- SurrealDB 3.0 available (local or remote)
+- Gemini API key exported as `GEMINI_API_KEY`
+- tree-sitter C libraries (installed via Homebrew on macOS: `brew install tree-sitter`)
+
+Create `internal/domain/ports.go` first—it's the contract that all adapters implement.
+
+## Custom Skills
+
+Project-specific Claude Code skills are in `.claude/skills/`:
+- `commit0-go` — Go conventions and module scaffolding
+- `commit0-surrealdb` — Schema design patterns and SurrealDB 3.0 specifics
+- `commit0-treesitter` — Parser integration and language-specific handling
+- `commit0-gemini` — Embedding and LLM prompt patterns
+
+Load these with `/read .claude/skills/<skill>/SKILL.md` for implementation guidance.
+
 ## Build & Run
 
 ```bash
+# Not yet available — scaffold cmd/ first
 go build -o commit0 .
 ./commit0 db start
 ./commit0 index ./my-project
@@ -135,3 +165,9 @@ go build -o commit0 .
 - Domain/app layer: unit tests with in-memory stubs for all ports
 - Adapters: integration tests requiring running SurrealDB + Gemini API key
 - Use `_ domain.GraphStore = (*SurrealAdapter)(nil)` compile-time interface checks
+
+## Further Reading
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — High-level vision and architecture diagram
+- [docs/BACKEND.md](docs/BACKEND.md) — Service layer, adapter implementations, concurrency patterns
+- [docs/DATABASE.md](docs/DATABASE.md) — SurrealDB 3.0 schema, indexes, and query patterns
