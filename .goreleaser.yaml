@@ -5,8 +5,8 @@
 # Darwin cross-compilation uses osxcross tools (o64-clang / oa64-clang)
 # available inside ghcr.io/goreleaser/goreleaser-cross.
 #
-# Container images are built via the kos section using the ko build library
-# embedded in goreleaser — no separate ko CLI installation is required.
+# Container images are built separately via Dockerfile + docker/build-push-action
+# (see .github/workflows/ci.yml and release.yml).
 version: 2
 
 project_name: commit0
@@ -63,36 +63,6 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-
-# ── Container images via ko ───────────────────────────────────────────────────
-# Ko's build library is embedded in goreleaser — no ko CLI required.
-# Base image: distroless/cc-debian12 carries glibc + libgcc for the CGO binary.
-# CC_linux_arm64 tells ko which cross-compiler to use for the arm64 platform build.
-kos:
-  - id: commit0
-    build: linux
-    repositories:
-      - ghcr.io/{{.Env.GITHUB_REPOSITORY_OWNER}}/commit0
-    base_image: gcr.io/distroless/cc-debian12
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    tags:
-      - "{{.Version}}"
-      - "{{.Major}}.{{.Minor}}"
-      - latest
-    bare: true
-    sbom: none
-    env:
-      - CGO_ENABLED=1
-      - CC_linux_arm64=aarch64-linux-gnu-gcc
-    flags:
-      - -trimpath
-    ldflags:
-      - -s
-      - -w
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
 

@@ -1,0 +1,57 @@
+name: commit0
+
+# Profiles
+#   (default)    surreal only — use this when developing the binary locally
+#   --profile app  full stack: surreal + commit0 (uses ghcr.io/commit0-dev/commit0:edge)
+#
+# Usage:
+#   docker compose up -d              # start SurrealDB only
+#   docker compose --profile app up -d  # start full stack
+#
+# Copy .env.example to .env and set GEMINI_API_KEY before starting.
+
+services:
+
+  # ── SurrealDB 3.0 ─────────────────────────────────────────────────────────
+  surreal:
+    image: surrealdb/surrealdb:v3
+    restart: unless-stopped
+    command: >
+      start
+        --bind 0.0.0.0:8000
+        --user ${SURREAL_USER:-root}
+        --pass ${SURREAL_PASS:-root}
+        surrealkv:///data
+    ports:
+      - "${SURREAL_PORT:-8000}:8000"
+    volumes:
+      - surreal_data:/data
+    healthcheck:
+      test: ["CMD", "surreal", "isready", "--conn", "http://localhost:8000"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ── commit0 binary (full-stack profile) ───────────────────────────────────
+  commit0:
+    image: ghcr.io/commit0-dev/commit0:edge
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Override the URL to reach the compose-internal surreal service.
+      SURREAL_URL: ws://surreal:8000
+      SURREAL_USER: ${SURREAL_USER:-root}
+      SURREAL_PASS: ${SURREAL_PASS:-root}
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    depends_on:
+      surreal:
+        condition: service_healthy
+    profiles:
+      - app
+
+volumes:
+  surreal_data:
