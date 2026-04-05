@@ -43,6 +43,10 @@ func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) 
 	switch node.Kind {
 	case types.NodeFunction:
 		return cb.forFunctionCtx(ctx, node)
+	case types.NodeClass:
+		return cb.forClassCtx(ctx, node)
+	case types.NodeFile:
+		return cb.forFileCtx(ctx, node)
 	case types.NodeModule:
 		return cb.forModuleCtx(ctx, node)
 	default:
@@ -50,12 +54,12 @@ func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) 
 	}
 }
 
-// forFunctionCtx enriches a function node with call-graph neighbors.
+// forFunctionCtx enriches a function node using GetNeighborhood — a single
+// round-trip that returns callers, callees (with signatures), and data-flow
+// sources/sinks. Falls back to ForNode if the neighborhood is empty.
 func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNode) string {
-	callees, _ := cb.store.TraceForward(ctx, node.ID, 1)
-	callers, _ := cb.store.TraceReverse(ctx, node.ID, 1)
-
-	if len(callees) == 0 && len(callers) == 0 {
+	nb, err := cb.store.GetNeighborhood(ctx, node.ID)
+	if err != nil || nb == nil || nb.IsEmpty() {
 		return cb.ForNode(node)
 	}
 
@@ -65,13 +69,41 @@ func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNo
 	if node.Signature != "" {
 		sb.WriteString(fmt.Sprintf("Signature: %s\n", node.Signature))
 	}
-	if len(callees) > 0 {
-		names := hopNames(callees)
-		sb.WriteString(fmt.Sprintf("Calls: %s\n", strings.Join(names, ", ")))
+	if len(nb.Callees) > 0 {
+		sb.WriteString(fmt.Sprintf("Calls: %s\n", strings.Join(neighborSigs(nb.Callees), ", ")))
 	}
-	if len(callers) > 0 {
-		names := hopNames(callers)
-		sb.WriteString(fmt.Sprintf("Called by: %s\n", strings.Join(names, ", ")))
+	if len(nb.Callers) > 0 {
+		sb.WriteString(fmt.Sprintf("Called by: %s\n", strings.Join(neighborSigs(nb.Callers), ", ")))
+	}
+	if len(nb.DataSinks) > 0 {
+		parts := make([]string, 0, len(nb.DataSinks))
+		for _, s := range nb.DataSinks {
+			part := s.Qualified
+			if s.ParamName != "" {
+				part += fmt.Sprintf(" (param %q)", s.ParamName)
+			} else if s.ArgExpr != "" {
+				part += fmt.Sprintf(" (arg %q)", s.ArgExpr)
+			}
+			parts = append(parts, part)
+		}
+		sb.WriteString(fmt.Sprintf("Data flows to: %s\n", strings.Join(parts, ", ")))
+	}
+	if len(nb.DataSources) > 0 {
+		parts := make([]string, 0, len(nb.DataSources))
+		for _, s := range nb.DataSources {
+			part := s.Qualified
+			if s.ArgExpr != "" {
+				part += fmt.Sprintf(" via %q", s.ArgExpr)
+			}
+			parts = append(parts, part)
+		}
+		sb.WriteString(fmt.Sprintf("Data flows from: %s\n", strings.Join(parts, ", ")))
+	}
+	if len(nb.Reads) > 0 {
+		sb.WriteString(fmt.Sprintf("Reads: %s\n", strings.Join(nb.Reads, ", ")))
+	}
+	if len(nb.Writes) > 0 {
+		sb.WriteString(fmt.Sprintf("Writes: %s\n", strings.Join(nb.Writes, ", ")))
 	}
 	if node.Docstring != "" {
 		sb.WriteString(fmt.Sprintf("Doc: %s\n", node.Docstring))
@@ -81,9 +113,58 @@ func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNo
 	return sb.String()
 }
 
+// forClassCtx enriches a class/struct node with its methods, inheritance chain,
+// and which functions use it.
+func (cb *ContextBuilder) forClassCtx(ctx context.Context, node *types.CodeNode) string {
+	nb, err := cb.store.GetNeighborhood(ctx, node.ID)
+	if err != nil || nb == nil || nb.IsEmpty() {
+		return cb.ForNode(node)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("task: search result | query: [CLASS] %s\n", node.Qualified))
+	sb.WriteString(fmt.Sprintf("Language: %s  File: %s\n", node.Language, node.FilePath))
+	// Callers for a class node are functions that call its methods (uses edges).
+	if len(nb.Callers) > 0 {
+		sb.WriteString(fmt.Sprintf("Used by: %s\n", strings.Join(neighborNames(nb.Callers), ", ")))
+	}
+	if len(nb.Callees) > 0 {
+		sb.WriteString(fmt.Sprintf("Calls: %s\n", strings.Join(neighborNames(nb.Callees), ", ")))
+	}
+	if node.Docstring != "" {
+		sb.WriteString(fmt.Sprintf("Doc: %s\n", node.Docstring))
+	}
+	sb.WriteString("---\n")
+	classBodyLimit := min(2048, cb.maxBodyRunes)
+	sb.WriteString(cb.truncate(node.Body, classBodyLimit))
+	return sb.String()
+}
+
+// forFileCtx enriches a file node with its import modules and defined symbols.
+func (cb *ContextBuilder) forFileCtx(ctx context.Context, node *types.CodeNode) string {
+	nb, err := cb.store.GetNeighborhood(ctx, node.ID)
+	if err != nil || nb == nil || nb.IsEmpty() {
+		return cb.ForNode(node)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("task: search result | query: [FILE] %s\n", node.FilePath))
+	sb.WriteString(fmt.Sprintf("Language: %s\n", node.Language))
+	if len(nb.Callees) > 0 {
+		sb.WriteString(fmt.Sprintf("Imports: %s\n", strings.Join(neighborNames(nb.Callees), ", ")))
+	}
+	if len(nb.Callers) > 0 {
+		sb.WriteString(fmt.Sprintf("Defines: %s\n", strings.Join(neighborNames(nb.Callers), ", ")))
+	}
+	sb.WriteString("---\n")
+	fileBodyLimit := min(4096, cb.maxBodyRunes)
+	sb.WriteString(cb.truncate(node.Body, fileBodyLimit))
+	return sb.String()
+}
+
 // forModuleCtx enriches a module node with its importers (reverse imports).
 func (cb *ContextBuilder) forModuleCtx(ctx context.Context, node *types.CodeNode) string {
-	importers, _ := cb.store.TraceReverse(ctx, node.ID, 1)
+	nb, _ := cb.store.GetNeighborhood(ctx, node.ID)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("task: search result | query: [MODULE] %s\n", node.Name))
@@ -92,23 +173,36 @@ func (cb *ContextBuilder) forModuleCtx(ctx context.Context, node *types.CodeNode
 	if node.Docstring != "" {
 		sb.WriteString(fmt.Sprintf("Version: %s\n", node.Docstring))
 	}
-	if len(importers) > 0 {
-		names := hopNames(importers)
-		sb.WriteString(fmt.Sprintf("Imported by: %s\n", strings.Join(names, ", ")))
+	if nb != nil && len(nb.Callers) > 0 {
+		sb.WriteString(fmt.Sprintf("Imported by: %s\n", strings.Join(neighborNames(nb.Callers), ", ")))
 	}
 	sb.WriteString(fmt.Sprintf("Module dependency used in the codebase. Package %s provides functionality imported via \"%s\".\n", node.Name, node.Qualified))
 	return sb.String()
 }
 
-// hopNames extracts the qualified names from the first level of TraceHops.
-func hopNames(hops []types.TraceHop) []string {
-	names := make([]string, 0, len(hops))
-	for _, h := range hops {
-		if h.Node.Qualified != "" {
-			names = append(names, h.Node.Qualified)
+// neighborSigs formats neighbors as "Qualified(Signature)" when a signature is
+// available, falling back to qualified name only.
+func neighborSigs(nodes []domain.NeighborNode) []string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Signature != "" {
+			out = append(out, fmt.Sprintf("%s %s", n.Qualified, n.Signature))
+		} else {
+			out = append(out, n.Qualified)
 		}
 	}
-	return names
+	return out
+}
+
+// neighborNames returns just the qualified names.
+func neighborNames(nodes []domain.NeighborNode) []string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Qualified != "" {
+			out = append(out, n.Qualified)
+		}
+	}
+	return out
 }
 
 // ForNode generates embedding input text from a code node.

@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the version number written to the schema_version table
 // by the DDL in schema.surql. Bump this when the schema changes.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // ApplySchema executes the embedded schema.surql DDL against SurrealDB.
 // All DEFINE … IF NOT EXISTS statements are idempotent, so this is safe

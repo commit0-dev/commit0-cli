@@ -40,8 +40,9 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 	// We track the "current scope" qualified name so call edges can reference it.
 	// Because BFS mixes levels, we use a simple stack instead.
 	type frame struct {
-		node      *sitter.Node
-		scopeQual string // qualified name of the function/method we are inside
+		node        *sitter.Node
+		scopeQual   string // qualified name of the function/method we are inside
+		isLHSAssign bool   // true when inside the left side of an assignment
 	}
 
 	queue := []frame{{node: root, scopeQual: ""}}
@@ -98,16 +99,58 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 		// ── call_expression ────────────────────────────────────────────────
 		case "call_expression":
 			if scope != "" {
-				e := extractGoCall(n, src, file.Path, scope)
-				if e != nil {
-					edges = append(edges, *e)
+				callEdge := extractGoCall(n, src, file.Path, scope)
+				if callEdge != nil {
+					edges = append(edges, *callEdge)
+					// Emit data-flow edges for non-trivial arguments.
+					edges = append(edges, extractGoDataFlow(n, src, file.Path, scope)...)
+				}
+			}
+
+		// ── assignment / short-var — track LHS for read/write classification ─
+		case "assignment_statement", "short_var_declaration":
+			leftNode := n.ChildByFieldName("left")
+			for i := range int(n.ChildCount()) {
+				child := n.Child(i)
+				isLHS := leftNode != nil && child == leftNode
+				queue = append(queue, frame{node: child, scopeQual: scope, isLHSAssign: isLHS})
+			}
+			continue
+
+		// ── selector_expression — field reads and writes ───────────────────
+		case "selector_expression":
+			if scope != "" {
+				// Skip selectors that are the callee of a call_expression —
+				// those represent method dispatch, not data access.
+				if p := n.Parent(); p != nil && p.Type() == "call_expression" {
+					if fn := p.ChildByFieldName("function"); fn == n {
+						break
+					}
+				}
+				operandN := n.ChildByFieldName("operand")
+				fieldN := n.ChildByFieldName("field")
+				if operandN != nil && fieldN != nil {
+					operandText := nodeText(operandN, src)
+					fieldText := nodeText(fieldN, src)
+					qualField := operandText + "." + fieldText
+					kind := types.EdgeReads
+					if f.isLHSAssign {
+						kind = types.EdgeWrites
+					}
+					edges = append(edges, types.CodeEdge{
+						Kind:     kind,
+						FromID:   makeNodeID(string(types.NodeFunction), scope),
+						ToID:     makeNodeID(string(types.NodeClass), operandText),
+						CallSite: fmt.Sprintf("%s:%d", file.Path, n.StartPoint().Row+1),
+						Metadata: map[string]string{"field": qualField},
+					})
 				}
 			}
 		}
 
-		// Default: enqueue all children with current scope.
-		for i := 0; i < int(n.ChildCount()); i++ {
-			queue = append(queue, frame{node: n.Child(i), scopeQual: scope})
+		// Default: enqueue all children, propagating both scope and LHS context.
+		for i := range int(n.ChildCount()) {
+			queue = append(queue, frame{node: n.Child(i), scopeQual: scope, isLHSAssign: f.isLHSAssign})
 		}
 	}
 
@@ -278,6 +321,61 @@ func extractGoCall(n *sitter.Node, src []byte, filePath, scopeQual string) *type
 	}
 }
 
+// extractGoDataFlow emits EdgeDataFlow edges for each non-literal argument
+// passed at a call site. param_name is left empty because callee parameter
+// names require cross-file resolution; arg_expr carries the source expression.
+func extractGoDataFlow(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
+	fnNode := n.ChildByFieldName("function")
+	argsNode := n.ChildByFieldName("arguments")
+	if fnNode == nil || argsNode == nil {
+		return nil
+	}
+	callee := strings.TrimSpace(nodeText(fnNode, src))
+	if callee == "" {
+		return nil
+	}
+
+	fromID := makeNodeID(string(types.NodeFunction), scopeQual)
+	callSite := fmt.Sprintf("%s:%d", filePath, n.StartPoint().Row+1)
+
+	var edges []types.CodeEdge
+	for i := range int(argsNode.ChildCount()) {
+		arg := argsNode.Child(i)
+		// Skip punctuation tokens.
+		if t := arg.Type(); t == "," || t == "(" || t == ")" {
+			continue
+		}
+		// Skip plain literals — they carry no meaningful data-flow information.
+		if isGoLiteral(arg) {
+			continue
+		}
+		argText := strings.TrimSpace(nodeText(arg, src))
+		if argText == "" {
+			continue
+		}
+		edges = append(edges, types.CodeEdge{
+			Kind:     types.EdgeDataFlow,
+			FromID:   fromID,
+			ToID:     callee,
+			CallSite: callSite,
+			Metadata: map[string]string{"arg_expr": argText},
+		})
+	}
+	return edges
+}
+
+// isGoLiteral reports whether a node is a compile-time constant (integer,
+// float, string, bool, nil). Data-flow edges for literals are not useful.
+func isGoLiteral(n *sitter.Node) bool {
+	switch n.Type() {
+	case "int_literal", "float_literal", "imaginary_literal",
+		"rune_literal", "interpreted_string_literal", "raw_string_literal",
+		"true", "false", "nil":
+		return true
+	}
+	return false
+}
+
 // detectGoCallType inspects parent nodes to classify the call.
 func detectGoCallType(n *sitter.Node) string {
 	p := n.Parent()
@@ -392,9 +490,6 @@ func nodeText(n *sitter.Node, src []byte) string {
 		return ""
 	}
 	start := n.StartByte()
-	end := n.EndByte()
-	if end > uint32(len(src)) {
-		end = uint32(len(src))
-	}
+	end := min(n.EndByte(), uint32(len(src)))
 	return string(src[start:end])
 }

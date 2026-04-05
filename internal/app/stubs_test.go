@@ -10,19 +10,22 @@ import (
 // Stub implementations for testing
 
 type stubGraphStore struct {
-	traceErr       error
-	err            error
-	deleteNodesErr error
-	upsertRepoErr  error
-	listReposErr   error
-	blastRadiusErr error
-	upsertBatchErr error
-	nodesByQ       map[string]*types.CodeNode
-	repos          map[string]*types.Repo
-	nodes          map[string]*types.CodeNode
-	upsertBatchFn  func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
-	traceHops      []types.TraceHop
-	affected       []types.AffectedNode
+	traceErr        error
+	err             error
+	deleteNodesErr  error
+	upsertRepoErr   error
+	listReposErr    error
+	blastRadiusErr  error
+	upsertBatchErr  error
+	nodesByQ        map[string]*types.CodeNode
+	repos           map[string]*types.Repo
+	nodes           map[string]*types.CodeNode
+	upsertBatchFn   func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
+	traceHops       []types.TraceHop
+	affected        []types.AffectedNode
+	neighborhood    *domain.Neighborhood
+	dataFlowHops    []types.TraceHop
+	nodeIDs         []string
 }
 
 func newStubGraphStore() *stubGraphStore {
@@ -173,6 +176,33 @@ func (s *stubGraphStore) ListRepos(ctx context.Context) ([]types.Repo, error) {
 		result = append(result, *r)
 	}
 	return result, nil
+}
+
+func (s *stubGraphStore) GetNeighborhood(ctx context.Context, nodeID string) (*domain.Neighborhood, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.neighborhood != nil {
+		return s.neighborhood, nil
+	}
+	return &domain.Neighborhood{}, nil
+}
+
+func (s *stubGraphStore) TraceDataFlow(ctx context.Context, startID string, depth int, direction string) ([]types.TraceHop, error) {
+	if s.traceErr != nil {
+		return nil, s.traceErr
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.dataFlowHops, nil
+}
+
+func (s *stubGraphStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.nodeIDs, nil
 }
 
 func (s *stubGraphStore) ApplySchema(ctx context.Context) error {

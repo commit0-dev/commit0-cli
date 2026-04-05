@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/commit0-dev/commit0/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
@@ -297,7 +298,7 @@ func TestContextBuilderWithStoreNilNode(t *testing.T) {
 }
 
 func TestContextBuilderWithStoreNonFunctionFallsBack(t *testing.T) {
-	// Non-function nodes skip graph enrichment and fall back to ForNode
+	// Class node with empty neighborhood falls back to ForNode.
 	store := newStubGraphStore()
 	cb := NewContextBuilderWithStore(1000, store)
 	node := &types.CodeNode{
@@ -305,10 +306,11 @@ func TestContextBuilderWithStoreNonFunctionFallsBack(t *testing.T) {
 		Qualified: "pkg.MyClass",
 		Language:  "go",
 		FilePath:  "pkg.go",
+		ID:        "class:pkg⋅MyClass",
 	}
 	result := cb.ForNodeCtx(context.Background(), node)
 	if !strings.Contains(result, "[CLASS]") {
-		t.Error("non-function ForNodeCtx should fall back to ForNode class output")
+		t.Error("class ForNodeCtx with empty neighborhood should fall back to ForNode class output")
 	}
 }
 
@@ -353,9 +355,9 @@ func TestContextBuilderForNodeCtxNoID(t *testing.T) {
 
 func TestContextBuilderForNodeCtxWithNeighborhood(t *testing.T) {
 	store := newStubGraphStore()
-	// Populate hop data: TraceForward returns one callee, TraceReverse one caller
-	store.traceHops = []types.TraceHop{
-		{Depth: 1, Node: types.CodeNode{ID: "function:pkg⋅G", Qualified: "pkg.G"}},
+	store.neighborhood = &domain.Neighborhood{
+		Callees: []domain.NeighborNode{{Qualified: "pkg.G", Signature: "(x int) error"}},
+		Callers: []domain.NeighborNode{{Qualified: "pkg.H"}},
 	}
 	cb := NewContextBuilderWithStore(1000, store)
 
@@ -370,18 +372,23 @@ func TestContextBuilderForNodeCtxWithNeighborhood(t *testing.T) {
 
 	result := cb.ForNodeCtx(context.Background(), node)
 
-	if !strings.Contains(result, "Calls:") && !strings.Contains(result, "Called by:") {
-		t.Error("ForNodeCtx with neighborhood should include Calls or Called-by lines")
+	if !strings.Contains(result, "Calls:") {
+		t.Error("ForNodeCtx with callees should include Calls: line")
+	}
+	if !strings.Contains(result, "Called by:") {
+		t.Error("ForNodeCtx with callers should include Called by: line")
 	}
 	if !strings.Contains(result, "pkg.G") {
-		t.Error("ForNodeCtx should include neighbor qualified name")
+		t.Error("ForNodeCtx should include callee qualified name")
+	}
+	if !strings.Contains(result, "pkg.H") {
+		t.Error("ForNodeCtx should include caller qualified name")
 	}
 }
 
 func TestContextBuilderForNodeCtxEmptyNeighborhood(t *testing.T) {
-	// Store returns no hops → falls back to ForNode output
-	store := newStubGraphStore()
-	store.traceHops = []types.TraceHop{} // empty
+	// Store returns empty neighborhood → falls back to ForNode output
+	store := newStubGraphStore() // neighborhood nil → stub returns &Neighborhood{}
 	cb := NewContextBuilderWithStore(1000, store)
 
 	node := &types.CodeNode{
@@ -416,8 +423,8 @@ func TestNewContextBuilderWithStore(t *testing.T) {
 func TestContextBuilderForNodeCtxSignatureAndDocstring(t *testing.T) {
 	// Covers the Signature and Docstring branches inside ForNodeCtx enrichment path
 	store := newStubGraphStore()
-	store.traceHops = []types.TraceHop{
-		{Depth: 1, Node: types.CodeNode{ID: "function:pkg⋅G", Qualified: "pkg.G"}},
+	store.neighborhood = &domain.Neighborhood{
+		Callees: []domain.NeighborNode{{Qualified: "pkg.G", Signature: "(x int) error"}},
 	}
 	cb := NewContextBuilderWithStore(1000, store)
 
@@ -442,5 +449,166 @@ func TestContextBuilderForNodeCtxSignatureAndDocstring(t *testing.T) {
 	}
 	if !strings.Contains(result, "pkg.G") {
 		t.Error("ForNodeCtx should include neighbor qualified name")
+	}
+}
+
+func TestContextBuilderForNodeCtxDataFlow(t *testing.T) {
+	store := newStubGraphStore()
+	store.neighborhood = &domain.Neighborhood{
+		DataSinks: []domain.NeighborNode{
+			{Qualified: "db.Save", ParamName: "user", ArgExpr: "u"},
+		},
+		DataSources: []domain.NeighborNode{
+			{Qualified: "api.Handler", ArgExpr: "req.User"},
+		},
+		Reads:  []string{"User.Email"},
+		Writes: []string{"User.UpdatedAt"},
+	}
+	cb := NewContextBuilderWithStore(1000, store)
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "svc.Update",
+		Language:  "go",
+		FilePath:  "svc.go",
+		ID:        "function:svc⋅Update",
+		Body:      "func Update() {}",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	if !strings.Contains(result, "Data flows to:") {
+		t.Error("expected Data flows to: line")
+	}
+	if !strings.Contains(result, "db.Save") {
+		t.Error("expected sink qualified name")
+	}
+	if !strings.Contains(result, `param "user"`) {
+		t.Error("expected param name in sink")
+	}
+	if !strings.Contains(result, "Data flows from:") {
+		t.Error("expected Data flows from: line")
+	}
+	if !strings.Contains(result, `via "req.User"`) {
+		t.Error("expected arg expr in source")
+	}
+	if !strings.Contains(result, "Reads: User.Email") {
+		t.Error("expected Reads: line")
+	}
+	if !strings.Contains(result, "Writes: User.UpdatedAt") {
+		t.Error("expected Writes: line")
+	}
+}
+
+func TestContextBuilderForClassCtxWithNeighborhood(t *testing.T) {
+	store := newStubGraphStore()
+	store.neighborhood = &domain.Neighborhood{
+		Callers: []domain.NeighborNode{{Qualified: "svc.UserService"}},
+	}
+	cb := NewContextBuilderWithStore(1000, store)
+	node := &types.CodeNode{
+		Kind:      types.NodeClass,
+		Qualified: "db.UserRepo",
+		Language:  "go",
+		FilePath:  "db/repo.go",
+		ID:        "class:db⋅UserRepo",
+		Docstring: "handles user persistence",
+		Body:      "type UserRepo struct {}",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	if !strings.Contains(result, "[CLASS]") {
+		t.Error("expected [CLASS] prefix")
+	}
+	if !strings.Contains(result, "Used by:") {
+		t.Error("expected Used by: line for class callers")
+	}
+	if !strings.Contains(result, "svc.UserService") {
+		t.Error("expected caller qualified name")
+	}
+}
+
+func TestContextBuilderForFileCtxWithNeighborhood(t *testing.T) {
+	store := newStubGraphStore()
+	store.neighborhood = &domain.Neighborhood{
+		Callees: []domain.NeighborNode{{Qualified: "fmt"}},
+		Callers: []domain.NeighborNode{{Qualified: "pkg.Handler"}},
+	}
+	cb := NewContextBuilderWithStore(1000, store)
+	node := &types.CodeNode{
+		Kind:     types.NodeFile,
+		FilePath: "handler.go",
+		Language: "go",
+		ID:       "file:handler.go",
+		Body:     "package handler",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	if !strings.Contains(result, "[FILE]") {
+		t.Error("expected [FILE] prefix")
+	}
+	if !strings.Contains(result, "Imports:") {
+		t.Error("expected Imports: line")
+	}
+	if !strings.Contains(result, "Defines:") {
+		t.Error("expected Defines: line")
+	}
+}
+
+// ── DataFlowService tests ────────────────────────────────────────────────────
+
+func TestDataFlowServiceBuildFlowContextEmpty(t *testing.T) {
+	store := newStubGraphStore()
+	svc := NewDataFlowService(store)
+	if got := svc.BuildFlowContext(context.Background(), nil); got != "" {
+		t.Errorf("BuildFlowContext(nil) = %q, want empty", got)
+	}
+	if got := svc.BuildFlowContext(context.Background(), []types.ScoredNode{}); got != "" {
+		t.Errorf("BuildFlowContext([]) = %q, want empty", got)
+	}
+}
+
+func TestDataFlowServiceBuildFlowContextNoID(t *testing.T) {
+	// Nodes without IDs are skipped; store has no neighborhood anyway.
+	store := newStubGraphStore()
+	svc := NewDataFlowService(store)
+	results := []types.ScoredNode{
+		{Node: types.CodeNode{Qualified: "pkg.F"}}, // ID is empty
+	}
+	if got := svc.BuildFlowContext(context.Background(), results); got != "" {
+		t.Errorf("BuildFlowContext with no-ID nodes = %q, want empty", got)
+	}
+}
+
+func TestDataFlowServiceBuildFlowContextWithNeighborhood(t *testing.T) {
+	store := newStubGraphStore()
+	store.neighborhood = &domain.Neighborhood{
+		Callees:   []domain.NeighborNode{{Qualified: "db.Save"}},
+		Callers:   []domain.NeighborNode{{Qualified: "api.Handler"}},
+		DataSinks: []domain.NeighborNode{{Qualified: "db.Save", ArgExpr: "user"}},
+		Reads:     []string{"User.Name"},
+	}
+	svc := NewDataFlowService(store)
+	results := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "function:svc⋅Update", Qualified: "svc.Update", FilePath: "svc.go", StartLine: 10}},
+	}
+
+	got := svc.BuildFlowContext(context.Background(), results)
+
+	if !strings.Contains(got, "svc.Update") {
+		t.Error("expected node qualified name in output")
+	}
+	if !strings.Contains(got, "Calls:") {
+		t.Error("expected Calls: line")
+	}
+	if !strings.Contains(got, "Called by:") {
+		t.Error("expected Called by: line")
+	}
+	if !strings.Contains(got, "Data flows to:") {
+		t.Error("expected Data flows to: line")
+	}
+	if !strings.Contains(got, "Reads:") {
+		t.Error("expected Reads: line")
 	}
 }

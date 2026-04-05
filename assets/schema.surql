@@ -52,6 +52,8 @@ DEFINE TABLE OVERWRITE `function` SCHEMAFULL CHANGEFEED 7d;
 
 DEFINE FIELD OVERWRITE name         ON `function` TYPE string;
 DEFINE FIELD OVERWRITE qualified    ON `function` TYPE string;
+DEFINE FIELD OVERWRITE file_path    ON `function` TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON `function` TYPE string;
 DEFINE FIELD OVERWRITE file         ON `function` TYPE record<file> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD OVERWRITE repo         ON `function` TYPE record<repo> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD OVERWRITE start_line   ON `function` TYPE int;
@@ -83,6 +85,8 @@ DEFINE TABLE OVERWRITE class SCHEMAFULL CHANGEFEED 7d;
 
 DEFINE FIELD OVERWRITE name         ON class TYPE string;
 DEFINE FIELD OVERWRITE qualified    ON class TYPE string;
+DEFINE FIELD OVERWRITE file_path    ON class TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON class TYPE string;
 DEFINE FIELD OVERWRITE file         ON class TYPE record<file> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD OVERWRITE repo         ON class TYPE record<repo> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD OVERWRITE start_line   ON class TYPE int;
@@ -166,6 +170,43 @@ DEFINE FIELD OVERWRITE usage_type ON uses TYPE string VALUE "reference"
 
 DEFINE INDEX OVERWRITE uses_in_idx  ON uses FIELDS in;
 DEFINE INDEX OVERWRITE uses_out_idx ON uses FIELDS out;
+
+-- ─────────────────────────────────────────
+-- Data-Flow Edge Tables
+-- ─────────────────────────────────────────
+
+-- data_flow: function A passes a specific argument to a named parameter of function B.
+-- Richer than `calls` — carries what data moves, not just that a call occurred.
+DEFINE TABLE OVERWRITE data_flow TYPE RELATION SCHEMAFULL;
+DEFINE FIELD OVERWRITE call_site  ON data_flow TYPE string;
+DEFINE FIELD OVERWRITE param_name ON data_flow TYPE option<string>; -- callee parameter name
+DEFINE FIELD OVERWRITE arg_expr   ON data_flow TYPE option<string>; -- argument expression at call site
+DEFINE FIELD OVERWRITE arg_type   ON data_flow TYPE option<string>; -- resolved type (if available)
+DEFINE FIELD OVERWRITE repo       ON data_flow TYPE record<repo>;
+
+DEFINE INDEX OVERWRITE df_in_idx   ON data_flow FIELDS in;
+DEFINE INDEX OVERWRITE df_out_idx  ON data_flow FIELDS out;
+DEFINE INDEX OVERWRITE df_repo_idx ON data_flow FIELDS repo;
+
+-- ─────────────────────────────────────────
+
+-- reads: function reads a field or global variable of a class/struct.
+DEFINE TABLE OVERWRITE reads TYPE RELATION SCHEMAFULL;
+DEFINE FIELD OVERWRITE field_name ON reads TYPE option<string>; -- qualified field, e.g. "User.Email"
+DEFINE FIELD OVERWRITE repo       ON reads TYPE record<repo>;
+
+DEFINE INDEX OVERWRITE reads_in_idx  ON reads FIELDS in;
+DEFINE INDEX OVERWRITE reads_out_idx ON reads FIELDS out;
+
+-- ─────────────────────────────────────────
+
+-- writes: function writes a field or global variable of a class/struct.
+DEFINE TABLE OVERWRITE writes TYPE RELATION SCHEMAFULL;
+DEFINE FIELD OVERWRITE field_name ON writes TYPE option<string>;
+DEFINE FIELD OVERWRITE repo       ON writes TYPE record<repo>;
+
+DEFINE INDEX OVERWRITE writes_in_idx  ON writes FIELDS in;
+DEFINE INDEX OVERWRITE writes_out_idx ON writes FIELDS out;
 
 -- ─────────────────────────────────────────
 -- Vector Indexes (HNSW — Gemini Embedding 2, 3072-dim)

@@ -141,7 +141,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("index.max_workers_parse", 0) // 0 = GOMAXPROCS
 	v.SetDefault("index.max_workers_embed", 4)
-	v.SetDefault("index.max_workers_store", 8)
+	v.SetDefault("index.max_workers_store", 4)
 	v.SetDefault("index.max_file_kb", 10000)
 	v.SetDefault("index.batch_size", 100)
 
