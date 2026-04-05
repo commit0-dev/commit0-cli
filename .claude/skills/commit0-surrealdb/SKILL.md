@@ -1,3 +1,8 @@
+---
+name: commit0-surrealdb
+description: SurrealDB 3.0 for commit0. TRIGGER when: writing SurrealQL, schema definitions, HNSW vector indexes, BM25 full-text search, RELATE edges, the SurrealDB Go adapter, transactions, DEFINE API, changefeeds, or assets/schema.surql. DO NOT TRIGGER for pure Go or Gemini code.
+---
+
 # commit0 SurrealDB 3.0 Skill
 
 Use this skill when writing SurrealDB-related code for commit0: schema definitions, SurrealQL queries, the Go SurrealDB adapter, DEFINE API endpoints, vector/FTS indexes, transactions, and changefeeds.

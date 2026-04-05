@@ -1,3 +1,8 @@
+---
+name: commit0-gemini
+description: Gemini API integration for commit0. TRIGGER when: writing the Embedder adapter, LLMExplainer, context builder, embedding batching, google.golang.org/genai SDK, task instruction prefixes, streaming explanations, or rate-limit retry logic. DO NOT TRIGGER for SurrealDB or tree-sitter code.
+---
+
 # commit0 Gemini Integration Skill
 
 Use this skill when writing Gemini-related code for commit0: the Embedder adapter, the LLMExplainer adapter, context building, embedding batching, and the Go SDK (`google.golang.org/genai`).

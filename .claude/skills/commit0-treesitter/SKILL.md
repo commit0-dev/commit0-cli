@@ -1,3 +1,8 @@
+---
+name: commit0-treesitter
+description: tree-sitter parsing for commit0. TRIGGER when: writing the Parser adapter, per-language AST extractors (Go/Python/TypeScript/JavaScript), node/edge extraction, type resolution, CGO integration, or internal/adapters/treesitter/. DO NOT TRIGGER for SurrealDB or Gemini code.
+---
+
 # commit0 tree-sitter Parsing Skill
 
 Use this skill when writing tree-sitter related code for commit0: the Parser adapter, per-language extractors, type resolution, AST node/edge extraction, and CGO integration.

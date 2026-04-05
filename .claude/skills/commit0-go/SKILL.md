@@ -1,3 +1,8 @@
+---
+name: commit0-go
+description: Go coding patterns for commit0. TRIGGER when: writing Go code, implementing ports/adapters/services, scaffolding CLI commands, dependency injection, concurrency with errgroup, domain errors, or hexagonal architecture in this repo. DO NOT TRIGGER when: working with SurrealDB schema, tree-sitter, or Gemini API.
+---
+
 # commit0 Go Coding Skill
 
 Use this skill when writing Go code for the commit0 project. This covers hexagonal architecture patterns, domain types, application services, CLI commands, dependency injection, concurrency patterns, error handling, and testing.
