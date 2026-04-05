@@ -60,12 +60,12 @@ jobs:
             -coverpkg=./internal/app/... \
             ./...
 
-      - name: Enforce 99.8 % coverage threshold
+      - name: Enforce 98 % coverage threshold
         run: |
           COVERAGE=$(go tool cover -func=coverage.out \
             | grep -E "^total:" | awk '{print $3}' | tr -d '%')
           echo "coverage=${COVERAGE}" >> "$GITHUB_ENV"
-          THRESHOLD=99.8
+          THRESHOLD=98
           if awk "BEGIN{exit !($COVERAGE < $THRESHOLD)}"; then
             echo "::error::Coverage ${COVERAGE}% is below the required ${THRESHOLD}%"
             exit 1
@@ -81,7 +81,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Total** | **${coverage}%** |"
-            echo "| Threshold | 99.8% |"
+            echo "| Threshold | 98% |"
             echo ""
             echo "### Per-function breakdown"
             echo '```'

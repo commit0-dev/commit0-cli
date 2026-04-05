@@ -76,7 +76,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Total** | **${COVERAGE}%** |"
-            echo "| Threshold | 99.8% |"
+            echo "| Threshold | 98% |"
             echo ""
             echo "### Per-function breakdown"
             echo '```'
