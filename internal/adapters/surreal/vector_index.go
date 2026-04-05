@@ -22,6 +22,8 @@ type vecRow struct {
 	Signature  string           `json:"signature"`
 	Docstring  string           `json:"docstring"`
 	Body       string           `json:"body"`
+	StartLine  int              `json:"start_line"`
+	EndLine    int              `json:"end_line"`
 	Centrality int              `json:"centrality"`
 	VecDist    float64          `json:"vec_dist"` // raw cosine distance from vector::distance::knn()
 }
@@ -80,6 +82,8 @@ func (a *SurrealAdapter) VectorSearch(ctx context.Context, query []float32, opts
 					Signature: r.Signature,
 					Docstring: r.Docstring,
 					Body:      r.Body,
+					StartLine: r.StartLine,
+					EndLine:   r.EndLine,
 				},
 				VectorScore: score,
 				Centrality:  r.Centrality,

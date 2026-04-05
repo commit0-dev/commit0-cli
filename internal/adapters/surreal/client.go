@@ -119,9 +119,9 @@ func nodeTable(kind string) string {
 // we alias "path" so it maps to the same struct fields as other tables.
 func selectCols(table string) string {
 	if table == "module" {
-		return "id, name, path AS qualified, path AS file_path, language, docstring, 0 AS centrality"
+		return "id, name, path AS qualified, path AS file_path, repo_slug, language, docstring, 0 AS start_line, 0 AS end_line, 0 AS centrality"
 	}
-	return "id, name, qualified, file_path, repo_slug, language, body, signature, docstring, centrality"
+	return "id, name, qualified, file_path, repo_slug, language, body, signature, docstring, start_line, end_line, centrality"
 }
 
 // recordID builds a models.RecordID from a table + opaque ID string.
