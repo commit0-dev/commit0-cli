@@ -556,6 +556,109 @@ func TestContextBuilderForFileCtxWithNeighborhood(t *testing.T) {
 	}
 }
 
+func TestContextBuilderForNodeCtxModuleKind(t *testing.T) {
+	// ForNodeCtx with NodeModule dispatches to forModuleCtx (which was 0% coverage).
+	store := newStubGraphStore()
+	store.neighborhood = &domain.Neighborhood{
+		Callers: []domain.NeighborNode{{Qualified: "main.go"}},
+	}
+	cb := NewContextBuilderWithStore(1000, store)
+
+	node := &types.CodeNode{
+		Kind:      types.NodeModule,
+		Name:      "encoding/json",
+		Qualified: "encoding/json",
+		Language:  "go",
+		Docstring: "v1.2.3",
+		ID:        "module:encoding/json",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	if !strings.Contains(result, "[MODULE]") {
+		t.Error("expected [MODULE] prefix")
+	}
+	if !strings.Contains(result, "encoding/json") {
+		t.Error("expected module name")
+	}
+	if !strings.Contains(result, "Version:") {
+		t.Error("expected Version: line from Docstring")
+	}
+	if !strings.Contains(result, "Imported by:") {
+		t.Error("expected Imported by: line")
+	}
+	if !strings.Contains(result, "main.go") {
+		t.Error("expected importer in Imported by: list")
+	}
+}
+
+func TestContextBuilderForNodeCtxModuleNoDocstring(t *testing.T) {
+	// forModuleCtx with no docstring and empty neighborhood.
+	store := newStubGraphStore() // returns empty Neighborhood
+	cb := NewContextBuilderWithStore(1000, store)
+
+	node := &types.CodeNode{
+		Kind:      types.NodeModule,
+		Name:      "fmt",
+		Qualified: "fmt",
+		Language:  "go",
+		ID:        "module:fmt",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	if !strings.Contains(result, "[MODULE]") {
+		t.Error("expected [MODULE] prefix")
+	}
+	// No docstring → no Version: line
+	if strings.Contains(result, "Version:") {
+		t.Error("should not have Version: line when docstring is empty")
+	}
+	// Empty callers → no Imported by: line
+	if strings.Contains(result, "Imported by:") {
+		t.Error("should not have Imported by: line when no callers")
+	}
+}
+
+func TestContextBuilderForNodeCtxModuleStoreError(t *testing.T) {
+	// forModuleCtx ignores neighborhood error and continues.
+	store := newStubGraphStore()
+	store.err = domain.NotFound("forced error")
+	cb := NewContextBuilderWithStore(1000, store)
+
+	node := &types.CodeNode{
+		Kind:      types.NodeModule,
+		Name:      "os",
+		Qualified: "os",
+		Language:  "go",
+		ID:        "module:os",
+	}
+
+	// Must not panic; returns module context without callers.
+	result := cb.ForNodeCtx(context.Background(), node)
+	if !strings.Contains(result, "[MODULE]") {
+		t.Error("expected [MODULE] prefix even when store errors")
+	}
+}
+
+func TestContextBuilderForNodeCtxUnknownKind(t *testing.T) {
+	// ForNodeCtx default branch for unrecognized NodeKind falls back to ForNode.
+	store := newStubGraphStore()
+	cb := NewContextBuilderWithStore(1000, store)
+
+	node := &types.CodeNode{
+		Kind: types.NodeKind("symbol"),
+		ID:   "symbol:x",
+		Body: "some body",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+	expected := cb.ForNode(node)
+	if result != expected {
+		t.Errorf("ForNodeCtx unknown kind should equal ForNode output")
+	}
+}
+
 // ── DataFlowService tests ────────────────────────────────────────────────────
 
 func TestDataFlowServiceBuildFlowContextEmpty(t *testing.T) {
@@ -610,5 +713,73 @@ func TestDataFlowServiceBuildFlowContextWithNeighborhood(t *testing.T) {
 	}
 	if !strings.Contains(got, "Reads:") {
 		t.Error("expected Reads: line")
+	}
+}
+
+func TestDataFlowServiceBuildFlowContextParamName(t *testing.T) {
+	// DataSink with ParamName set (hits s.ParamName != "" branch).
+	store := newStubGraphStore()
+	store.neighborhood = &domain.Neighborhood{
+		DataSinks: []domain.NeighborNode{
+			{Qualified: "db.Insert", ParamName: "record"},
+		},
+	}
+	svc := NewDataFlowService(store)
+	results := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "function:svc⋅Create", Qualified: "svc.Create", FilePath: "svc.go"}},
+	}
+
+	got := svc.BuildFlowContext(context.Background(), results)
+
+	if !strings.Contains(got, "Data flows to:") {
+		t.Error("expected Data flows to: line")
+	}
+	if !strings.Contains(got, `param "record"`) {
+		t.Error("expected param name in sink annotation")
+	}
+}
+
+func TestDataFlowServiceBuildFlowContextDataSourcesAndWrites(t *testing.T) {
+	// DataSources (with and without ArgExpr) and Writes field.
+	store := newStubGraphStore()
+	store.neighborhood = &domain.Neighborhood{
+		DataSources: []domain.NeighborNode{
+			{Qualified: "http.Request", ArgExpr: "r.Body"},
+			{Qualified: "cfg.Config"}, // no ArgExpr
+		},
+		Writes: []string{"User.LastSeen"},
+	}
+	svc := NewDataFlowService(store)
+	results := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "function:handler⋅Handle", Qualified: "handler.Handle", FilePath: "h.go"}},
+	}
+
+	got := svc.BuildFlowContext(context.Background(), results)
+
+	if !strings.Contains(got, "Data flows from:") {
+		t.Error("expected Data flows from: line")
+	}
+	if !strings.Contains(got, `via "r.Body"`) {
+		t.Error("expected arg expr annotation")
+	}
+	if !strings.Contains(got, "Writes:") {
+		t.Error("expected Writes: line")
+	}
+	if !strings.Contains(got, "User.LastSeen") {
+		t.Error("expected write field in output")
+	}
+}
+
+func TestDataFlowServiceBuildFlowContextAllEmptyNeighborhoods(t *testing.T) {
+	// All nodes have IDs but store returns empty neighborhood → written==0 → returns "".
+	store := newStubGraphStore() // returns &Neighborhood{} which IsEmpty()==true
+	svc := NewDataFlowService(store)
+	results := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "function:pkg⋅F", Qualified: "pkg.F"}},
+		{Node: types.CodeNode{ID: "function:pkg⋅G", Qualified: "pkg.G"}},
+	}
+
+	if got := svc.BuildFlowContext(context.Background(), results); got != "" {
+		t.Errorf("BuildFlowContext with all empty neighborhoods = %q, want empty", got)
 	}
 }

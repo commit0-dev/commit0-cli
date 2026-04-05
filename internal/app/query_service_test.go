@@ -268,6 +268,17 @@ func TestQueryServiceQueryWithExplainerFails(t *testing.T) {
 	}
 }
 
+func TestNewQueryServiceWithNonNilStore(t *testing.T) {
+	// When store != nil, NewQueryService creates an internal DataFlowService.
+	// This covers the `if store != nil { qs.flowSvc = ... }` branch.
+	store := newStubGraphStore()
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
+	svc := NewQueryService(nil, nil, nil, store, nil, cfg)
+	if svc.flowSvc == nil {
+		t.Error("flowSvc should be set when store is non-nil")
+	}
+}
+
 func TestQueryServiceQueryWithExplainerChunkError(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
 	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}

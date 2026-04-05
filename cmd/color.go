@@ -39,13 +39,11 @@ func colorize(codes, text string) string {
 	return codes + text + ansiReset
 }
 
-func bold(s string) string     { return colorize(ansiBold, s) }
-func dim(s string) string      { return colorize(ansiDim, s) }
-func gray(s string) string     { return colorize(ansiGray, s) }
-func yellow(s string) string   { return colorize(ansiYellow, s) }
-func cyan(s string) string     { return colorize(ansiCyan, s) }
-func magenta(s string) string  { return colorize(ansiMagenta, s) }
-func green(s string) string    { return colorize(ansiGreen, s) }
+func bold(s string) string   { return colorize(ansiBold, s) }
+func dim(s string) string    { return colorize(ansiDim, s) }
+func gray(s string) string   { return colorize(ansiGray, s) }
+func yellow(s string) string { return colorize(ansiYellow, s) }
+func cyan(s string) string   { return colorize(ansiCyan, s) }
 
 // kindBadge returns a colored [KIND] badge based on the node kind string.
 func kindBadge(kind string) string {

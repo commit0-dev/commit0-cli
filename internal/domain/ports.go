@@ -96,11 +96,11 @@ type NeighborNode struct {
 	Signature string
 	Docstring string
 	FilePath  string
-	StartLine int
 	// ParamName is set on DataSinks: the callee parameter that receives the data.
 	ParamName string
 	// ArgExpr is set on DataSources: the expression passed at the call site.
-	ArgExpr string
+	ArgExpr   string
+	StartLine int
 }
 
 // Neighborhood holds all immediate graph context for a node.

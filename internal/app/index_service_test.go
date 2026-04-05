@@ -509,3 +509,152 @@ func TestIndexServiceEmbedContextCancelled(t *testing.T) {
 
 	svc.Index(ctx, IndexRequest{RepoPath: "/repo", RepoSlug: "r"})
 }
+
+// ── ReembedNeighborhood tests ────────────────────────────────────────────────
+
+func TestReembedNeighborhoodHappyPath(t *testing.T) {
+	node := &types.CodeNode{ID: "function:pkg⋅F", Qualified: "pkg.F", Kind: types.NodeFunction}
+	store := newStubGraphStore()
+	store.nodeIDs = []string{node.ID}
+	store.nodes[node.ID] = node
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: node.ID, Vector: []float32{0.1, 0.2}}},
+	}
+
+	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	svc := NewIndexService(nil, nil, embedder, store, cfg)
+
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	if err != nil {
+		t.Fatalf("ReembedNeighborhood failed: %v", err)
+	}
+	if result.NodesUpdated != 1 {
+		t.Errorf("NodesUpdated = %d, want 1", result.NodesUpdated)
+	}
+}
+
+func TestReembedNeighborhoodListIDsError(t *testing.T) {
+	store := newStubGraphStore()
+	store.err = domain.NotFound("forced list error")
+
+	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	svc := NewIndexService(nil, nil, nil, store, cfg)
+
+	_, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	if err == nil {
+		t.Fatal("expected error from ListNodeIDs failure")
+	}
+}
+
+func TestReembedNeighborhoodGetNodeError(t *testing.T) {
+	// GetNode fails for the node ID → warns and skips, no nodes updated.
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"function:pkg⋅Missing"}
+	// nodes map is empty → GetNode returns not-found
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{},
+	}
+
+	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	svc := NewIndexService(nil, nil, embedder, store, cfg)
+
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	if err != nil {
+		t.Fatalf("ReembedNeighborhood should not return error on get-node failure: %v", err)
+	}
+	if result.NodesUpdated != 0 {
+		t.Errorf("NodesUpdated = %d, want 0 (node was skipped)", result.NodesUpdated)
+	}
+}
+
+func TestReembedNeighborhoodEmbedError(t *testing.T) {
+	// EmbedBatch fails → warns and continues; no nodes updated.
+	node := &types.CodeNode{ID: "function:pkg⋅F", Qualified: "pkg.F", Kind: types.NodeFunction}
+	store := newStubGraphStore()
+	store.nodeIDs = []string{node.ID}
+	store.nodes[node.ID] = node
+
+	embedder := &stubEmbedder{
+		batchErr: domain.RateLimit("embed failed"),
+	}
+
+	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	svc := NewIndexService(nil, nil, embedder, store, cfg)
+
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	if err != nil {
+		t.Fatalf("ReembedNeighborhood should not fail on embed error: %v", err)
+	}
+	if result.NodesUpdated != 0 {
+		t.Errorf("NodesUpdated = %d, want 0 (batch was skipped)", result.NodesUpdated)
+	}
+}
+
+func TestReembedNeighborhoodUpsertError(t *testing.T) {
+	// UpsertNode fails for the enriched node → warns and continues.
+	node := &types.CodeNode{ID: "function:pkg⋅F", Qualified: "pkg.F", Kind: types.NodeFunction}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: node.ID, Vector: []float32{0.1}}},
+	}
+
+	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+
+	goodStore := newStubGraphStore()
+	goodStore.nodeIDs = []string{node.ID}
+	goodStore.nodes[node.ID] = node
+
+	// upsertFailStore overrides UpsertNode to always error while GetNode works fine.
+	failStore := &upsertFailStore{stubGraphStore: goodStore}
+	svc2 := NewIndexService(nil, nil, embedder, failStore, cfg)
+
+	result, err := svc2.ReembedNeighborhood(context.Background(), "my-repo")
+	if err != nil {
+		t.Fatalf("ReembedNeighborhood should not fail on upsert error: %v", err)
+	}
+	if result.NodesUpdated != 0 {
+		t.Errorf("NodesUpdated = %d, want 0 (upsert was skipped)", result.NodesUpdated)
+	}
+}
+
+func TestReembedNeighborhoodDefaultBatchSize(t *testing.T) {
+	// BatchSize=0 → defaults to 100.
+	node := &types.CodeNode{ID: "function:pkg⋅F", Qualified: "pkg.F", Kind: types.NodeFunction}
+	store := newStubGraphStore()
+	store.nodeIDs = []string{node.ID}
+	store.nodes[node.ID] = node
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: node.ID, Vector: []float32{0.1}}},
+	}
+
+	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 0}} // triggers default=100
+	svc := NewIndexService(nil, nil, embedder, store, cfg)
+
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	if err != nil {
+		t.Fatalf("ReembedNeighborhood failed: %v", err)
+	}
+	if result.NodesUpdated != 1 {
+		t.Errorf("NodesUpdated = %d, want 1", result.NodesUpdated)
+	}
+}
+
+// upsertFailStore wraps stubGraphStore and makes UpsertNode always return an error.
+type upsertFailStore struct {
+	*stubGraphStore
+}
+
+func (u *upsertFailStore) UpsertNode(ctx context.Context, node *types.CodeNode) error {
+	return domain.Validation("upsert failed")
+}
+
+func (u *upsertFailStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error) {
+	return u.stubGraphStore.nodeIDs, nil
+}
+
+func (u *upsertFailStore) GetNode(ctx context.Context, id string) (*types.CodeNode, error) {
+	return u.stubGraphStore.GetNode(ctx, id)
+}

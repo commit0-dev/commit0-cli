@@ -10,22 +10,22 @@ import (
 // Stub implementations for testing
 
 type stubGraphStore struct {
-	traceErr        error
-	err             error
-	deleteNodesErr  error
-	upsertRepoErr   error
-	listReposErr    error
-	blastRadiusErr  error
-	upsertBatchErr  error
-	nodesByQ        map[string]*types.CodeNode
-	repos           map[string]*types.Repo
-	nodes           map[string]*types.CodeNode
-	upsertBatchFn   func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
-	traceHops       []types.TraceHop
-	affected        []types.AffectedNode
-	neighborhood    *domain.Neighborhood
-	dataFlowHops    []types.TraceHop
-	nodeIDs         []string
+	traceErr       error
+	err            error
+	deleteNodesErr error
+	upsertRepoErr  error
+	listReposErr   error
+	blastRadiusErr error
+	upsertBatchErr error
+	nodesByQ       map[string]*types.CodeNode
+	repos          map[string]*types.Repo
+	nodes          map[string]*types.CodeNode
+	upsertBatchFn  func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
+	traceHops      []types.TraceHop
+	affected       []types.AffectedNode
+	neighborhood   *domain.Neighborhood
+	dataFlowHops   []types.TraceHop
+	nodeIDs        []string
 }
 
 func newStubGraphStore() *stubGraphStore {

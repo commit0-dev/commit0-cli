@@ -84,14 +84,14 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		localID = node.Qualified
 	}
 
-	// Pass repo/file as typed models.RecordID objects so the Go SDK serialises
+	// Pass repo/file as typed models.RecordID objects so the Go SDK serializes
 	// them via CBOR correctly — especially when slugs or paths contain '/' which
 	// type::record(string) may mis-parse as a division operator.
 	repoRef := models.NewRecordID("repo", node.RepoSlug)
 	fileRef := models.NewRecordID("file", node.FilePath)
 
 	// SurrealDB 3.0 strict mode: option<T> fields need NONE (not NULL)
-	// when the value is absent. The Go SDK's models.None serialises correctly.
+	// when the value is absent. The Go SDK's models.None serializes correctly.
 	var embedding any = models.None
 	if len(node.Embedding) > 0 {
 		embedding = node.Embedding
@@ -697,9 +697,9 @@ type neighborRow struct {
 	Signature string           `json:"signature"`
 	Docstring string           `json:"docstring"`
 	FilePath  string           `json:"file_path"`
-	StartLine int              `json:"start_line"`
 	ParamName string           `json:"param_name"`
 	ArgExpr   string           `json:"arg_expr"`
+	StartLine int              `json:"start_line"`
 }
 
 func neighborRowToNeighborNode(r neighborRow) domain.NeighborNode {
