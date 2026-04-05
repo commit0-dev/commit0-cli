@@ -373,6 +373,9 @@ func (a *SurrealAdapter) GetNode(ctx context.Context, id string) (*types.CodeNod
 }
 
 // GetNodeByQualified looks up a node by repo slug + fully qualified name.
+// If the input contains no dot (i.e. it is an unqualified short name), a
+// second pass searches the `name` field so that users can type bare function
+// names like "ParseGoMod" instead of "treesitter.ParseGoMod".
 func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified string) (*types.CodeNode, error) {
 	// Try each node table in priority order.
 	tables := []string{"function", "class", "module", "file"}
@@ -391,6 +394,26 @@ func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified
 			row := (*results)[0].Result[0]
 			node := rowToCodeNode(row, kindFromTable(table))
 			return &node, nil
+		}
+	}
+
+	// Fallback: bare name lookup (no dot means the caller supplied a short name).
+	if !strings.Contains(qualified, ".") {
+		const nameQ = `SELECT * FROM $table WHERE repo = $repo_ref AND name = $name LIMIT 1;`
+		for _, table := range tables {
+			results, err := surrealdb.Query[[]nodeRow](ctx, a.db, nameQ, map[string]any{
+				"table":    models.Table(table),
+				"repo_ref": models.NewRecordID("repo", repo),
+				"name":     qualified,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("get node by name %s/%s: %w", repo, qualified, err)
+			}
+			if results != nil && len(*results) > 0 && len((*results)[0].Result) > 0 {
+				row := (*results)[0].Result[0]
+				node := rowToCodeNode(row, kindFromTable(table))
+				return &node, nil
+			}
 		}
 	}
 
@@ -524,7 +547,7 @@ SELECT
     <-calls.call_site  AS call_site,
     <-calls.call_type  AS call_type,
     <-calls.is_dynamic AS is_dynamic
-FROM $start->calls->function{1..%d};`, depth)
+FROM $start->calls{1..%d}->function;`, depth)
 
 	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
 		"start": models.NewRecordID(table, localID),
@@ -559,7 +582,7 @@ SELECT
     ->calls.call_site  AS call_site,
     ->calls.call_type  AS call_type,
     ->calls.is_dynamic AS is_dynamic
-FROM $start<-calls<-function{1..%d};`, depth)
+FROM $start<-calls{1..%d}<-function;`, depth)
 
 	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
 		"start": models.NewRecordID(table, localID),
@@ -625,7 +648,7 @@ func (a *SurrealAdapter) BlastRadius(ctx context.Context, targetID string, maxDe
 	// Reverse traversal: who calls the target (transitively)?
 	q := fmt.Sprintf(`
 SELECT id, name, qualified, language, file_path, repo_slug
-FROM $target<-calls<-function{1..%d};`, maxDepth)
+FROM $target<-calls{1..%d}<-function;`, maxDepth)
 
 	type affectedRow struct {
 		ID        *models.RecordID `json:"id"`
