@@ -1,9 +1,16 @@
+# Build outputs
+commit0
+dist/
+coverage.out
+coverage.html
+
+# Test outputs
 **/*.out
-coverage.*
 
+# OS / editor
 .DS_Store
-
-# Ignore all .log files
 *.log
-
 .env
+
+# pre-commit cache (local only, not shared)
+.pre-commit-cache/
