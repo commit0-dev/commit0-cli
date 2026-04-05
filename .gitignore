@@ -12,5 +12,8 @@ coverage.html
 *.log
 .env
 
-# pre-commit cache (local only, not shared)
+# pre-commit cache
 .pre-commit-cache/
+
+# Python virtual environment
+.venv/
