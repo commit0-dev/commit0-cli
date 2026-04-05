@@ -303,7 +303,12 @@ func (s *stubParser) Parse(ctx context.Context, file domain.FileEntry) (*domain.
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.result, nil
+	// Return a shallow copy so concurrent parse goroutines don't share the same
+	// Nodes slice — the production code stamps RepoSlug onto each node in-place.
+	cp := *s.result
+	cp.Nodes = make([]types.CodeNode, len(s.result.Nodes))
+	copy(cp.Nodes, s.result.Nodes)
+	return &cp, nil
 }
 
 func (s *stubParser) SupportedLanguages() []string {
