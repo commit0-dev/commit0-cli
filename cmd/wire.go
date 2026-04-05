@@ -5,18 +5,22 @@ import (
 	"fmt"
 	"log/slog"
 
+	"google.golang.org/genai"
+
 	"github.com/commit0-dev/commit0/internal/adapters/gemini"
 	"github.com/commit0-dev/commit0/internal/adapters/surreal"
 	"github.com/commit0-dev/commit0/internal/adapters/treesitter"
+	"github.com/commit0-dev/commit0/internal/adapters/voyage"
 	"github.com/commit0-dev/commit0/internal/adapters/walker"
 	"github.com/commit0-dev/commit0/internal/app"
 	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/domain"
 )
 
 // deps holds all constructed adapter instances.
 type deps struct {
 	db        *surreal.SurrealAdapter
-	embedder  *gemini.GeminiEmbedder
+	embedder  domain.Embedder
 	explainer *gemini.GeminiExplainer
 	parser    *treesitter.TreeSitterParser
 	walker    *walker.FSWalker
@@ -42,25 +46,45 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 		}
 	}
 
-	// 2. Shared Gemini client
-	genaiClient, err := gemini.NewGeminiClient(ctx, &cfg.Gemini)
-	if err != nil {
-		db.Close(ctx)
-		return nil, nil, fmt.Errorf("gemini client: %w", err)
+	// 2. Shared Gemini client (used by explainer, and optionally by embedder).
+	var genaiClient *genai.Client
+	if cfg.Gemini.APIKey != "" {
+		genaiClient, err = gemini.NewGeminiClient(ctx, &cfg.Gemini)
+		if err != nil {
+			db.Close(ctx)
+			return nil, nil, fmt.Errorf("gemini client: %w", err)
+		}
 	}
 
-	// 3. Embedder
-	emb, err := gemini.NewGeminiEmbedder(genaiClient, &cfg.Gemini, log)
-	if err != nil {
-		db.Close(ctx)
-		return nil, nil, fmt.Errorf("gemini embedder: %w", err)
+	// 3. Embedder — provider selected by config.
+	var emb domain.Embedder
+	switch cfg.EmbedProvider {
+	case "voyage":
+		emb, err = voyage.NewVoyageEmbedder(&cfg.Voyage, log)
+		if err != nil {
+			db.Close(ctx)
+			return nil, nil, fmt.Errorf("voyage embedder: %w", err)
+		}
+	default: // "gemini"
+		if genaiClient == nil {
+			db.Close(ctx)
+			return nil, nil, fmt.Errorf("gemini embedder: GEMINI_API_KEY is required")
+		}
+		emb, err = gemini.NewGeminiEmbedder(genaiClient, &cfg.Gemini, log)
+		if err != nil {
+			db.Close(ctx)
+			return nil, nil, fmt.Errorf("gemini embedder: %w", err)
+		}
 	}
 
-	// 4. Explainer
-	exp, err := gemini.NewGeminiExplainer(genaiClient, &cfg.Gemini, log)
-	if err != nil {
-		db.Close(ctx)
-		return nil, nil, fmt.Errorf("gemini explainer: %w", err)
+	// 4. Explainer (always Gemini).
+	var exp *gemini.GeminiExplainer
+	if genaiClient != nil {
+		exp, err = gemini.NewGeminiExplainer(genaiClient, &cfg.Gemini, log)
+		if err != nil {
+			db.Close(ctx)
+			return nil, nil, fmt.Errorf("gemini explainer: %w", err)
+		}
 	}
 
 	// 5. tree-sitter parser

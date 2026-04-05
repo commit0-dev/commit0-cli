@@ -11,11 +11,13 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	Surreal SurrealConfig
-	Gemini  GeminiConfig
-	Server  ServerConfig
-	Index   IndexConfig
-	Query   QueryConfig
+	EmbedProvider string // "gemini" (default) or "voyage"
+	Surreal       SurrealConfig
+	Gemini        GeminiConfig
+	Voyage        VoyageConfig
+	Server        ServerConfig
+	Index         IndexConfig
+	Query         QueryConfig
 }
 
 // ServerConfig holds HTTP server settings.
@@ -40,6 +42,15 @@ type GeminiConfig struct {
 	APIKey         string
 	EmbedModel     string
 	ExplainModel   string
+	EmbedDimension int
+	MaxBatchSize   int
+}
+
+// VoyageConfig holds Voyage AI API settings.
+type VoyageConfig struct {
+	APIKey         string
+	Model          string
+	BaseURL        string
 	EmbedDimension int
 	MaxBatchSize   int
 }
@@ -96,12 +107,20 @@ func Load(cfgPath string) (*Config, error) {
 			Namespace: v.GetString("surreal.namespace"),
 			Database:  v.GetString("surreal.database"),
 		},
+		EmbedProvider: v.GetString("embed.provider"),
 		Gemini: GeminiConfig{
 			APIKey:         v.GetString("gemini.api_key"),
 			EmbedModel:     v.GetString("gemini.embed_model"),
 			ExplainModel:   v.GetString("gemini.explain_model"),
 			EmbedDimension: v.GetInt("gemini.embed_dimension"),
 			MaxBatchSize:   v.GetInt("gemini.max_batch_size"),
+		},
+		Voyage: VoyageConfig{
+			APIKey:         v.GetString("voyage.api_key"),
+			Model:          v.GetString("voyage.model"),
+			EmbedDimension: v.GetInt("voyage.embed_dimension"),
+			MaxBatchSize:   v.GetInt("voyage.max_batch_size"),
+			BaseURL:        v.GetString("voyage.base_url"),
 		},
 		Index: IndexConfig{
 			MaxWorkersParse: v.GetInt("index.max_workers_parse"),
@@ -123,8 +142,18 @@ func Load(cfgPath string) (*Config, error) {
 		},
 	}
 
-	if cfg.Gemini.APIKey == "" {
-		return nil, domain.Validation("GEMINI_API_KEY is required")
+	// Validate API key for the selected provider.
+	switch cfg.EmbedProvider {
+	case "voyage":
+		if cfg.Voyage.APIKey == "" {
+			return nil, domain.Validation("VOYAGE_API_KEY is required when EMBED_PROVIDER=voyage")
+		}
+	default:
+		// "gemini" or empty (default)
+		cfg.EmbedProvider = "gemini"
+		if cfg.Gemini.APIKey == "" {
+			return nil, domain.Validation("GEMINI_API_KEY is required")
+		}
 	}
 
 	return cfg, nil
@@ -136,6 +165,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("surreal.pass", "root")
 	v.SetDefault("surreal.namespace", "commit0")
 	v.SetDefault("surreal.database", "codebase")
+
+	v.SetDefault("embed.provider", "gemini")
+
+	v.SetDefault("voyage.model", "voyage-code-3")
+	v.SetDefault("voyage.embed_dimension", 1024)
+	v.SetDefault("voyage.max_batch_size", 128)
+	v.SetDefault("voyage.base_url", "https://api.voyageai.com/v1")
 
 	v.SetDefault("gemini.embed_model", "gemini-embedding-2-preview")
 	v.SetDefault("gemini.explain_model", "gemini-2.5-flash")
@@ -166,6 +202,14 @@ func bindEnvs(v *viper.Viper) {
 		"surreal.pass":      "SURREAL_PASS",
 		"surreal.namespace": "SURREAL_NAMESPACE",
 		"surreal.database":  "SURREAL_DATABASE",
+
+		"embed.provider": "EMBED_PROVIDER",
+
+		"voyage.api_key":         "VOYAGE_API_KEY",
+		"voyage.model":           "VOYAGE_MODEL",
+		"voyage.embed_dimension": "VOYAGE_EMBED_DIM",
+		"voyage.max_batch_size":  "VOYAGE_BATCH_SIZE",
+		"voyage.base_url":        "VOYAGE_BASE_URL",
 
 		"gemini.api_key":         "GEMINI_API_KEY",
 		"gemini.embed_model":     "GEMINI_EMBED_MODEL",
