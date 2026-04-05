@@ -536,18 +536,10 @@ func (a *SurrealAdapter) TraceForward(ctx context.Context, startID string, depth
 		depth = 5
 	}
 
-	// Build a parameterised recursive CTE using SurrealDB path syntax.
-	// We select each hop together with its depth level.
+	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
 	q := fmt.Sprintf(`
-SELECT
-    id,
-    name,
-    qualified,
-    language,
-    <-calls.call_site  AS call_site,
-    <-calls.call_type  AS call_type,
-    <-calls.is_dynamic AS is_dynamic
-FROM $start->calls{1..%d}->function;`, depth)
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(->calls->function);`, depth)
 
 	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
 		"start": models.NewRecordID(table, localID),
@@ -573,16 +565,10 @@ func (a *SurrealAdapter) TraceReverse(ctx context.Context, startID string, depth
 		depth = 5
 	}
 
+	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
 	q := fmt.Sprintf(`
-SELECT
-    id,
-    name,
-    qualified,
-    language,
-    ->calls.call_site  AS call_site,
-    ->calls.call_type  AS call_type,
-    ->calls.is_dynamic AS is_dynamic
-FROM $start<-calls{1..%d}<-function;`, depth)
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(<-calls<-function);`, depth)
 
 	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
 		"start": models.NewRecordID(table, localID),
@@ -645,10 +631,10 @@ func (a *SurrealAdapter) BlastRadius(ctx context.Context, targetID string, maxDe
 		maxDepth = 10
 	}
 
-	// Reverse traversal: who calls the target (transitively)?
+	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
 	q := fmt.Sprintf(`
 SELECT id, name, qualified, language, file_path, repo_slug
-FROM $target<-calls{1..%d}<-function;`, maxDepth)
+FROM $target.{1..%d}(<-calls<-function);`, maxDepth)
 
 	type affectedRow struct {
 		ID        *models.RecordID `json:"id"`
@@ -833,16 +819,12 @@ func (a *SurrealAdapter) TraceDataFlow(ctx context.Context, startID string, dept
 	switch direction {
 	case "reverse":
 		q = fmt.Sprintf(`
-SELECT id, name, qualified, language, file_path, repo_slug,
-       <-data_flow.call_site  AS call_site,
-       <-data_flow.param_name AS call_type
-FROM $start<-data_flow<-function{1..%d};`, depth)
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(<-data_flow<-function);`, depth)
 	default: // "forward" or "both" — forward is the primary direction
 		q = fmt.Sprintf(`
-SELECT id, name, qualified, language, file_path, repo_slug,
-       ->data_flow.call_site  AS call_site,
-       ->data_flow.param_name AS call_type
-FROM $start->data_flow->function{1..%d};`, depth)
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(->data_flow->function);`, depth)
 	}
 
 	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
@@ -863,10 +845,8 @@ FROM $start->data_flow->function{1..%d};`, depth)
 	// For "both", append the reverse hops as well.
 	if direction == "both" {
 		revQ := fmt.Sprintf(`
-SELECT id, name, qualified, language, file_path, repo_slug,
-       <-data_flow.call_site  AS call_site,
-       <-data_flow.param_name AS call_type
-FROM $start<-data_flow<-function{1..%d};`, depth)
+SELECT id, name, qualified, language, file_path, repo_slug
+FROM $start.{1..%d}(<-data_flow<-function);`, depth)
 		revResults, err := surrealdb.Query[[]traceRow](ctx, a.db, revQ, map[string]any{
 			"start": models.NewRecordID(table, localID),
 		})
