@@ -23,7 +23,11 @@ var indexCmd = &cobra.Command{
 
 		repoSlug, _ := cmd.Flags().GetString("slug")
 		if repoSlug == "" {
-			repoSlug = filepath.Base(args[0])
+			absPath, err := filepath.Abs(args[0])
+			if err != nil {
+				return fmt.Errorf("resolve path: %w", err)
+			}
+			repoSlug = filepath.Base(absPath)
 		}
 
 		langsRaw, _ := cmd.Flags().GetString("languages")

@@ -101,6 +101,11 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 					return nil // non-fatal
 				}
 
+				// Stamp repo slug onto every node so the store can build record IDs.
+				for i := range parsed.Nodes {
+					parsed.Nodes[i].RepoSlug = req.RepoSlug
+				}
+
 				run.addFilesIndexed(1)
 				run.addNodesCreated(len(parsed.Nodes))
 				run.addEdgesCreated(len(parsed.Edges))

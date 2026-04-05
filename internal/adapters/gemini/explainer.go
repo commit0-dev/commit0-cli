@@ -31,7 +31,7 @@ func NewGeminiExplainer(client *genai.Client, cfg *config.GeminiConfig, log *slo
 	}
 	model := cfg.ExplainModel
 	if model == "" {
-		model = "gemini-2.0-flash"
+		model = "gemini-2.5-flash"
 	}
 	return &GeminiExplainer{
 		client: client,

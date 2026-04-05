@@ -110,16 +110,19 @@ func (a *SurrealAdapter) vecSearchTable(
 		"effort": effort,
 	}
 
+	// SurrealDB v3 requires literal integers for HNSW <|K,EF|> parameters,
+	// and "function" must be backtick-escaped (reserved keyword).
+	escaped := fmt.Sprintf("`%s`", table)
+
 	if repoSlug != "" {
-		// Repo-scoped HNSW query: WHERE clause filters after ANN retrieval.
 		q = fmt.Sprintf(`
 SELECT
     id, name, qualified, language, body, signature, docstring,
     vector::distance::knn() AS vec_dist,
     centrality
 FROM %s
-WHERE embedding <|$topk,$effort|> $q
-  AND repo = type::record($repo_ref);`, table)
+WHERE embedding <|%d,%d|> $q
+  AND repo = type::record($repo_ref);`, escaped, topK, effort)
 		params["repo_ref"] = fmt.Sprintf("repo:%s", repoSlug)
 	} else {
 		q = fmt.Sprintf(`
@@ -128,7 +131,7 @@ SELECT
     vector::distance::knn() AS vec_dist,
     centrality
 FROM %s
-WHERE embedding <|$topk,$effort|> $q;`, table)
+WHERE embedding <|%d,%d|> $q;`, escaped, topK, effort)
 	}
 
 	results, err := surrealdb.Query[[]vecRow](ctx, a.db, q, params)

@@ -42,8 +42,8 @@ func TestNewGeminiExplainerDefaultModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ex.model != "gemini-2.0-flash" {
-		t.Fatalf("expected default model %q, got %q", "gemini-2.0-flash", ex.model)
+	if ex.model != "gemini-2.5-flash" {
+		t.Fatalf("expected default model %q, got %q", "gemini-2.5-flash", ex.model)
 	}
 }
 

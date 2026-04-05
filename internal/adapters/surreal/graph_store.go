@@ -179,7 +179,7 @@ func relateEdgeQuery(kind types.EdgeKind) string {
 	switch kind {
 	case types.EdgeCalls:
 		return `
-RELATE type::record($from)->calls->type::record($to) CONTENT {
+RELATE $from->calls->$to CONTENT {
     call_site:  $call_site,
     is_dynamic: $is_dynamic,
     call_type:  $call_type,
@@ -187,18 +187,18 @@ RELATE type::record($from)->calls->type::record($to) CONTENT {
 };`
 	case types.EdgeImports:
 		return `
-RELATE type::record($from)->imports->type::record($to);`
+RELATE $from->imports->$to;`
 	case types.EdgeDefines:
 		return `
-RELATE type::record($from)->defines->type::record($to);`
+RELATE $from->defines->$to;`
 	case types.EdgeInherits:
 		return `
-RELATE type::record($from)->inherits->type::record($to) CONTENT {
+RELATE $from->inherits->$to CONTENT {
     kind: $inherit_kind
 };`
 	case types.EdgeUses:
 		return `
-RELATE type::record($from)->uses->type::record($to) CONTENT {
+RELATE $from->uses->$to CONTENT {
     usage_type: $usage_type
 };`
 	}
@@ -222,6 +222,15 @@ func edgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
 
 	fromTable, fromID := splitRecordID(edge.FromID)
 	toTable, toID := splitRecordID(edge.ToID)
+
+	// Default missing table to "function" — unresolved call targets from the
+	// parser arrive without a table prefix.
+	if fromTable == "" {
+		fromTable = "function"
+	}
+	if toTable == "" {
+		toTable = "function"
+	}
 
 	return map[string]any{
 		"from":         models.NewRecordID(fromTable, fromID),
@@ -345,7 +354,7 @@ func (a *SurrealAdapter) DeleteNode(ctx context.Context, id string) error {
 // DeleteNodesByRepo removes all nodes (all tables) that belong to a repo.
 func (a *SurrealAdapter) DeleteNodesByRepo(ctx context.Context, repo string) error {
 	const q = `
-DELETE FROM function WHERE repo = type::record($repo_ref);
+DELETE FROM ` + "`function`" + ` WHERE repo = type::record($repo_ref);
 DELETE FROM class     WHERE repo = type::record($repo_ref);
 DELETE FROM file      WHERE repo = type::record($repo_ref);
 DELETE FROM module    WHERE repo = type::record($repo_ref);`

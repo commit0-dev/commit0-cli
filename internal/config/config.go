@@ -135,7 +135,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("surreal.database", "codebase")
 
 	v.SetDefault("gemini.embed_model", "gemini-embedding-2-preview")
-	v.SetDefault("gemini.explain_model", "gemini-2.0-flash")
+	v.SetDefault("gemini.explain_model", "gemini-2.5-flash")
 	v.SetDefault("gemini.embed_dimension", 3072)
 	v.SetDefault("gemini.max_batch_size", 100)
 
