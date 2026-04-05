@@ -39,6 +39,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +100,16 @@ jobs:
           name: coverage
           path: coverage.out
           retention-days: 14
+
+      - name: Publish coverage report
+        uses: ncruces/go-coverage-report@v0
+        with:
+          coverage-file: coverage.out
+          report: true
+          chart: true
+          amend: true
+        if: github.event_name == 'push'
+        continue-on-error: true
 
   # ── GoReleaser: validate config + linux snapshot build ────────────────────
   # Uses goreleaser-action on ubuntu-latest with arm64 cross-compiler.

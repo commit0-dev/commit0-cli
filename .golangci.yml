@@ -1,9 +1,5 @@
 run:
   timeout: 5m
-  # CGO is required by smacker/go-tree-sitter.
-  # Ensure the C cross-compiler is available when running lint locally.
-  env:
-    - CGO_ENABLED=1
 
 linters:
   # Opt-in model: only explicitly listed linters run.
