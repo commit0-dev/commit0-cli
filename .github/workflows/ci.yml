@@ -19,11 +19,10 @@ env:
 
 jobs:
   # ── Lint ──────────────────────────────────────────────────────────────────
-  # Uses golangci-lint with .golangci.yml — the same config and tool that
-  # runs in the pre-push git hook, guaranteeing local ↔ CI parity.
-  # install-mode: goinstall compiles golangci-lint with the active Go toolchain,
-  # avoiding a version mismatch when go.mod targets a newer Go than the
-  # pre-built binary was compiled with.
+  # golangci-lint with .golangci.yml — same config as the pre-push hook,
+  # guaranteeing local ↔ CI parity.
+  # install-mode: goinstall avoids a version mismatch when go.mod targets a
+  # newer Go than the pre-built binary was compiled with.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -35,16 +34,15 @@ jobs:
           go-version-file: go.mod
           cache: false   # golangci-lint-action manages its own cache
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
           install-mode: goinstall
           args: --timeout=5m
 
   # ── Unit tests + coverage ─────────────────────────────────────────────────
-  # Single go test invocation: race detector on all packages, coverage
-  # collected only for internal/app (adapters need live external services).
+  # Race detector on all packages; coverage collected only for internal/app
+  # (adapters need live external services).
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -95,27 +93,64 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage
           path: coverage.out
           retention-days: 14
 
-      - name: Publish coverage report
-        uses: ncruces/go-coverage-report@v0
+      - uses: ncruces/go-coverage-report@v0
+        if: github.event_name == 'push'
         with:
           coverage-file: coverage.out
           report: true
           chart: true
           amend: true
-        if: github.event_name == 'push'
         continue-on-error: true
 
-  # ── GoReleaser: validate config + linux snapshot build ────────────────────
+  # ── Go vulnerability scan ─────────────────────────────────────────────────
+  # govulncheck cross-references the module graph against the Go vuln DB.
+  # Runs in parallel with lint + test so it doesn't extend the critical path.
+  govulncheck:
+    name: Go vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+  # ── Dependency review (PRs only) ──────────────────────────────────────────
+  # Blocks PRs that introduce dependencies with known CVEs or non-permissive
+  # licenses. Only runs on pull_request — push events don't need it.
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          # Fail on high+ severity CVEs that have a fix available.
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, LGPL-2.0, LGPL-2.1, AGPL-3.0
+          comment-summary-in-pr: always
+
+  # ── GoReleaser: validate config + linux snapshot ──────────────────────────
   # Validates .goreleaser.yaml and builds linux/amd64 + linux/arm64 binaries.
-  # Runs on push only — PRs get lint + test feedback without the heavy build.
+  # Push only — PRs get lint+test+vuln feedback without the heavy build.
   goreleaser:
     name: GoReleaser snapshot
     runs-on: ubuntu-latest
@@ -132,7 +167,7 @@ jobs:
           cache: true
 
       - name: Install arm64 cross-compiler
-        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
 
       - name: Validate .goreleaser.yaml
         uses: goreleaser/goreleaser-action@v6
@@ -144,31 +179,30 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          # --id linux: only build the linux targets defined in .goreleaser.yaml.
-          # darwin builds require osxcross (goreleaser-cross image) — run in release only.
+          # --id linux: darwin requires osxcross — available only in release.yml.
           args: build --snapshot --clean --id linux
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload snapshot artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: snapshot-linux
           path: dist/
           retention-days: 3
 
-  # ── Container image (main branch only) ───────────────────────────────────
-  # Builds a multi-arch image from Dockerfile using buildx + QEMU, then
-  # pushes edge + sha-<short> tags to ghcr.io.
-  # Runs after the goreleaser snapshot so a broken binary blocks the push.
+  # ── Container image ──────────────────────────────────────────────────────
+  # PRs:       linux/amd64 only, load to local daemon, trivy scan — no push.
+  # push/main: linux/amd64 + linux/arm64, push to ghcr.io with SBOM +
+  #            provenance attestations, trivy scan from registry.
   image:
-    name: Build & push edge image
+    name: ${{ github.event_name == 'pull_request' && 'Build & scan image (no push)' || 'Build, push & scan edge image' }}
     runs-on: ubuntu-latest
-    needs: [goreleaser]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, test]
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     permissions:
       contents: read
       packages: write
+      security-events: write   # trivy SARIF upload
     steps:
       - uses: actions/checkout@v4
 
@@ -176,7 +210,10 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      # Skip login on PRs — forks don't have package write access.
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -187,18 +224,55 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/commit0
           tags: |
-            type=raw,value=edge
-            type=sha,prefix=sha-,format=short
+            type=raw,value=edge,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short,enable={{is_default_branch}}
 
+      # PRs:  single platform + load for local trivy scan.
+      # main: multi-arch + push with SBOM and SLSA provenance attestations.
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=edge
+            VERSION=${{ github.event_name == 'pull_request' && 'pr' || 'edge' }}
             COMMIT=${{ github.sha }}
+          provenance: ${{ github.event_name == 'pull_request' && 'false' || 'mode=max' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Resolve the image reference for trivy:
+      #   PR   → local image ID (sha256:...) from the Docker daemon.
+      #   main → registry digest reference (can be pulled by trivy).
+      - name: Resolve image ref for scanning
+        id: image-ref
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "value=${{ steps.build.outputs.imageid }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=ghcr.io/${{ github.repository_owner }}/commit0@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.image-ref.outputs.value }}
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          # Only fail on fixable CVEs — base-image unfixable vulns shouldn't
+          # block unrelated PRs.
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()   # upload even when the scan step fails
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image

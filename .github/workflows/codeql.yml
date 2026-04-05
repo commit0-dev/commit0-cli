@@ -1,0 +1,51 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly deep scan on Monday at 02:30 UTC (off-peak).
+    - cron: "30 2 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (Go)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # CGO is required — tree-sitter C sources are compiled at go build time.
+      # Without this the autobuild step would fail to compile the project.
+      - name: Install CGO dependencies
+        run: sudo apt-get install -y --no-install-recommends gcc
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          # security-extended adds CWE checks beyond the default security suite.
+          queries: security-extended,security-and-quality
+
+      - uses: github/codeql-action/autobuild@v3
+        env:
+          CGO_ENABLED: "1"
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:go
