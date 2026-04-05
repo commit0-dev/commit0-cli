@@ -52,7 +52,12 @@ func (a *SurrealAdapter) TextSearch(ctx context.Context, query string, opts doma
 	var allResults []types.ScoredNode
 
 	for _, table := range tables {
-		rows, err := a.ftsSearchTable(ctx, table, query, fields, topK, opts.RepoSlug)
+		// Module table uses "path" instead of "qualified".
+		tableFields := fields
+		if table == "module" {
+			tableFields = ftsFieldsForModule(fields)
+		}
+		rows, err := a.ftsSearchTable(ctx, table, query, tableFields, topK, opts.RepoSlug)
 		if err != nil {
 			a.log.Warn("fts search failed for table", "table", table, "err", err)
 			continue
@@ -164,11 +169,26 @@ func buildFTSWhere(fields []string) string {
 	return result
 }
 
+// ftsFieldsForModule maps the default FTS field list to module-compatible
+// fields: "qualified" → "path" (module table has path, not qualified).
+func ftsFieldsForModule(fields []string) []string {
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		switch f {
+		case "qualified":
+			out = append(out, "path")
+		default:
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // ftsTablesToSearch returns the tables to query for FTS.
 // File table uses path field; class/module have limited FTS indexes.
 func ftsTablesToSearch(kinds []types.NodeKind) []string {
 	if len(kinds) == 0 {
-		return []string{"function", "class"}
+		return []string{"function", "class", "module"}
 	}
 	seen := make(map[string]bool, len(kinds))
 	var tables []string

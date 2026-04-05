@@ -164,10 +164,11 @@ UPSERT type::record($record_id) CONTENT {
 	case "module":
 		return `
 UPSERT type::record($record_id) CONTENT {
-    name:     $name,
-    path:     $file_path,
-    repo:     type::record($repo_ref),
-    language: $language,
+    name:      $name,
+    path:      $file_path,
+    repo:      type::record($repo_ref),
+    language:  $language,
+    docstring: $docstring,
     embedding: $embedding
 };`
 	}

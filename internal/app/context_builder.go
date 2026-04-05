@@ -36,11 +36,22 @@ func NewContextBuilderWithStore(maxBodyRunes int, store domain.GraphStore) *Cont
 // data (callers and callees) when a GraphStore is attached and node.ID is set.
 // Falls back to ForNode if the store is nil or the lookup fails.
 func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) string {
-	if node == nil || node.Kind != types.NodeFunction || cb.store == nil || node.ID == "" {
+	if node == nil || cb.store == nil || node.ID == "" {
 		return cb.ForNode(node)
 	}
 
-	// Depth-1 traversal to get direct callees and callers.
+	switch node.Kind {
+	case types.NodeFunction:
+		return cb.forFunctionCtx(ctx, node)
+	case types.NodeModule:
+		return cb.forModuleCtx(ctx, node)
+	default:
+		return cb.ForNode(node)
+	}
+}
+
+// forFunctionCtx enriches a function node with call-graph neighbours.
+func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNode) string {
 	callees, _ := cb.store.TraceForward(ctx, node.ID, 1)
 	callers, _ := cb.store.TraceReverse(ctx, node.ID, 1)
 
@@ -67,6 +78,25 @@ func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) 
 	}
 	sb.WriteString("---\n")
 	sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
+	return sb.String()
+}
+
+// forModuleCtx enriches a module node with its importers (reverse imports).
+func (cb *ContextBuilder) forModuleCtx(ctx context.Context, node *types.CodeNode) string {
+	importers, _ := cb.store.TraceReverse(ctx, node.ID, 1)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("task: search result | query: [MODULE] %s\n", node.Name))
+	sb.WriteString(fmt.Sprintf("Import path: %s\n", node.Qualified))
+	sb.WriteString(fmt.Sprintf("Language: %s\n", node.Language))
+	if node.Docstring != "" {
+		sb.WriteString(fmt.Sprintf("Version: %s\n", node.Docstring))
+	}
+	if len(importers) > 0 {
+		names := hopNames(importers)
+		sb.WriteString(fmt.Sprintf("Imported by: %s\n", strings.Join(names, ", ")))
+	}
+	sb.WriteString(fmt.Sprintf("Module dependency used in the codebase. Package %s provides functionality imported via \"%s\".\n", node.Name, node.Qualified))
 	return sb.String()
 }
 
@@ -129,11 +159,12 @@ func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 
 	case types.NodeModule:
 		sb.WriteString(fmt.Sprintf("task: search result | query: [MODULE] %s\n", node.Name))
-		sb.WriteString(fmt.Sprintf("Path: %s\n", node.FilePath))
-		if node.Body != "" {
-			sb.WriteString("---\n")
-			sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
+		sb.WriteString(fmt.Sprintf("Import path: %s\n", node.Qualified))
+		sb.WriteString(fmt.Sprintf("Language: %s\n", node.Language))
+		if node.Docstring != "" {
+			sb.WriteString(fmt.Sprintf("Version: %s\n", node.Docstring))
 		}
+		sb.WriteString(fmt.Sprintf("Module dependency used in the codebase. Package %s provides functionality imported via \"%s\".\n", node.Name, node.Qualified))
 
 	default:
 		// Unknown kind - just use prefix + body

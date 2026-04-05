@@ -112,10 +112,11 @@ DEFINE FIELD name       ON module TYPE string;
 DEFINE FIELD path       ON module TYPE string;
 DEFINE FIELD repo       ON module TYPE record<repo> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD language   ON module TYPE string;
+DEFINE FIELD docstring  ON module TYPE option<string>;
 DEFINE FIELD embedding  ON module TYPE option<array<float>>;
 DEFINE FIELD indexed_at ON module TYPE datetime VALUE time::now();
 
-DEFINE FIELD file_count ON module COMPUTED count(<-defines<-file);
+DEFINE FIELD file_count ON module COMPUTED count(<-imports<-file);
 
 DEFINE INDEX mod_repo_path_idx ON module FIELDS repo, path UNIQUE;
 
@@ -214,6 +215,11 @@ DEFINE INDEX cls_doc_fts  ON class FIELDS docstring
 
 DEFINE INDEX file_path_fts ON file FIELDS path
     FULLTEXT ANALYZER code_analyzer BM25;
+
+DEFINE INDEX mod_name_fts ON module FIELDS name, path
+    FULLTEXT ANALYZER code_analyzer BM25;
+DEFINE INDEX mod_doc_fts  ON module FIELDS docstring
+    FULLTEXT ANALYZER nl_analyzer BM25;
 
 -- ─────────────────────────────────────────
 -- Schema Version (for migration tracking)
