@@ -50,7 +50,7 @@ func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) 
 	}
 }
 
-// forFunctionCtx enriches a function node with call-graph neighbours.
+// forFunctionCtx enriches a function node with call-graph neighbors.
 func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNode) string {
 	callees, _ := cb.store.TraceForward(ctx, node.ID, 1)
 	callers, _ := cb.store.TraceReverse(ctx, node.ID, 1)
