@@ -10,6 +10,7 @@ import (
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
 	"github.com/commit0-dev/commit0/internal/domain"
+	"github.com/commit0-dev/commit0/internal/infra/retry"
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
@@ -912,14 +913,20 @@ func (a *SurrealAdapter) UpsertFileBatch(ctx context.Context, nodes []types.Code
 		if q == "" {
 			continue
 		}
-		results, err := surrealdb.Query[any](ctx, a.db, q, nodeParams(node))
+		err := retry.WithRetry(ctx, 3, func() error {
+			results, err := surrealdb.Query[any](ctx, a.db, q, nodeParams(node))
+			if err != nil {
+				return classifySurrealError(err)
+			}
+			for _, r := range *results {
+				if r.Status == "ERR" {
+					return classifySurrealError(fmt.Errorf("%v", r.Error))
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			return fmt.Errorf("upsert node %s: %w", node.ID, err)
-		}
-		for _, r := range *results {
-			if r.Status == "ERR" {
-				return fmt.Errorf("upsert node %s: %v", node.ID, r.Error)
-			}
 		}
 	}
 
@@ -1047,4 +1054,20 @@ func repoRowToRepo(r repoRow) *types.Repo {
 		LastCommit:    r.LastCommit,
 		LastIndexedAt: r.LastIndexedAt,
 	}
+}
+
+// classifySurrealError wraps SurrealDB errors into domain error types so the
+// retry layer can distinguish transient failures from permanent ones.
+// Transaction write conflicts are common under concurrent upsert workloads and
+// are safe to retry with backoff.
+func classifySurrealError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "Transaction conflict") ||
+		strings.Contains(msg, "write conflict") {
+		return domain.Conflict(msg)
+	}
+	return err
 }
