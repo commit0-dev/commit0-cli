@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 )
@@ -94,11 +93,6 @@ func (cb *ContextBuilder) truncate(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return ""
 	}
-
-	if utf8.RuneCountInString(s) <= maxRunes {
-		return s
-	}
-
 	count := 0
 	for i := range s {
 		if count == maxRunes {

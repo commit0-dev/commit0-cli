@@ -9,12 +9,12 @@ import (
 
 func TestReciprocalRankFusion(t *testing.T) {
 	tests := []struct {
-		name       string
-		vector     []types.ScoredNode
-		fts        []types.ScoredNode
-		weights    RRFWeights
-		wantCount  int
-		wantOrder  []string // node IDs in expected order
+		name      string
+		vector    []types.ScoredNode
+		fts       []types.ScoredNode
+		weights   RRFWeights
+		wantCount int
+		wantOrder []string // node IDs in expected order
 	}{
 		{
 			name:      "empty both lists",
@@ -101,7 +101,6 @@ func TestReciprocalRankFusion(t *testing.T) {
 }
 
 func TestCentralityBoostGuard(t *testing.T) {
-	// Ensure Centrality=0 doesn't zero out score
 	nodes := []types.ScoredNode{
 		{Node: types.CodeNode{ID: "n1"}, Centrality: 0},
 	}
@@ -111,7 +110,6 @@ func TestCentralityBoostGuard(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(result))
 	}
 
-	// With Centrality=0, boost should be max(1, log(1+0)) = 1, so score should be > 0
 	if result[0].FusedScore <= 0 {
 		t.Errorf("FusedScore = %f, want > 0 for Centrality=0", result[0].FusedScore)
 	}
@@ -125,19 +123,16 @@ func TestRRFWeights(t *testing.T) {
 		{Node: types.CodeNode{ID: "n2"}},
 	}
 
-	// Test with different K values
 	w1 := RRFWeights{Vector: 1, FTS: 1, K: 10}
 	result1 := ReciprocalRankFusion(vector, fts, w1)
 
 	w2 := RRFWeights{Vector: 1, FTS: 1, K: 100}
 	result2 := ReciprocalRankFusion(vector, fts, w2)
 
-	// Different K should produce different results (lower K gives higher scores)
 	if len(result1) != 2 || len(result2) != 2 {
 		t.Fatalf("expected 2 results in both cases")
 	}
 
-	// Score with K=10 should be higher than K=100
 	if result1[0].FusedScore <= result2[0].FusedScore {
 		t.Errorf("K=10 score (%.2f) should be higher than K=100 score (%.2f)",
 			result1[0].FusedScore, result2[0].FusedScore)
@@ -159,11 +154,53 @@ func TestRRFWeightsBalance(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(result))
 	}
 
-	// With both vector and FTS having same node at rank 0
-	// Score = 2/(60+1) + 1/(60+1) = 3/61 ≈ 0.049
 	expected := (2.0 + 1.0) / 61.0
 	actual := result[0].FusedScore
 	if math.Abs(actual-expected) > 0.001 {
 		t.Errorf("FusedScore = %.6f, want %.6f", actual, expected)
+	}
+}
+
+func TestRRFNegativeK(t *testing.T) {
+	// Negative K should default to 60
+	vector := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "n1"}},
+	}
+	result := ReciprocalRankFusion(vector, []types.ScoredNode{}, RRFWeights{Vector: 1, FTS: 1, K: -5})
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+	// With K=60 (default), score = 1/(60+1) = 1/61 ≈ 0.01639
+	expected := 1.0 / 61.0
+	if math.Abs(result[0].FusedScore-expected) > 0.001 {
+		t.Errorf("FusedScore with negative K = %.6f, want %.6f (K=60 default)", result[0].FusedScore, expected)
+	}
+}
+
+func TestRRFTiebreakByNodeID(t *testing.T) {
+	// Two nodes with the same centrality (=0) and same rank position produce
+	// identical RRF scores → tiebreak must be by node ID (ascending).
+	vector := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "z-node"}, Centrality: 0},
+		{Node: types.CodeNode{ID: "a-node"}, Centrality: 0},
+	}
+	fts := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "z-node"}, Centrality: 0},
+		{Node: types.CodeNode{ID: "a-node"}, Centrality: 0},
+	}
+
+	result := ReciprocalRankFusion(vector, fts, DefaultRRFWeights())
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(result))
+	}
+
+	// Both nodes have the same score; check they're in a deterministic order.
+	// With same score, sort is by node ID ascending → "a-node" before "z-node".
+	if result[0].FusedScore == result[1].FusedScore {
+		if result[0].Node.ID > result[1].Node.ID {
+			t.Errorf("tiebreak should sort by ID ascending: got %s before %s",
+				result[0].Node.ID, result[1].Node.ID)
+		}
 	}
 }

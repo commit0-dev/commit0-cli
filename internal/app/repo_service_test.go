@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -35,6 +37,10 @@ func TestRepoServiceCreateRepo(t *testing.T) {
 
 	if len(repo.Languages) != 2 {
 		t.Errorf("Languages = %v, want [go python]", repo.Languages)
+	}
+
+	if repo.DefaultBranch != "main" {
+		t.Errorf("DefaultBranch = %s, want main", repo.DefaultBranch)
 	}
 }
 
@@ -103,6 +109,23 @@ func TestRepoServiceCreateRepoConflict(t *testing.T) {
 	}
 }
 
+func TestRepoServiceCreateRepoUpsertFails(t *testing.T) {
+	store := newStubGraphStore()
+	store.upsertRepoErr = fmt.Errorf("db write failure")
+
+	svc := NewRepoService(store)
+	ctx := context.Background()
+
+	_, err := svc.CreateRepo(ctx, CreateRepoRequest{
+		Slug: "new-repo",
+		Path: "/path",
+	})
+
+	if err == nil {
+		t.Errorf("CreateRepo should fail when UpsertRepo fails")
+	}
+}
+
 func TestRepoServiceGetRepo(t *testing.T) {
 	store := newStubGraphStore()
 	store.repos["my-repo"] = &types.Repo{
@@ -144,6 +167,26 @@ func TestRepoServiceGetRepoNotFound(t *testing.T) {
 	}
 }
 
+func TestRepoServiceGetRepoNonDomainError(t *testing.T) {
+	// When store.GetRepo returns a non-domain error, GetRepo wraps it with fmt.Errorf
+	store := newStubGraphStore()
+	store.err = errors.New("connection refused") // generic error
+
+	svc := NewRepoService(store)
+	ctx := context.Background()
+
+	_, err := svc.GetRepo(ctx, "any-repo")
+	if err == nil {
+		t.Errorf("GetRepo should fail when store returns error")
+	}
+
+	// Should NOT be a domain error wrapping (it's wrapped with "get repo:")
+	var domErr *domain.DomainError
+	if errors.As(err, &domErr) {
+		t.Errorf("expected wrapped generic error, got domain error: %v", domErr)
+	}
+}
+
 func TestRepoServiceListRepos(t *testing.T) {
 	store := newStubGraphStore()
 	store.repos["repo1"] = &types.Repo{Slug: "repo1"}
@@ -160,6 +203,19 @@ func TestRepoServiceListRepos(t *testing.T) {
 
 	if len(repos) != 3 {
 		t.Errorf("ListRepos returned %d repos, want 3", len(repos))
+	}
+}
+
+func TestRepoServiceListReposFails(t *testing.T) {
+	store := newStubGraphStore()
+	store.listReposErr = fmt.Errorf("db read failure")
+
+	svc := NewRepoService(store)
+	ctx := context.Background()
+
+	_, err := svc.ListRepos(ctx)
+	if err == nil {
+		t.Errorf("ListRepos should fail when store fails")
 	}
 }
 
@@ -191,5 +247,121 @@ func TestRepoServiceDeleteRepoNotFound(t *testing.T) {
 	_, err := svc.DeleteRepo(ctx, "nonexistent")
 	if err == nil {
 		t.Errorf("DeleteRepo should fail for non-existent repo")
+	}
+}
+
+func TestRepoServiceDeleteRepoNodesFails(t *testing.T) {
+	store := newStubGraphStore()
+	store.repos["my-repo"] = &types.Repo{Slug: "my-repo", Path: "/path"}
+	store.deleteNodesErr = fmt.Errorf("delete nodes failed")
+
+	svc := NewRepoService(store)
+	ctx := context.Background()
+
+	_, err := svc.DeleteRepo(ctx, "my-repo")
+	if err == nil {
+		t.Errorf("DeleteRepo should fail when DeleteNodesByRepo fails")
+	}
+}
+
+func TestRepoServiceUpdateRepoSuccess(t *testing.T) {
+	store := newStubGraphStore()
+	store.repos["my-repo"] = &types.Repo{
+		Slug:      "my-repo",
+		Path:      "/path",
+		Languages: []string{"go"},
+	}
+
+	svc := NewRepoService(store)
+	ctx := context.Background()
+
+	repo, err := svc.UpdateRepo(ctx, UpdateRepoRequest{
+		Slug:       "my-repo",
+		Languages:  []string{"go", "python"},
+		LastCommit: "abc123",
+	})
+
+	if err != nil {
+		t.Fatalf("UpdateRepo failed: %v", err)
+	}
+	if len(repo.Languages) != 2 {
+		t.Errorf("Languages = %v, want [go python]", repo.Languages)
+	}
+	if repo.LastCommit != "abc123" {
+		t.Errorf("LastCommit = %s, want abc123", repo.LastCommit)
+	}
+}
+
+func TestRepoServiceUpdateRepoLanguagesOnly(t *testing.T) {
+	store := newStubGraphStore()
+	store.repos["repo"] = &types.Repo{
+		Slug: "repo", Path: "/p", Languages: []string{"go"},
+	}
+
+	svc := NewRepoService(store)
+	repo, err := svc.UpdateRepo(context.Background(), UpdateRepoRequest{
+		Slug:      "repo",
+		Languages: []string{"go", "ts"},
+	})
+
+	if err != nil {
+		t.Fatalf("UpdateRepo failed: %v", err)
+	}
+	if len(repo.Languages) != 2 {
+		t.Errorf("Languages = %v, want 2 entries", repo.Languages)
+	}
+	// LastCommit unchanged
+	if repo.LastCommit != "" {
+		t.Errorf("LastCommit should be unchanged, got %q", repo.LastCommit)
+	}
+}
+
+func TestRepoServiceUpdateRepoLastCommitOnly(t *testing.T) {
+	store := newStubGraphStore()
+	store.repos["repo"] = &types.Repo{
+		Slug: "repo", Path: "/p", Languages: []string{"go"},
+	}
+
+	svc := NewRepoService(store)
+	repo, err := svc.UpdateRepo(context.Background(), UpdateRepoRequest{
+		Slug:       "repo",
+		LastCommit: "deadbeef",
+	})
+
+	if err != nil {
+		t.Fatalf("UpdateRepo failed: %v", err)
+	}
+	if repo.LastCommit != "deadbeef" {
+		t.Errorf("LastCommit = %s, want deadbeef", repo.LastCommit)
+	}
+}
+
+func TestRepoServiceUpdateRepoNotFound(t *testing.T) {
+	store := newStubGraphStore()
+	svc := NewRepoService(store)
+
+	_, err := svc.UpdateRepo(context.Background(), UpdateRepoRequest{
+		Slug: "nonexistent",
+	})
+
+	if err == nil {
+		t.Errorf("UpdateRepo should fail for non-existent repo")
+	}
+}
+
+func TestRepoServiceUpdateRepoUpsertFails(t *testing.T) {
+	store := newStubGraphStore()
+	store.repos["repo"] = &types.Repo{Slug: "repo", Path: "/p"}
+	store.upsertRepoErr = fmt.Errorf("write failed")
+
+	svc := NewRepoService(store)
+
+	_, err := svc.UpdateRepo(context.Background(), UpdateRepoRequest{
+		Slug:      "repo",
+		Languages: []string{"go"},
+	})
+
+	if err == nil {
+		t.Errorf("UpdateRepo should fail when UpsertRepo fails")
 	}
 }

@@ -33,13 +33,15 @@ type IndexResult struct {
 
 // IndexService orchestrates the indexing pipeline
 type IndexService struct {
-	walker   domain.FileWalker
-	parser   domain.Parser
-	embedder domain.Embedder
-	store    domain.GraphStore
-	builder  *ContextBuilder
-	cfg      *config.Config
-	log      *slog.Logger
+	walker      domain.FileWalker
+	parser      domain.Parser
+	embedder    domain.Embedder
+	store       domain.GraphStore
+	builder     *ContextBuilder
+	cfg         *config.Config
+	log         *slog.Logger
+	parsedChBuf int // channel buffer override: <0 = unbuffered, 0 = default (64), >0 = exact size
+	embedChBuf  int // channel buffer override: <0 = unbuffered, 0 = default (32), >0 = exact size
 }
 
 // NewIndexService creates a new index service
@@ -77,14 +79,20 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	if parseLimit <= 0 {
 		parseLimit = runtime.GOMAXPROCS(0)
 	}
-	parsedCh := make(chan *domain.ParsedFile, 64)
+	parsedCap := 64
+	switch {
+	case is.parsedChBuf > 0:
+		parsedCap = is.parsedChBuf
+	case is.parsedChBuf < 0:
+		parsedCap = 0 // unbuffered — used in tests to force context-cancel path
+	}
+	parsedCh := make(chan *domain.ParsedFile, parsedCap)
 	parseGroup, parseCtx := errgroup.WithContext(ctx)
 	parseGroup.SetLimit(parseLimit)
 
 	go func() {
 		defer close(parsedCh)
 		for file := range fileCh {
-			file := file // capture for closure
 			parseGroup.Go(func() error {
 				parsed, err := is.parser.Parse(parseCtx, file)
 				if err != nil {
@@ -109,7 +117,14 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	}()
 
 	// Stage 3: Embed (Gemini API, limit to 4 concurrent)
-	embedCh := make(chan *embeddedFile, 32)
+	embedCap := 32
+	switch {
+	case is.embedChBuf > 0:
+		embedCap = is.embedChBuf
+	case is.embedChBuf < 0:
+		embedCap = 0 // unbuffered — used in tests to force context-cancel path
+	}
+	embedCh := make(chan *embeddedFile, embedCap)
 	embedGroup, embedCtx := errgroup.WithContext(ctx)
 	embedGroup.SetLimit(is.cfg.Index.MaxWorkersEmbed)
 
@@ -117,7 +132,6 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		defer close(embedCh)
 		batcher := NewEmbedBatcher(is.embedder, is.cfg.Index.BatchSize)
 		for parsed := range parsedCh {
-			parsed := parsed // capture for closure
 			embedGroup.Go(func() error {
 				nodes, err := batcher.Process(embedCtx, parsed.Nodes, is.builder)
 				if err != nil {
@@ -142,13 +156,15 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	storeGroup.SetLimit(is.cfg.Index.MaxWorkersStore)
 
 	for embedded := range embedCh {
-		embedded := embedded // capture for closure
 		storeGroup.Go(func() error {
-			err := is.store.UpsertFileBatch(storeCtx, embedded.Nodes, embedded.Edges)
-			if err != nil {
+			// Context cancellation is fatal — propagate for graceful shutdown
+			if err := storeCtx.Err(); err != nil {
+				return err
+			}
+			if err := is.store.UpsertFileBatch(storeCtx, embedded.Nodes, embedded.Edges); err != nil {
 				is.log.Error("upsert failed", "err", err)
 				run.addError()
-				return nil // non-fatal
+				return nil // non-fatal store error
 			}
 			return nil
 		})

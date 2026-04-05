@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/commit0-dev/commit0/internal/config"
@@ -25,15 +26,14 @@ func TestQueryServiceQueryEmptyQuestion(t *testing.T) {
 func TestQueryServiceQuerySuccess(t *testing.T) {
 	embedder := &stubEmbedder{
 		queryVec: []float32{0.1, 0.2, 0.3},
-		batchRes: []domain.EmbedResult{},
 	}
 
 	vectorIdx := &stubVectorIndex{
 		results: []types.ScoredNode{
 			{
-				Node:       types.CodeNode{ID: "n1", Qualified: "pkg.Func1"},
+				Node:        types.CodeNode{ID: "n1", Qualified: "pkg.Func1"},
 				VectorScore: 0.9,
-				FusedScore: 0.9,
+				FusedScore:  0.9,
 			},
 		},
 	}
@@ -75,13 +75,8 @@ func TestQueryServiceQueryEmbedFails(t *testing.T) {
 		err: domain.RateLimit("too fast"),
 	}
 
-	vectorIdx := &stubVectorIndex{
-		results: []types.ScoredNode{},
-	}
-
-	textIdx := &stubTextIndex{
-		results: []types.ScoredNode{},
-	}
+	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
 	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
@@ -105,9 +100,7 @@ func TestQueryServiceQueryVectorSearchFails(t *testing.T) {
 		err: domain.Timeout("timeout", nil),
 	}
 
-	textIdx := &stubTextIndex{
-		results: []types.ScoredNode{},
-	}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
 	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
@@ -122,18 +115,30 @@ func TestQueryServiceQueryVectorSearchFails(t *testing.T) {
 	}
 }
 
-func TestQueryServiceQueryDefaultTopK(t *testing.T) {
-	embedder := &stubEmbedder{
-		queryVec: []float32{0.1},
-	}
-
-	vectorIdx := &stubVectorIndex{
-		results: []types.ScoredNode{},
-	}
-
+func TestQueryServiceQueryFTSFails(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1}}
+	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
 	textIdx := &stubTextIndex{
-		results: []types.ScoredNode{},
+		err: domain.Timeout("fts timeout", nil),
 	}
+
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
+	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+
+	_, err := svc.Query(context.Background(), QueryRequest{
+		Question: "find",
+		RepoSlug: "repo",
+	})
+
+	if err == nil {
+		t.Errorf("Query should fail when FTS search fails")
+	}
+}
+
+func TestQueryServiceQueryDefaultTopK(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1}}
+	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 5}}
 	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
@@ -147,9 +152,144 @@ func TestQueryServiceQueryDefaultTopK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
-
-	// Just verify it succeeds with default TopK
 	if result == nil {
 		t.Errorf("Query should return result")
+	}
+}
+
+func TestQueryServiceQueryMinScoreDefault(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1}}
+	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 5, MinScore: 0.7}}
+	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+
+	// MinScore=0 in request → should use cfg.Query.MinScore=0.7
+	result, err := svc.Query(context.Background(), QueryRequest{
+		Question: "find",
+		RepoSlug: "repo",
+		MinScore: 0,
+	})
+
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if result == nil {
+		t.Errorf("Query should return result")
+	}
+}
+
+func TestQueryServiceQueryTopKTruncation(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1}}
+	// Vector returns 5 results but TopK=2 → should be truncated to 2
+	vectorIdx := &stubVectorIndex{
+		results: []types.ScoredNode{
+			{Node: types.CodeNode{ID: "n1"}, FusedScore: 0.9},
+			{Node: types.CodeNode{ID: "n2"}, FusedScore: 0.8},
+			{Node: types.CodeNode{ID: "n3"}, FusedScore: 0.7},
+			{Node: types.CodeNode{ID: "n4"}, FusedScore: 0.6},
+			{Node: types.CodeNode{ID: "n5"}, FusedScore: 0.5},
+		},
+	}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
+	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+
+	result, err := svc.Query(context.Background(), QueryRequest{
+		Question: "find",
+		RepoSlug: "repo",
+		TopK:     2,
+	})
+
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if len(result.Nodes) > 2 {
+		t.Errorf("Nodes should be truncated to TopK=2, got %d", len(result.Nodes))
+	}
+}
+
+func TestQueryServiceQueryWithExplainerSuccess(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1}}
+	vectorIdx := &stubVectorIndex{
+		results: []types.ScoredNode{
+			{Node: types.CodeNode{ID: "n1", Qualified: "pkg.Func"}, FusedScore: 0.9},
+		},
+	}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+
+	explainer := &stubExplainer{
+		chunks: []domain.ExplainChunk{
+			{Text: "This function ", Done: false},
+			{Text: "handles auth", Done: true},
+		},
+	}
+
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
+	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, explainer, cfg)
+
+	result, err := svc.Query(context.Background(), QueryRequest{
+		Question: "find auth",
+		RepoSlug: "repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if result.Explanation != "This function handles auth" {
+		t.Errorf("Explanation = %q, want 'This function handles auth'", result.Explanation)
+	}
+}
+
+func TestQueryServiceQueryWithExplainerFails(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1}}
+	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+	explainer := &stubExplainer{
+		err: errors.New("llm unavailable"),
+	}
+
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
+	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, explainer, cfg)
+
+	// Explainer failure is non-fatal
+	result, err := svc.Query(context.Background(), QueryRequest{
+		Question: "find",
+		RepoSlug: "repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Query should succeed even when explainer fails, got: %v", err)
+	}
+	if result.Explanation != "" {
+		t.Errorf("Explanation should be empty on explainer error")
+	}
+}
+
+func TestQueryServiceQueryWithExplainerChunkError(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1}}
+	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
+	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+	explainer := &stubExplainer{
+		chunks: []domain.ExplainChunk{
+			{Error: errors.New("stream interrupted")},
+		},
+	}
+
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
+	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, explainer, cfg)
+
+	result, err := svc.Query(context.Background(), QueryRequest{
+		Question: "find",
+		RepoSlug: "repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Query should succeed even with chunk error, got: %v", err)
+	}
+	if result.Explanation != "" {
+		t.Errorf("Explanation should be empty on chunk error")
 	}
 }
