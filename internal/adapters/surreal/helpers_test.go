@@ -212,7 +212,7 @@ func TestRowToCodeNode_NilEmbedding(t *testing.T) {
 
 func TestNewSurrealAdapter_EmptyURL(t *testing.T) {
 	ctx := context.Background()
-	_, err := NewSurrealAdapter(ctx, &config.SurrealConfig{URL: ""})
+	_, err := NewSurrealAdapter(ctx, &config.SurrealConfig{URL: ""}, 3072)
 	if err == nil {
 		t.Fatal("expected error for empty URL, got nil")
 	}

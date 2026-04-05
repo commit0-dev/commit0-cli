@@ -35,7 +35,7 @@ func TestSurrealAdapterConnect(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available at %s: %v", cfg.URL, err)
 	}
@@ -50,7 +50,7 @@ func TestSurrealAdapterApplySchema(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestSurrealAdapterRepoCRUD(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestSurrealAdapterUpsertAndGetNode(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestSurrealAdapterUpsertFileBatch(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestSurrealAdapterTraceForwardReverse(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestSurrealAdapterVectorSearch(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestSurrealAdapterDeleteNode(t *testing.T) {
 	ctx := context.Background()
 	cfg := surrealCfg()
 
-	adapter, err := surreal.NewSurrealAdapter(ctx, cfg)
+	adapter, err := surreal.NewSurrealAdapter(ctx, cfg, 3072)
 	if err != nil {
 		t.Skipf("SurrealDB not available: %v", err)
 	}

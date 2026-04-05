@@ -215,20 +215,20 @@ DEFINE INDEX OVERWRITE writes_in_idx  ON writes FIELDS in;
 DEFINE INDEX OVERWRITE writes_out_idx ON writes FIELDS out;
 
 -- ─────────────────────────────────────────
--- Vector Indexes (HNSW — Gemini Embedding 2, 3072-dim)
+-- Vector Indexes (HNSW — dimension set by EMBED_DIM config)
 -- ─────────────────────────────────────────
 
 DEFINE INDEX OVERWRITE fn_vec_idx   ON `function` FIELDS embedding
-    HNSW DIMENSION 3072 DIST COSINE TYPE F32 EFC 200 M 16;
+    HNSW DIMENSION {{EMBED_DIM}} DIST COSINE TYPE F32 EFC 200 M 16;
 
 DEFINE INDEX OVERWRITE cls_vec_idx  ON class FIELDS embedding
-    HNSW DIMENSION 3072 DIST COSINE TYPE F32 EFC 200 M 16;
+    HNSW DIMENSION {{EMBED_DIM}} DIST COSINE TYPE F32 EFC 200 M 16;
 
 DEFINE INDEX OVERWRITE file_vec_idx ON file FIELDS embedding
-    HNSW DIMENSION 3072 DIST COSINE TYPE F32 EFC 150 M 12;
+    HNSW DIMENSION {{EMBED_DIM}} DIST COSINE TYPE F32 EFC 150 M 12;
 
 DEFINE INDEX OVERWRITE mod_vec_idx  ON module FIELDS embedding
-    HNSW DIMENSION 3072 DIST COSINE TYPE F32 EFC 150 M 12;
+    HNSW DIMENSION {{EMBED_DIM}} DIST COSINE TYPE F32 EFC 150 M 12;
 
 -- ─────────────────────────────────────────
 -- Full-Text Search Indexes (BM25)

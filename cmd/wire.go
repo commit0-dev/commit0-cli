@@ -31,8 +31,13 @@ type deps struct {
 func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	log := slog.Default()
 
-	// 1. SurrealDB
-	db, err := surreal.NewSurrealAdapter(ctx, &cfg.Surreal)
+	// 1. SurrealDB — pass the embed dimension so ApplySchema creates HNSW
+	// indexes matching the configured embedding provider.
+	embedDim := cfg.Gemini.EmbedDimension
+	if cfg.EmbedProvider == "voyage" {
+		embedDim = cfg.Voyage.EmbedDimension
+	}
+	db, err := surreal.NewSurrealAdapter(ctx, &cfg.Surreal, embedDim)
 	if err != nil {
 		return nil, nil, fmt.Errorf("surreal: %w", err)
 	}

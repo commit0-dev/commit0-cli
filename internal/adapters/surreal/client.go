@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"time"
 
 	surrealdb "github.com/surrealdb/surrealdb.go"
+	"github.com/surrealdb/surrealdb.go/pkg/connection"
+	"github.com/surrealdb/surrealdb.go/pkg/connection/gorillaws"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
 	"github.com/commit0-dev/commit0/internal/config"
@@ -36,20 +40,39 @@ func (a *SurrealAdapter) AsTextIndex() domain.TextIndex { return &TextAdapter{a}
 // SurrealAdapter implements GraphStore, VectorIndex, and TextIndex
 // using SurrealDB 3.0 via WebSocket.
 type SurrealAdapter struct {
-	db     *surrealdb.DB
-	log    *slog.Logger
-	ns     string
-	dbName string
+	db       *surrealdb.DB
+	log      *slog.Logger
+	ns       string
+	dbName   string
+	embedDim int // HNSW vector index dimension (e.g. 3072, 1024)
 }
 
+// rpcTimeout is the maximum time the WebSocket client waits for a single RPC
+// response. The default in surrealdb.go is 30s, which is too short for heavy
+// DDL operations such as HNSW index rebuilds on existing data.
+const rpcTimeout = 5 * time.Minute
+
 // NewSurrealAdapter dials SurrealDB, authenticates, and selects the
-// namespace/database specified in cfg. The returned adapter is ready to use.
-func NewSurrealAdapter(ctx context.Context, cfg *config.SurrealConfig) (*SurrealAdapter, error) {
+// namespace/database specified in cfg. embedDim sets the HNSW vector index
+// dimension used in ApplySchema (e.g. 3072 for Gemini, 1024 for Voyage).
+func NewSurrealAdapter(ctx context.Context, cfg *config.SurrealConfig, embedDim int) (*SurrealAdapter, error) {
 	if cfg.URL == "" {
 		return nil, domain.Validation("surreal URL is required")
 	}
 
-	db, err := surrealdb.FromEndpointURLString(ctx, cfg.URL)
+	u, err := url.ParseRequestURI(cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("surreal: invalid URL %q: %w", cfg.URL, err)
+	}
+
+	connCfg := connection.NewConfig(u)
+	if cfgErr := connCfg.Validate(); cfgErr != nil {
+		return nil, fmt.Errorf("surreal: invalid connection config: %w", cfgErr)
+	}
+
+	ws := gorillaws.New(connCfg).SetTimeOut(rpcTimeout)
+
+	db, err := surrealdb.FromConnection(ctx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("surreal dial %s: %w", cfg.URL, err)
 	}
@@ -71,10 +94,11 @@ func NewSurrealAdapter(ctx context.Context, cfg *config.SurrealConfig) (*Surreal
 	log.Info("connected", "url", cfg.URL)
 
 	return &SurrealAdapter{
-		db:     db,
-		ns:     cfg.Namespace,
-		dbName: cfg.Database,
-		log:    log,
+		db:       db,
+		ns:       cfg.Namespace,
+		dbName:   cfg.Database,
+		embedDim: embedDim,
+		log:      log,
 	}, nil
 }
 
