@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# One release at a time — a second tag push waits rather than racing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# goreleaser-cross bundles every cross-compiler needed:
+#   linux/arm64  → aarch64-linux-gnu-gcc
+#   darwin/amd64 → o64-clang   (osxcross)
+#   darwin/arm64 → oa64-clang  (osxcross)
+# Keep this tag in sync with the `go` directive in go.mod.
+env:
+  GORELEASER_CROSS_IMAGE: ghcr.io/goreleaser/goreleaser-cross:v1.26.0
+
+jobs:
+  # ── Binary archives + GitHub Release ─────────────────────────────────────
+  # Builds linux + darwin binaries (amd64/arm64), creates tar.gz archives,
+  # SHA-256 checksums, and publishes the GitHub Release with changelog.
+  release-binaries:
+    name: Release binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # create GitHub Release + upload assets
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for changelog + tag resolution
+
+      # Cache Go modules on the host so the goreleaser-cross container can
+      # reuse them via the mount below.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Write registry credentials to a temp Docker config so goreleaser-cross
+      # can push without a running Docker daemon on the host.
+      - name: Configure ghcr.io credentials
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/.docker"
+          AUTH=$(printf '%s:%s' '${{ github.actor }}' "${GITHUB_TOKEN}" | base64 -w0)
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "${AUTH}" \
+            > "$RUNNER_TEMP/.docker/config.json"
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/.docker" >> "$GITHUB_ENV"
+
+      - name: GoReleaser release
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$HOME/go:/root/go" \
+            -v "$RUNNER_TEMP/.docker:/root/.docker:ro" \
+            -w /workspace \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e GITHUB_REPOSITORY_OWNER="${{ github.repository_owner }}" \
+            "${{ env.GORELEASER_CROSS_IMAGE }}" \
+            goreleaser release --clean
+
+  # ── Multi-arch container image ────────────────────────────────────────────
+  # Builds linux/amd64 + linux/arm64 from Dockerfile, pushes to ghcr.io,
+  # attaches SBOM and SLSA provenance, then signs with cosign (keyless /
+  # Sigstore OIDC) so consumers can verify without managing keys.
+  #
+  # Verification:
+  #   cosign verify \
+  #     --certificate-identity-regexp="…/release.yml" \
+  #     --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  #     ghcr.io/commit0-dev/commit0:<version>
+  release-image:
+    name: Release image
+    runs-on: ubuntu-latest
+    needs: [release-binaries]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write      # cosign keyless signing via GitHub OIDC
+      attestations: write  # actions/attest-build-provenance
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      # cosign v2 — keyless signing, no key material stored in the repo.
+      - uses: sigstore/cosign-installer@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags:  1.2.3 · 1.2 · latest (stable only — no pre-release suffix).
+      # Labels: full OCI image spec (title, description, url, source, …).
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/commit0
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+          labels: |
+            org.opencontainers.image.title=commit0
+            org.opencontainers.image.description=Graph-based source code analyzer with conversational query and blast-radius analysis
+            org.opencontainers.image.url=https://github.com/commit0-dev/commit0
+            org.opencontainers.image.source=https://github.com/commit0-dev/commit0
+            org.opencontainers.image.licenses=MIT
+
+      # provenance=mode=max attaches a SLSA level 3 in-toto provenance statement.
+      # sbom=true attaches a Syft-generated SBOM as an OCI artifact.
+      # Both are stored as image attestations in the registry (no side files).
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Keyless cosign signature using the job's GitHub OIDC token.
+      # The certificate embeds the workflow URL, making the identity verifiable
+      # without any pre-distributed public key.
+      - name: Sign container image
+        run: |
+          cosign sign --yes \
+            "ghcr.io/${{ github.repository_owner }}/commit0@${{ steps.build.outputs.digest }}"
+
+      # GitHub-native provenance attestation (separate from docker buildx
+      # provenance — this one is queryable via `gh attestation verify`).
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/commit0
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      # Vulnerability scan of the published release image.
+      # Uses CRITICAL,HIGH + ignore-unfixed to catch actionable issues only.
+      - name: Scan release image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/commit0@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-release-image
