@@ -51,7 +51,8 @@ var queryCmd = &cobra.Command{
 		}
 
 		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			fmt.Printf("Found %d results in %dms\n\n", len(result.Nodes), result.Timing.TotalMS)
+			fmt.Printf(bold("Found %d results")+" %s\n\n",
+				len(result.Nodes), gray(fmt.Sprintf("(%dms)", result.Timing.TotalMS)))
 			for i, node := range result.Nodes {
 				n := node.Node
 				switch n.Kind {
@@ -60,12 +61,19 @@ var queryCmd = &cobra.Command{
 					if n.Docstring != "" {
 						version = " " + n.Docstring
 					}
-					fmt.Printf("%d. [MODULE] %s%s (score: %.3f)\n   import \"%s\"\n\n",
-						i+1, n.Name, version, node.FusedScore, n.Qualified)
+					fmt.Printf("%s %s %s\n   %s\n\n",
+						gray(fmt.Sprintf("%d.", i+1)),
+						kindBadge("MODULE"),
+						bold(n.Name+version),
+						gray(fmt.Sprintf("import %q  %s", n.Qualified, yellow(fmt.Sprintf("%.3f", node.FusedScore)))))
 				default:
 					label := strings.ToUpper(string(n.Kind))
-					fmt.Printf("%d. [%s] %s (score: %.3f)\n   %s:%d\n\n",
-						i+1, label, n.Qualified, node.FusedScore, n.FilePath, n.StartLine)
+					fmt.Printf("%s %s %s %s\n   %s\n\n",
+						gray(fmt.Sprintf("%d.", i+1)),
+						kindBadge(label),
+						bold(n.Qualified),
+						yellow(fmt.Sprintf("%.3f", node.FusedScore)),
+						gray(fmt.Sprintf("%s:%d", n.FilePath, n.StartLine)))
 				}
 			}
 		}
