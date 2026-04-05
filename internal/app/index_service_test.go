@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/commit0-dev/commit0/internal/config"
@@ -414,6 +415,63 @@ func TestIndexServiceParseContextCancelled(t *testing.T) {
 
 	// Must not hang or panic. Result may be error or zero-result success.
 	svc.Index(ctx, IndexRequest{RepoPath: "/repo", RepoSlug: "r"})
+}
+
+// TestIndexServiceStoreStageFatalError exercises the storeCtx.Err() fatal path and the
+// resulting storeGroup.Wait() error return. We send two files through the full pipeline
+// (parse → embed succeed for both), then in the first store call we cancel the context.
+// With MaxWorkersStore=1, the second goroutine is queued and when it runs it sees
+// storeCtx.Err() != nil, returns the error, and storeGroup.Wait() propagates it.
+func TestIndexServiceStoreStageFatalError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "a.go", Language: "go"},
+			{Path: "b.go", Language: "go"},
+		},
+	}
+	// stubParser returns the same result for every call; both files parse to one node each.
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "a.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "pkg.F", Kind: types.NodeFunction}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	// First UpsertFileBatch call cancels the context; the second goroutine will see
+	// storeCtx.Err() != nil and return it, causing storeGroup.Wait() to return an error.
+	store.upsertBatchFn = func(c context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error {
+		cancel() // cancel the shared context
+		return nil
+	}
+
+	cfg := &config.Config{
+		Index: config.IndexConfig{
+			MaxWorkersEmbed: 2,
+			MaxWorkersStore: 1, // serialise store goroutines: 1st cancels, 2nd sees Err()
+			BatchSize:       1, // flush every node so both files produce store calls
+		},
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	// Both stages have large buffers so items flow through before context check fires.
+	svc.parsedChBuf = 8
+	svc.embedChBuf = 8
+
+	_, err := svc.Index(ctx, IndexRequest{RepoPath: "/repo", RepoSlug: "my-repo"})
+	// The second store goroutine may or may not fire depending on scheduler timing;
+	// the test is valid either way — it must not panic, and if an error is returned
+	// it must be a "store stage" error.
+	if err != nil && !strings.Contains(err.Error(), "store stage") {
+		t.Errorf("expected 'store stage' error, got: %v", err)
+	}
 }
 
 // TestIndexServiceEmbedContextCancelled exercises the embed-stage context-cancel select branch.

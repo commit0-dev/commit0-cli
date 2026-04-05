@@ -89,9 +89,10 @@ func (eb *EmbedBatcher) flushLocked(ctx context.Context) ([]domain.EmbedResult, 
 
 // Process is a convenience method to embed a batch of nodes
 func (eb *EmbedBatcher) Process(ctx context.Context, nodes []types.CodeNode, builder *ContextBuilder) ([]types.CodeNode, error) {
-	// Build inputs from nodes
+	// Build inputs from nodes (use ForNodeCtx for graph-neighborhood enrichment
+	// when a GraphStore is attached to the builder; falls back to ForNode otherwise)
 	for _, node := range nodes {
-		text := builder.ForNode(&node)
+		text := builder.ForNodeCtx(ctx, &node)
 		hash := sha256.Sum256([]byte(text))
 
 		input := domain.EmbedInput{

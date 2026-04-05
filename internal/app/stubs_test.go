@@ -26,6 +26,9 @@ type stubGraphStore struct {
 	traceErr       error // TraceForward / TraceReverse
 	blastRadiusErr error // BlastRadius
 	upsertBatchErr error // UpsertFileBatch
+
+	// Optional hook called at the start of UpsertFileBatch (before error checks).
+	upsertBatchFn func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
 }
 
 func newStubGraphStore() *stubGraphStore {
@@ -127,6 +130,9 @@ func (s *stubGraphStore) BlastRadius(ctx context.Context, targetID string, maxDe
 }
 
 func (s *stubGraphStore) UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error {
+	if s.upsertBatchFn != nil {
+		return s.upsertBatchFn(ctx, nodes, edges)
+	}
 	if s.upsertBatchErr != nil {
 		return s.upsertBatchErr
 	}

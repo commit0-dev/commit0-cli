@@ -1,23 +1,84 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/commit0-dev/commit0/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // ContextBuilder constructs embedding-ready context text from code nodes
 type ContextBuilder struct {
 	maxBodyRunes int
+	store        domain.GraphStore // optional; nil = no graph-neighborhood enrichment
 }
 
-// NewContextBuilder creates a new context builder with a max body size in runes
+// NewContextBuilder creates a new context builder with a max body size in runes.
+// Graph-neighborhood enrichment is disabled (no store attached).
 func NewContextBuilder(maxBodyRunes int) *ContextBuilder {
 	if maxBodyRunes <= 0 {
 		maxBodyRunes = 32768
 	}
 	return &ContextBuilder{maxBodyRunes: maxBodyRunes}
+}
+
+// NewContextBuilderWithStore creates a ContextBuilder that also injects
+// graph-neighborhood context (callers/callees) into function embeddings.
+func NewContextBuilderWithStore(maxBodyRunes int, store domain.GraphStore) *ContextBuilder {
+	cb := NewContextBuilder(maxBodyRunes)
+	cb.store = store
+	return cb
+}
+
+// ForNodeCtx generates embedding input text enriched with graph-neighborhood
+// data (callers and callees) when a GraphStore is attached and node.ID is set.
+// Falls back to ForNode if the store is nil or the lookup fails.
+func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) string {
+	if node == nil || node.Kind != types.NodeFunction || cb.store == nil || node.ID == "" {
+		return cb.ForNode(node)
+	}
+
+	// Depth-1 traversal to get direct callees and callers.
+	callees, _ := cb.store.TraceForward(ctx, node.ID, 1)
+	callers, _ := cb.store.TraceReverse(ctx, node.ID, 1)
+
+	if len(callees) == 0 && len(callers) == 0 {
+		return cb.ForNode(node)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("task: search result | query: [FUNCTION] %s\n", node.Qualified))
+	sb.WriteString(fmt.Sprintf("Language: %s  File: %s:%d-%d\n", node.Language, node.FilePath, node.StartLine, node.EndLine))
+	if node.Signature != "" {
+		sb.WriteString(fmt.Sprintf("Signature: %s\n", node.Signature))
+	}
+	if len(callees) > 0 {
+		names := hopNames(callees)
+		sb.WriteString(fmt.Sprintf("Calls: %s\n", strings.Join(names, ", ")))
+	}
+	if len(callers) > 0 {
+		names := hopNames(callers)
+		sb.WriteString(fmt.Sprintf("Called by: %s\n", strings.Join(names, ", ")))
+	}
+	if node.Docstring != "" {
+		sb.WriteString(fmt.Sprintf("Doc: %s\n", node.Docstring))
+	}
+	sb.WriteString("---\n")
+	sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
+	return sb.String()
+}
+
+// hopNames extracts the qualified names from the first level of TraceHops.
+func hopNames(hops []types.TraceHop) []string {
+	names := make([]string, 0, len(hops))
+	for _, h := range hops {
+		if h.Node.Qualified != "" {
+			names = append(names, h.Node.Qualified)
+		}
+	}
+	return names
 }
 
 // ForNode generates embedding input text from a code node

@@ -13,6 +13,15 @@ type Config struct {
 	Gemini  GeminiConfig
 	Index   IndexConfig
 	Query   QueryConfig
+	Server  ServerConfig
+}
+
+// ServerConfig holds HTTP server settings
+type ServerConfig struct {
+	Port           int
+	CORSOrigins    []string
+	ReadTimeoutSec int
+	WriteTimeoutSec int
 }
 
 // SurrealConfig holds SurrealDB connection settings
@@ -74,9 +83,15 @@ func Load() (*Config, error) {
 			BatchSize:       getEnvInt("INDEX_BATCH_SIZE", 100),
 		},
 		Query: QueryConfig{
-			DefaultTopK:   getEnvInt("QUERY_DEFAULT_TOP_K", 10),
-			MinScore:      getEnvFloat("QUERY_MIN_SCORE", 0.5),
-			RRFKConstant:  getEnvInt("QUERY_RRF_K", 60),
+			DefaultTopK:  getEnvInt("QUERY_DEFAULT_TOP_K", 10),
+			MinScore:     getEnvFloat("QUERY_MIN_SCORE", 0.5),
+			RRFKConstant: getEnvInt("QUERY_RRF_K", 60),
+		},
+		Server: ServerConfig{
+			Port:            getEnvInt("SERVER_PORT", 8080),
+			CORSOrigins:     []string{getEnv("SERVER_CORS_ORIGINS", "*")},
+			ReadTimeoutSec:  getEnvInt("SERVER_READ_TIMEOUT", 30),
+			WriteTimeoutSec: getEnvInt("SERVER_WRITE_TIMEOUT", 120),
 		},
 	}
 

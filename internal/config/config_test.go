@@ -134,3 +134,51 @@ func TestConfigStructFields(t *testing.T) {
 		t.Error("Query config not populated")
 	}
 }
+
+func TestServerConfigDefaults(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Server.Port != 8080 {
+		t.Errorf("Server.Port = %d, want 8080", cfg.Server.Port)
+	}
+
+	if cfg.Server.ReadTimeoutSec != 30 {
+		t.Errorf("Server.ReadTimeoutSec = %d, want 30", cfg.Server.ReadTimeoutSec)
+	}
+
+	if cfg.Server.WriteTimeoutSec != 120 {
+		t.Errorf("Server.WriteTimeoutSec = %d, want 120", cfg.Server.WriteTimeoutSec)
+	}
+
+	if len(cfg.Server.CORSOrigins) == 0 {
+		t.Error("Server.CORSOrigins should have at least one entry")
+	}
+}
+
+func TestServerConfigEnvOverride(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	t.Setenv("SERVER_PORT", "9090")
+	t.Setenv("SERVER_READ_TIMEOUT", "60")
+	t.Setenv("SERVER_WRITE_TIMEOUT", "300")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Server.Port != 9090 {
+		t.Errorf("Server.Port = %d, want 9090", cfg.Server.Port)
+	}
+
+	if cfg.Server.ReadTimeoutSec != 60 {
+		t.Errorf("Server.ReadTimeoutSec = %d, want 60", cfg.Server.ReadTimeoutSec)
+	}
+
+	if cfg.Server.WriteTimeoutSec != 300 {
+		t.Errorf("Server.WriteTimeoutSec = %d, want 300", cfg.Server.WriteTimeoutSec)
+	}
+}

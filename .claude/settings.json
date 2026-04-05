@@ -3,7 +3,18 @@
     "allow": [
       "Bash(go test:*)",
       "Bash(go tool:*)",
-      "Edit(/.claude/skills/commit0-go/**)"
+      "Edit(/.claude/skills/commit0-go/**)",
+      "Bash(go get:*)",
+      "Read(//Users/thomas.nguyen/go/1.25.6/pkg/mod/google.golang.org/genai@v1.52.1/**)",
+      "Bash(go env:*)",
+      "Bash(go version:*)",
+      "Read(//Users/thomas.nguyen/go/1.25.6/pkg/mod/github.com/surrealdb/surrealdb.go@v1.4.0/**)",
+      "Read(//Users/thomas.nguyen/go/1.25.6/pkg/mod/github.com/smacker/**)",
+      "Bash(go vet:*)",
+      "Bash(grep -h \"^func New\" /Volumes/DATA/Coding/commit0/commit0/internal/app/*.go)",
+      "Read(//private/tmp/**)",
+      "Bash(go list:*)",
+      "Bash(ls /Volumes/DATA/Coding/commit0/commit0/internal/adapters/surreal/*_test.go)"
     ]
   }
 }

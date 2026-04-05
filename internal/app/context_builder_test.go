@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -284,5 +285,162 @@ func TestContextBuilderDefaultMaxBodyRunes(t *testing.T) {
 	cbNeg := NewContextBuilder(-1)
 	if cbNeg.maxBodyRunes != 32768 {
 		t.Errorf("maxBodyRunes = %d, want 32768 for negative input", cbNeg.maxBodyRunes)
+	}
+}
+
+func TestContextBuilderWithStoreNilNode(t *testing.T) {
+	store := newStubGraphStore()
+	cb := NewContextBuilderWithStore(1000, store)
+	if cb.ForNodeCtx(context.Background(), nil) != "" {
+		t.Error("ForNodeCtx(nil) should return empty string")
+	}
+}
+
+func TestContextBuilderWithStoreNonFunctionFallsBack(t *testing.T) {
+	// Non-function nodes skip graph enrichment and fall back to ForNode
+	store := newStubGraphStore()
+	cb := NewContextBuilderWithStore(1000, store)
+	node := &types.CodeNode{
+		Kind:     types.NodeClass,
+		Qualified: "pkg.MyClass",
+		Language: "go",
+		FilePath: "pkg.go",
+	}
+	result := cb.ForNodeCtx(context.Background(), node)
+	if !strings.Contains(result, "[CLASS]") {
+		t.Error("non-function ForNodeCtx should fall back to ForNode class output")
+	}
+}
+
+func TestContextBuilderForNodeCtxNoStore(t *testing.T) {
+	// ForNodeCtx without store == ForNode
+	cb := NewContextBuilder(1000)
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "pkg.F",
+		Language:  "go",
+		FilePath:  "f.go",
+		ID:        "function:pkg⋅F",
+		Body:      "func F() {}",
+	}
+	withCtx := cb.ForNodeCtx(context.Background(), node)
+	withoutCtx := cb.ForNode(node)
+	if withCtx != withoutCtx {
+		t.Error("ForNodeCtx without store should produce same output as ForNode")
+	}
+}
+
+func TestContextBuilderForNodeCtxNoID(t *testing.T) {
+	// Node with empty ID skips graph enrichment
+	store := newStubGraphStore()
+	cb := NewContextBuilderWithStore(1000, store)
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "pkg.F",
+		Language:  "go",
+		FilePath:  "f.go",
+		ID:        "", // empty ID
+		Body:      "func F() {}",
+	}
+	result := cb.ForNodeCtx(context.Background(), node)
+	if !strings.Contains(result, "[FUNCTION]") {
+		t.Error("ForNodeCtx with empty ID should fall back to ForNode")
+	}
+	if strings.Contains(result, "Calls:") || strings.Contains(result, "Called by:") {
+		t.Error("ForNodeCtx with empty ID should not have Calls/Called-by lines")
+	}
+}
+
+func TestContextBuilderForNodeCtxWithNeighborhood(t *testing.T) {
+	store := newStubGraphStore()
+	// Populate hop data: TraceForward returns one callee, TraceReverse one caller
+	store.traceHops = []types.TraceHop{
+		{Depth: 1, Node: types.CodeNode{ID: "function:pkg⋅G", Qualified: "pkg.G"}},
+	}
+	cb := NewContextBuilderWithStore(1000, store)
+
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "pkg.F",
+		Language:  "go",
+		FilePath:  "f.go",
+		ID:        "function:pkg⋅F",
+		Body:      "func F() {}",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	if !strings.Contains(result, "Calls:") && !strings.Contains(result, "Called by:") {
+		t.Error("ForNodeCtx with neighborhood should include Calls or Called-by lines")
+	}
+	if !strings.Contains(result, "pkg.G") {
+		t.Error("ForNodeCtx should include neighbor qualified name")
+	}
+}
+
+func TestContextBuilderForNodeCtxEmptyNeighborhood(t *testing.T) {
+	// Store returns no hops → falls back to ForNode output
+	store := newStubGraphStore()
+	store.traceHops = []types.TraceHop{} // empty
+	cb := NewContextBuilderWithStore(1000, store)
+
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "pkg.H",
+		Language:  "go",
+		FilePath:  "h.go",
+		ID:        "function:pkg⋅H",
+		Body:      "func H() {}",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	// When no hops, output equals ForNode (no Calls/Called-by lines)
+	expected := cb.ForNode(node)
+	if result != expected {
+		t.Errorf("ForNodeCtx with empty neighborhood should equal ForNode output\ngot:  %q\nwant: %q", result, expected)
+	}
+}
+
+func TestNewContextBuilderWithStore(t *testing.T) {
+	store := newStubGraphStore()
+	cb := NewContextBuilderWithStore(500, store)
+	if cb.maxBodyRunes != 500 {
+		t.Errorf("maxBodyRunes = %d, want 500", cb.maxBodyRunes)
+	}
+	if cb.store == nil {
+		t.Error("store should not be nil")
+	}
+}
+
+func TestContextBuilderForNodeCtxSignatureAndDocstring(t *testing.T) {
+	// Covers the Signature and Docstring branches inside ForNodeCtx enrichment path
+	store := newStubGraphStore()
+	store.traceHops = []types.TraceHop{
+		{Depth: 1, Node: types.CodeNode{ID: "function:pkg⋅G", Qualified: "pkg.G"}},
+	}
+	cb := NewContextBuilderWithStore(1000, store)
+
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "pkg.F",
+		Language:  "go",
+		FilePath:  "f.go",
+		ID:        "function:pkg⋅F",
+		Signature: "func(x int) error",
+		Docstring: "F does something",
+		Body:      "func F(x int) error { return nil }",
+	}
+
+	result := cb.ForNodeCtx(context.Background(), node)
+
+	if !strings.Contains(result, "Signature:") {
+		t.Error("ForNodeCtx should include Signature line when set")
+	}
+	if !strings.Contains(result, "Doc:") {
+		t.Error("ForNodeCtx should include Doc line when set")
+	}
+	if !strings.Contains(result, "pkg.G") {
+		t.Error("ForNodeCtx should include neighbor qualified name")
 	}
 }
