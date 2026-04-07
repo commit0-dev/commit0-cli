@@ -23,8 +23,9 @@ type Server struct {
 	traceSvc *app.TraceService
 	blastSvc *app.BlastService
 	repoSvc  *app.RepoService
-	db       domain.GraphStore
-	cfg      *config.ServerConfig
+	db          domain.GraphStore
+	agentRunner domain.AgentRunner
+	cfg         *config.ServerConfig
 	log      *slog.Logger
 	jobs     *indexJobStore
 }
@@ -37,6 +38,7 @@ func NewServer(
 	blastSvc *app.BlastService,
 	repoSvc *app.RepoService,
 	db domain.GraphStore,
+	agentRunner domain.AgentRunner,
 	cfg *config.ServerConfig,
 ) *Server {
 	e := echo.New()
@@ -50,8 +52,9 @@ func NewServer(
 		traceSvc: traceSvc,
 		blastSvc: blastSvc,
 		repoSvc:  repoSvc,
-		db:       db,
-		cfg:      cfg,
+		db:          db,
+		agentRunner: agentRunner,
+		cfg:         cfg,
 		log:      slog.Default(),
 		jobs:     newIndexJobStore(),
 	}
@@ -90,6 +93,9 @@ func (s *Server) registerRoutes() {
 	v1.POST("/trace", s.handleTrace)
 	v1.POST("/trace/json", s.handleTraceJSON)
 	v1.POST("/blast", s.handleBlast)
+
+	// Agent (agentic conversation with tool use)
+	v1.POST("/agent/chat", s.handleAgentChat)
 
 	// Nodes (for VSCode extension: CodeLens, graph, hover)
 	v1.GET("/nodes/lookup", s.handleNodeLookup)

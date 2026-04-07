@@ -194,7 +194,7 @@ func newTestServer(store *httpTestGraphStore, embedder *httpTestEmbedder, explai
 		ReadTimeoutSec:  30,
 		WriteTimeoutSec: 120,
 	}
-	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, store, serverCfg)
+	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, store, nil, serverCfg)
 }
 
 func defaultTestServer() *Server {

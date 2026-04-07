@@ -10,6 +10,7 @@ import (
 
 	"github.com/commit0-dev/commit0/internal/adapters/gemini"
 	"github.com/commit0-dev/commit0/internal/adapters/surreal"
+	agentpkg "github.com/commit0-dev/commit0/internal/app/agent"
 	"github.com/commit0-dev/commit0/internal/adapters/treesitter"
 	"github.com/commit0-dev/commit0/internal/adapters/voyage"
 	"github.com/commit0-dev/commit0/internal/adapters/walker"
@@ -199,23 +200,41 @@ type serveServices struct {
 	blast   *app.BlastService
 	repo    *app.RepoService
 	db      domain.GraphStore
+	agent   domain.AgentRunner
 	cleanup func()
 }
 
 // wireServeServices builds all services from one shared deps instance so the
 // serve command opens only a single SurrealDB connection.
 func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices, error) {
+	log := slog.Default()
 	d, cleanup, err := wireDeps(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
+	querySvc := app.NewQueryService(d.embedder, d.db.AsVectorIndex(), d.db.AsTextIndex(), d.db, d.explainer, cfg)
+	traceSvc := app.NewTraceService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg)
+	blastSvc := app.NewBlastService(d.db, d.explainer, cfg)
+
+	// Agent service (optional — requires Gemini API key)
+	var agentRunner domain.AgentRunner
+	if cfg.Gemini.APIKey != "" {
+		agentSvc, err := agentpkg.NewAgentService(querySvc, traceSvc, blastSvc, d.db, cfg)
+		if err != nil {
+			log.Warn("agent service unavailable", "err", err)
+		} else {
+			agentRunner = agentSvc
+		}
+	}
+
 	return &serveServices{
 		index:   app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg),
-		query:   app.NewQueryService(d.embedder, d.db.AsVectorIndex(), d.db.AsTextIndex(), d.db, d.explainer, cfg),
-		trace:   app.NewTraceService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg),
-		blast:   app.NewBlastService(d.db, d.explainer, cfg),
+		query:   querySvc,
+		trace:   traceSvc,
+		blast:   blastSvc,
 		repo:    app.NewRepoService(d.db),
 		db:      d.db,
+		agent:   agentRunner,
 		cleanup: cleanup,
 	}, nil
 }

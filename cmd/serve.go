@@ -45,6 +45,7 @@ var serveCmd = &cobra.Command{
 			svcs.blast,
 			svcs.repo,
 			svcs.db,
+			svcs.agent,
 			&cfg.Server,
 		)
 

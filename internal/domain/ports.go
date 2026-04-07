@@ -185,6 +185,27 @@ type LLMExplainer interface {
 	ExplainStructured(ctx context.Context, req ExplainRequest) ([]byte, error)
 }
 
+// ChatRequest represents a user message in an agentic conversation.
+type ChatRequest struct {
+	SessionID string
+	UserID    string
+	RepoSlug  string
+	Message   string
+}
+
+// ChatEvent is streamed back as the agent reasons and calls tools.
+type ChatEvent struct {
+	Type     string `json:"type"`      // "thinking", "tool_call", "tool_result", "message", "error", "done"
+	Content  string `json:"content"`   // text content or JSON
+	ToolName string `json:"tool_name"` // set for tool_call/tool_result
+	Done     bool   `json:"done"`
+}
+
+// AgentRunner executes agentic conversations with tool use.
+type AgentRunner interface {
+	Chat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error)
+}
+
 // Parser extracts code structure from source files.
 type Parser interface {
 	Parse(ctx context.Context, file FileEntry) (*ParsedFile, error)

@@ -228,6 +228,16 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		// Non-fatal: base embeddings are still valid.
 	}
 
+	// Mark repo as indexed so the UI shows the correct status.
+	now := time.Now()
+	if err := is.store.UpsertRepo(ctx, &types.Repo{
+		Slug:          req.RepoSlug,
+		Path:          req.RepoPath,
+		LastIndexedAt: &now,
+	}); err != nil {
+		is.log.Warn("failed to update LastIndexedAt", "repo", req.RepoSlug, "err", err)
+	}
+
 	return result, nil
 }
 
