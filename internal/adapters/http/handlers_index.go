@@ -110,12 +110,20 @@ func (s *Server) handleStartIndex(c echo.Context) error {
 
 	// Run indexing in background; use a detached context so canceling the
 	// HTTP request does not abort the index job.
+	// Report incremental progress to the job store for polling.
 	go func() {
-		result, indexErr := s.indexSvc.Index(context.Background(), app.IndexRequest{
+		onProgress := func(filesIndexed, nodesCreated int) {
+			s.jobs.update(jobID, func(j *IndexJob) {
+				j.FilesIndexed = filesIndexed
+				j.NodesCreated = nodesCreated
+			})
+		}
+
+		result, indexErr := s.indexSvc.IndexWithProgress(context.Background(), app.IndexRequest{
 			RepoPath:  req.RepoPath,
 			RepoSlug:  req.RepoSlug,
 			Languages: req.Languages,
-		})
+		}, onProgress)
 
 		s.jobs.update(jobID, func(j *IndexJob) {
 			now := time.Now()

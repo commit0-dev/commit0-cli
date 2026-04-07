@@ -17,3 +17,5 @@ coverage.html
 
 # Python virtual environment
 .venv/
+
+node_modules/

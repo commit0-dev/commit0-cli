@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -84,42 +85,56 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 		return nil, fmt.Errorf("trace %s: %w", req.Direction, err)
 	}
 
-	// Build explanation (non-fatal)
+	// Build explanation (non-fatal). Structured output first, fallback to streaming.
 	graphStart := time.Now()
 	explanation := ""
+	var structuredExplan *types.TraceExplanation
 	if ts.explainer != nil {
-		// Build code context from hops
 		var excerpts []domain.CodeExcerpt
 		ts.collectHopExcerpts(hops, &excerpts)
 
-		chunks, err := ts.explainer.Explain(ctx, domain.ExplainRequest{
+		explainReq := domain.ExplainRequest{
 			QueryType:   "trace",
 			UserQuery:   fmt.Sprintf("trace %s from %s", req.Direction, req.Symbol),
 			CodeContext: excerpts,
-		})
-		if err != nil {
-			ts.log.Warn("explain failed", "err", err)
-		} else if chunks != nil {
-			var buf []byte
-			for chunk := range chunks {
-				if chunk.Error != nil {
-					ts.log.Warn("explain chunk error", "err", chunk.Error)
-					break
-				}
-				buf = append(buf, []byte(chunk.Text)...)
-				if chunk.Done {
-					break
-				}
+		}
+
+		raw, err := ts.explainer.ExplainStructured(ctx, explainReq)
+		if err == nil {
+			var te types.TraceExplanation
+			if json.Unmarshal(raw, &te) == nil {
+				structuredExplan = &te
+				explanation = te.Overview
 			}
-			explanation = string(buf)
+		}
+
+		if structuredExplan == nil {
+			chunks, err := ts.explainer.Explain(ctx, explainReq)
+			if err != nil {
+				ts.log.Warn("explain failed", "err", err)
+			} else if chunks != nil {
+				var buf []byte
+				for chunk := range chunks {
+					if chunk.Error != nil {
+						ts.log.Warn("explain chunk error", "err", chunk.Error)
+						break
+					}
+					buf = append(buf, []byte(chunk.Text)...)
+					if chunk.Done {
+						break
+					}
+				}
+				explanation = string(buf)
+			}
 		}
 	}
 
 	return &types.TraceResult{
-		Root:        *node,
-		Tree:        hops,
-		Direction:   req.Direction,
-		Explanation: explanation,
+		Root:                  *node,
+		Tree:                  hops,
+		Direction:             req.Direction,
+		Explanation:           explanation,
+		StructuredExplanation: structuredExplan,
 		Timing: types.TimingInfo{
 			GraphMS: time.Since(graphStart).Milliseconds(),
 			TotalMS: time.Since(startTime).Milliseconds(),

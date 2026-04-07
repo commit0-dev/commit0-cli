@@ -42,6 +42,8 @@ DEFINE FIELD OVERWRITE content_hash ON file TYPE string;
 DEFINE FIELD OVERWRITE line_count   ON file TYPE int VALUE 0;
 DEFINE FIELD OVERWRITE size_bytes   ON file TYPE int VALUE 0;
 DEFINE FIELD OVERWRITE embedding    ON file TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE summary      ON file TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON file TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at   ON file TYPE datetime VALUE time::now();
 
 DEFINE FIELD OVERWRITE symbol_count ON file COMPUTED
@@ -68,6 +70,8 @@ DEFINE FIELD OVERWRITE body         ON `function` TYPE string;
 DEFINE FIELD OVERWRITE language     ON `function` TYPE string;
 DEFINE FIELD OVERWRITE content_hash ON `function` TYPE string;
 DEFINE FIELD OVERWRITE embedding    ON `function` TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE summary      ON `function` TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON `function` TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at   ON `function` TYPE datetime VALUE time::now();
 DEFINE FIELD OVERWRITE visibility   ON `function` TYPE string VALUE "public"
     ASSERT $value IN ["public", "private", "protected", "internal", "package"];
@@ -101,6 +105,8 @@ DEFINE FIELD OVERWRITE kind         ON class TYPE string VALUE "class"
     ASSERT $value IN ["class", "struct", "interface", "enum", "trait", "protocol"];
 DEFINE FIELD OVERWRITE content_hash ON class TYPE string;
 DEFINE FIELD OVERWRITE embedding    ON class TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE summary      ON class TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON class TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at   ON class TYPE datetime VALUE time::now();
 
 DEFINE FIELD OVERWRITE method_count ON class COMPUTED count(->defines->`function`);
@@ -121,6 +127,8 @@ DEFINE FIELD OVERWRITE repo       ON module TYPE record<repo> REFERENCE ON DELET
 DEFINE FIELD OVERWRITE language   ON module TYPE string;
 DEFINE FIELD OVERWRITE docstring  ON module TYPE option<string>;
 DEFINE FIELD OVERWRITE embedding  ON module TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE summary    ON module TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts   ON module TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at ON module TYPE datetime VALUE time::now();
 
 DEFINE FIELD OVERWRITE file_count ON module COMPUTED count(<-imports<-file);
@@ -243,12 +251,16 @@ DEFINE INDEX OVERWRITE fn_qualified_fts ON `function` FIELDS qualified
     FULLTEXT ANALYZER code_analyzer BM25;
 DEFINE INDEX OVERWRITE fn_doc_fts       ON `function` FIELDS docstring
     FULLTEXT ANALYZER nl_analyzer BM25;
+DEFINE INDEX OVERWRITE fn_summary_fts   ON `function` FIELDS summary
+    FULLTEXT ANALYZER nl_analyzer BM25;
 
 DEFINE INDEX OVERWRITE cls_name_fts      ON class FIELDS name
     FULLTEXT ANALYZER code_analyzer BM25;
 DEFINE INDEX OVERWRITE cls_qualified_fts ON class FIELDS qualified
     FULLTEXT ANALYZER code_analyzer BM25;
 DEFINE INDEX OVERWRITE cls_doc_fts       ON class FIELDS docstring
+    FULLTEXT ANALYZER nl_analyzer BM25;
+DEFINE INDEX OVERWRITE cls_summary_fts   ON class FIELDS summary
     FULLTEXT ANALYZER nl_analyzer BM25;
 
 DEFINE INDEX OVERWRITE file_path_fts ON file FIELDS path

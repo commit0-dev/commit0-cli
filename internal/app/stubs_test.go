@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/commit0-dev/commit0/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
@@ -205,6 +206,14 @@ func (s *stubGraphStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 	return s.nodeIDs, nil
 }
 
+func (s *stubGraphStore) ListNodesByFile(_ context.Context, _, _ string) ([]types.CodeNode, error) {
+	return nil, nil
+}
+
+func (s *stubGraphStore) ListNodesByConcepts(_ context.Context, _ string, _ []string, _ int) ([]types.CodeNode, error) {
+	return nil, nil
+}
+
 func (s *stubGraphStore) ApplySchema(ctx context.Context) error {
 	return nil
 }
@@ -276,8 +285,9 @@ func (s *stubEmbedder) EmbedQuery(ctx context.Context, query string) ([]float32,
 // ----- explainer -----
 
 type stubExplainer struct {
-	err    error
-	chunks []domain.ExplainChunk
+	err            error
+	chunks         []domain.ExplainChunk
+	structuredJSON []byte // if set, ExplainStructured returns this
 }
 
 func (s *stubExplainer) Explain(ctx context.Context, req domain.ExplainRequest) (<-chan domain.ExplainChunk, error) {
@@ -290,6 +300,15 @@ func (s *stubExplainer) Explain(ctx context.Context, req domain.ExplainRequest) 
 	}
 	close(ch)
 	return ch, nil
+}
+
+func (s *stubExplainer) ExplainStructured(_ context.Context, _ domain.ExplainRequest) ([]byte, error) {
+	// Default: return error so tests exercise the streaming Explain() fallback path.
+	// Tests that want structured output should set structuredJSON.
+	if s.structuredJSON != nil {
+		return s.structuredJSON, nil
+	}
+	return nil, fmt.Errorf("structured output not configured in stub")
 }
 
 // ----- parser -----

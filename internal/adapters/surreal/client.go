@@ -47,14 +47,15 @@ type SurrealAdapter struct {
 	embedDim int // HNSW vector index dimension (e.g. 3072, 1024)
 }
 
-// rpcTimeout is the maximum time the WebSocket client waits for a single RPC
-// response. The default in surrealdb.go is 30s, which is too short for heavy
-// DDL operations such as HNSW index rebuilds on existing data.
-const rpcTimeout = 5 * time.Minute
+// defaultRPCTimeout is the fallback if config doesn't specify one.
+const defaultRPCTimeout = 5 * time.Minute
 
 // NewSurrealAdapter dials SurrealDB, authenticates, and selects the
 // namespace/database specified in cfg. embedDim sets the HNSW vector index
 // dimension used in ApplySchema (e.g. 3072 for Gemini, 1024 for Voyage).
+//
+// The connection uses cfg.ConnectTimeoutS for the initial dial and
+// cfg.RPCTimeoutS for per-operation timeouts.
 func NewSurrealAdapter(ctx context.Context, cfg *config.SurrealConfig, embedDim int) (*SurrealAdapter, error) {
 	if cfg.URL == "" {
 		return nil, domain.Validation("surreal URL is required")
@@ -70,14 +71,30 @@ func NewSurrealAdapter(ctx context.Context, cfg *config.SurrealConfig, embedDim 
 		return nil, fmt.Errorf("surreal: invalid connection config: %w", cfgErr)
 	}
 
+	// Configurable RPC timeout
+	rpcTimeout := defaultRPCTimeout
+	if cfg.RPCTimeoutS > 0 {
+		rpcTimeout = time.Duration(cfg.RPCTimeoutS) * time.Second
+	}
 	ws := gorillaws.New(connCfg).SetTimeOut(rpcTimeout)
 
-	db, err := surrealdb.FromConnection(ctx, ws)
+	// Apply connect timeout
+	connectTimeout := 30 * time.Second
+	if cfg.ConnectTimeoutS > 0 {
+		connectTimeout = time.Duration(cfg.ConnectTimeoutS) * time.Second
+	}
+	connCtx, connCancel := context.WithTimeout(ctx, connectTimeout)
+	defer connCancel()
+
+	log := slog.Default().With("adapter", "surreal", "ns", cfg.Namespace, "db", cfg.Database)
+	log.Info("connecting", "url", cfg.URL, "connect_timeout", connectTimeout, "rpc_timeout", rpcTimeout)
+
+	db, err := surrealdb.FromConnection(connCtx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("surreal dial %s: %w", cfg.URL, err)
 	}
 
-	if _, err := db.SignIn(ctx, map[string]any{
+	if _, err := db.SignIn(connCtx, map[string]any{
 		"user": cfg.User,
 		"pass": cfg.Pass,
 	}); err != nil {
@@ -85,12 +102,22 @@ func NewSurrealAdapter(ctx context.Context, cfg *config.SurrealConfig, embedDim 
 		return nil, fmt.Errorf("surreal signin: %w", err)
 	}
 
-	if err := db.Use(ctx, cfg.Namespace, cfg.Database); err != nil {
+	if err := db.Use(connCtx, cfg.Namespace, cfg.Database); err != nil {
 		_ = db.Close(ctx)
 		return nil, fmt.Errorf("surreal USE %s/%s: %w", cfg.Namespace, cfg.Database, err)
 	}
 
-	log := slog.Default().With("adapter", "surreal", "ns", cfg.Namespace, "db", cfg.Database)
+	// Verify connectivity with a ping
+	if err := func() error {
+		pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer pingCancel()
+		_, err := db.Version(pingCtx)
+		return err
+	}(); err != nil {
+		_ = db.Close(ctx)
+		return nil, fmt.Errorf("surreal ping after connect: %w", err)
+	}
+
 	log.Info("connected", "url", cfg.URL)
 
 	return &SurrealAdapter{

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -74,10 +75,10 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	affected = deduplicateAffected(affected)
 	sortAffectedByHopCount(affected)
 
-	// Build explanation (non-fatal)
+	// Build explanation (non-fatal). Structured first, fallback to streaming.
 	explanation := ""
+	var structuredSummary *types.BlastExplanation
 	if bs.explainer != nil {
-		// Build code excerpts
 		excerpts := []domain.CodeExcerpt{
 			{
 				Qualified: target.Qualified,
@@ -85,7 +86,7 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 				Snippet:   target.Body,
 			},
 		}
-		for _, aff := range affected[:minInt(5, len(affected))] { // Take top 5 affected
+		for _, aff := range affected[:minInt(5, len(affected))] {
 			excerpts = append(excerpts, domain.CodeExcerpt{
 				Qualified: aff.Node.Qualified,
 				FilePath:  aff.Node.FilePath,
@@ -93,33 +94,47 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 			})
 		}
 
-		chunks, err := bs.explainer.Explain(ctx, domain.ExplainRequest{
+		explainReq := domain.ExplainRequest{
 			QueryType:   "blast",
 			UserQuery:   fmt.Sprintf("impact of changing %s", req.Symbol),
 			CodeContext: excerpts,
-		})
-		if err != nil {
-			bs.log.Warn("explain failed", "err", err)
-		} else if chunks != nil {
-			var buf []byte
-			for chunk := range chunks {
-				if chunk.Error != nil {
-					bs.log.Warn("explain chunk error", "err", chunk.Error)
-					break
-				}
-				buf = append(buf, []byte(chunk.Text)...)
-				if chunk.Done {
-					break
-				}
+		}
+
+		raw, err := bs.explainer.ExplainStructured(ctx, explainReq)
+		if err == nil {
+			var be types.BlastExplanation
+			if json.Unmarshal(raw, &be) == nil {
+				structuredSummary = &be
+				explanation = be.Overview
 			}
-			explanation = string(buf)
+		}
+
+		if structuredSummary == nil {
+			chunks, err := bs.explainer.Explain(ctx, explainReq)
+			if err != nil {
+				bs.log.Warn("explain failed", "err", err)
+			} else if chunks != nil {
+				var buf []byte
+				for chunk := range chunks {
+					if chunk.Error != nil {
+						bs.log.Warn("explain chunk error", "err", chunk.Error)
+						break
+					}
+					buf = append(buf, []byte(chunk.Text)...)
+					if chunk.Done {
+						break
+					}
+				}
+				explanation = string(buf)
+			}
 		}
 	}
 
 	return &types.BlastResult{
-		Target:   *target,
-		Affected: affected,
-		Summary:  explanation,
+		Target:            *target,
+		Affected:          affected,
+		Summary:           explanation,
+		StructuredSummary: structuredSummary,
 		Timing: types.TimingInfo{
 			GraphMS: time.Since(graphStart).Milliseconds(),
 			TotalMS: time.Since(startTime).Milliseconds(),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -31,21 +32,55 @@ type deps struct {
 func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	log := slog.Default()
 
-	// 1. SurrealDB — pass the embed dimension so ApplySchema creates HNSW
-	// indexes matching the configured embedding provider.
+	// 1. SurrealDB — connect with retry for resilience against cold starts.
 	embedDim := cfg.Gemini.EmbedDimension
 	if cfg.EmbedProvider == "voyage" {
 		embedDim = cfg.Voyage.EmbedDimension
 	}
-	db, err := surreal.NewSurrealAdapter(ctx, &cfg.Surreal, embedDim)
-	if err != nil {
-		return nil, nil, fmt.Errorf("surreal: %w", err)
+
+	maxRetries := cfg.Surreal.StartupRetries
+	if maxRetries <= 0 {
+		maxRetries = 5
+	}
+
+	var db *surreal.SurrealAdapter
+	var err error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		db, err = surreal.NewSurrealAdapter(ctx, &cfg.Surreal, embedDim)
+		if err == nil {
+			break
+		}
+		if attempt == maxRetries {
+			return nil, nil, fmt.Errorf("surreal: %w (after %d attempts)", err, maxRetries)
+		}
+		backoff := time.Duration(attempt*attempt) * time.Second // 1s, 4s, 9s, 16s, 25s
+		log.Warn("surreal connect failed, retrying",
+			"attempt", attempt, "max", maxRetries,
+			"backoff", backoff, "err", err)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf("surreal: startup cancelled: %w", ctx.Err())
+		}
 	}
 
 	// Apply schema DDL only when the stored version is behind the binary version.
-	currentVersion, err := db.GetSchemaVersion(ctx)
+	// Use a dedicated timeout so heavy DDL doesn't inherit a short parent deadline.
+	rpcTimeoutS := cfg.Surreal.RPCTimeoutS
+	if rpcTimeoutS <= 0 {
+		rpcTimeoutS = 300 // 5 minutes default
+	}
+	schemaCtx, schemaCancel := context.WithTimeout(ctx, time.Duration(rpcTimeoutS)*time.Second)
+	defer schemaCancel()
+
+	currentVersion, err := db.GetSchemaVersion(schemaCtx)
+	log.Info("schema version check",
+		"current", currentVersion,
+		"required", surreal.SchemaVersion(),
+		"needs_apply", err != nil || currentVersion < surreal.SchemaVersion(),
+		"err", err)
 	if err != nil || currentVersion < surreal.SchemaVersion() {
-		if err := db.ApplySchema(ctx); err != nil {
+		if err := db.ApplySchema(schemaCtx); err != nil {
 			db.Close(ctx)
 			return nil, nil, fmt.Errorf("apply schema: %w", err)
 		}
@@ -116,7 +151,7 @@ func wireIndexService(ctx context.Context, cfg *config.Config) (*app.IndexServic
 	if err != nil {
 		return nil, nil, err
 	}
-	svc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, cfg)
+	svc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg)
 	return svc, cleanup, nil
 }
 
@@ -163,6 +198,7 @@ type serveServices struct {
 	trace   *app.TraceService
 	blast   *app.BlastService
 	repo    *app.RepoService
+	db      domain.GraphStore
 	cleanup func()
 }
 
@@ -174,11 +210,12 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		return nil, err
 	}
 	return &serveServices{
-		index:   app.NewIndexService(d.walker, d.parser, d.embedder, d.db, cfg),
+		index:   app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg),
 		query:   app.NewQueryService(d.embedder, d.db.AsVectorIndex(), d.db.AsTextIndex(), d.db, d.explainer, cfg),
 		trace:   app.NewTraceService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg),
 		blast:   app.NewBlastService(d.db, d.explainer, cfg),
 		repo:    app.NewRepoService(d.db),
+		db:      d.db,
 		cleanup: cleanup,
 	}, nil
 }

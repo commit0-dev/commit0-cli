@@ -30,6 +30,8 @@ type nodeRow struct {
 	Qualified   string           `json:"qualified"`
 	Name        string           `json:"name"`
 	Body        string           `json:"body"`
+	Summary     string           `json:"summary"`
+	Concepts    []string         `json:"concepts"`
 	Embedding   []float32        `json:"embedding"`
 	EndLine     int              `json:"end_line"`
 	StartLine   int              `json:"start_line"`
@@ -71,6 +73,8 @@ func rowToCodeNode(r nodeRow, kind types.NodeKind) types.CodeNode {
 		Signature:   r.Signature,
 		Docstring:   r.Docstring,
 		Body:        r.Body,
+		Summary:     r.Summary,
+		Concepts:    r.Concepts,
 		ContentHash: r.ContentHash,
 		Embedding:   r.Embedding,
 		Visibility:  r.Visibility,
@@ -103,6 +107,16 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		docstring = node.Docstring
 	}
 
+	var summary any = models.None
+	if node.Summary != "" {
+		summary = node.Summary
+	}
+
+	var concepts any = models.None
+	if len(node.Concepts) > 0 {
+		concepts = node.Concepts
+	}
+
 	return map[string]any{
 		"record_id":    models.NewRecordID(table, localID),
 		"name":         node.Name,
@@ -115,6 +129,8 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		"signature":    node.Signature,
 		"docstring":    docstring,
 		"body":         node.Body,
+		"summary":      summary,
+		"concepts":     concepts,
 		"content_hash": node.ContentHash,
 		"embedding":    embedding,
 		"visibility":   defaultVisibility(node.Visibility),
@@ -150,6 +166,8 @@ UPSERT type::record($record_id) CONTENT {
     signature:    $signature,
     docstring:    $docstring,
     body:         $body,
+    summary:      $summary,
+    concepts:     $concepts,
     content_hash: $content_hash,
     embedding:    $embedding,
     visibility:   $visibility
@@ -167,6 +185,8 @@ UPSERT type::record($record_id) CONTENT {
     start_line:   $start_line,
     end_line:     $end_line,
     docstring:    $docstring,
+    summary:      $summary,
+    concepts:     $concepts,
     content_hash: $content_hash,
     embedding:    $embedding
 };`
@@ -178,6 +198,8 @@ UPSERT type::record($record_id) CONTENT {
     repo_slug:    $repo_slug,
     repo:         $repo_ref,
     language:     $language,
+    summary:      $summary,
+    concepts:     $concepts,
     content_hash: $content_hash,
     embedding:    $embedding
 };`
@@ -191,6 +213,8 @@ UPSERT type::record($record_id) CONTENT {
     repo:      $repo_ref,
     language:  $language,
     docstring: $docstring,
+    summary:   $summary,
+    concepts:  $concepts,
     embedding: $embedding
 };`
 	}
@@ -894,6 +918,62 @@ func (a *SurrealAdapter) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 		}
 	}
 	return ids, nil
+}
+
+// ListNodesByFile returns all function and class nodes defined in a specific file.
+func (a *SurrealAdapter) ListNodesByFile(ctx context.Context, repoSlug, filePath string) ([]types.CodeNode, error) {
+	params := map[string]any{
+		"repo_ref": models.NewRecordID("repo", repoSlug),
+		"fpath":    filePath,
+	}
+
+	var nodes []types.CodeNode
+	tables := []string{"`function`", "class"}
+	for _, table := range tables {
+		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo_ref AND file_path = $fpath;", table)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, params)
+		if err != nil {
+			return nil, fmt.Errorf("list nodes by file %s [%s]: %w", filePath, table, err)
+		}
+		if results == nil || len(*results) == 0 {
+			continue
+		}
+		kind := kindFromTable(strings.Trim(table, "`"))
+		for _, r := range (*results)[0].Result {
+			nodes = append(nodes, rowToCodeNode(r, kind))
+		}
+	}
+	return nodes, nil
+}
+
+// ListNodesByConcepts returns nodes whose concepts array overlaps with the given tags.
+func (a *SurrealAdapter) ListNodesByConcepts(ctx context.Context, repoSlug string, concepts []string, limit int) ([]types.CodeNode, error) {
+	if len(concepts) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	params := map[string]any{
+		"repo_ref": models.NewRecordID("repo", repoSlug),
+		"concepts": concepts,
+		"lim":      limit,
+	}
+
+	var nodes []types.CodeNode
+	tables := []string{"`function`", "class"}
+	for _, table := range tables {
+		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo_ref AND concepts CONTAINSANY $concepts LIMIT $lim;", table)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, params)
+		if err != nil {
+			continue // non-fatal
+		}
+		if results == nil || len(*results) == 0 {
+			continue
+		}
+		kind := kindFromTable(strings.Trim(table, "`"))
+		for _, r := range (*results)[0].Result {
+			nodes = append(nodes, rowToCodeNode(r, kind))
+		}
+	}
+	return nodes, nil
 }
 
 // ---------------------------------------------------------------------------

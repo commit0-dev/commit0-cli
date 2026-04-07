@@ -38,9 +38,11 @@ type IndexService struct {
 	embedder    domain.Embedder
 	store       domain.GraphStore
 	builder     *ContextBuilder
+	summarizer  *Summarizer
 	cfg         *config.Config
 	log         *slog.Logger
-	parsedChBuf int // channel buffer override: <0 = unbuffered, 0 = default (64), >0 = exact size
+	parsedChBuf int          // channel buffer override: <0 = unbuffered, 0 = default (64), >0 = exact size
+	progressFn  ProgressFunc // set during IndexWithProgress, nil otherwise
 	embedChBuf  int // channel buffer override: <0 = unbuffered, 0 = default (32), >0 = exact size
 }
 
@@ -50,23 +52,26 @@ func NewIndexService(
 	parser domain.Parser,
 	embedder domain.Embedder,
 	store domain.GraphStore,
+	explainer domain.LLMExplainer,
 	cfg *config.Config,
 ) *IndexService {
+	log := slog.Default().With("service", "index")
 	return &IndexService{
-		walker:   walker,
-		parser:   parser,
-		embedder: embedder,
-		store:    store,
-		builder:  NewContextBuilder(32768),
-		cfg:      cfg,
-		log:      slog.Default().With("service", "index"),
+		walker:     walker,
+		parser:     parser,
+		embedder:   embedder,
+		store:      store,
+		builder:    NewContextBuilder(32768),
+		summarizer: NewSummarizer(explainer, log),
+		cfg:        cfg,
+		log:        log,
 	}
 }
 
 // Index executes the 4-stage indexing pipeline.
 func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResult, error) {
 	startTime := time.Now()
-	run := &indexRun{}
+	run := &indexRun{onProgress: is.progressFn}
 
 	// Force re-index: cascade-delete all existing nodes via the repo record so
 	// stale records (functions/files removed from the codebase) don't persist.
@@ -157,6 +162,10 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		batcher := NewEmbedBatcher(is.embedder, is.cfg.Index.BatchSize)
 		for parsed := range parsedCh {
 			embedGroup.Go(func() error {
+				// Summarize nodes before embedding (enriches Summary + Concepts)
+				if is.summarizer != nil {
+					is.summarizer.SummarizeNodes(embedCtx, parsed.Nodes)
+				}
 				nodes, err := batcher.Process(embedCtx, parsed.Nodes, is.builder)
 				if err != nil {
 					is.log.Warn("embed failed", "file", parsed.Path, "err", err)
@@ -291,6 +300,17 @@ func (is *IndexService) ReembedNeighborhood(ctx context.Context, repoSlug string
 	}, nil
 }
 
+// ProgressFunc is called with incremental indexing progress.
+type ProgressFunc func(filesIndexed, nodesCreated int)
+
+// IndexWithProgress runs Index with a progress callback that fires
+// after each file is stored. Used by the HTTP handler for real-time polling.
+func (is *IndexService) IndexWithProgress(ctx context.Context, req IndexRequest, onProgress ProgressFunc) (*IndexResult, error) {
+	is.progressFn = onProgress
+	defer func() { is.progressFn = nil }()
+	return is.Index(ctx, req)
+}
+
 // indexRun tracks statistics during indexing.
 type indexRun struct {
 	mu           sync.Mutex
@@ -298,12 +318,19 @@ type indexRun struct {
 	nodesCreated int
 	edgesCreated int
 	errors       int
+	onProgress   ProgressFunc
 }
 
 func (r *indexRun) addFilesIndexed(n int) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.filesIndexed += n
+	fn := r.onProgress
+	files := r.filesIndexed
+	nodes := r.nodesCreated
+	r.mu.Unlock()
+	if fn != nil {
+		fn(files, nodes)
+	}
 }
 
 func (r *indexRun) addNodesCreated(n int) {

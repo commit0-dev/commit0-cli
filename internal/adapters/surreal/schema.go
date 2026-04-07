@@ -14,7 +14,7 @@ import (
 // schemaVersion is the version number written to the schema_version table
 // by the DDL in schema.surql. Bump this when the schema changes.
 // Bump when: schema structure changes OR default embed dimension changes.
-const schemaVersion = 6
+const schemaVersion = 7
 
 // SchemaVersion returns the current schema version for external callers.
 func SchemaVersion() int { return schemaVersion }
@@ -39,27 +39,70 @@ func (a *SurrealAdapter) ApplySchema(ctx context.Context) error {
 
 	ddl := strings.ReplaceAll(assets.SchemaSurQL, "{{EMBED_DIM}}", strconv.Itoa(embedDim))
 
-	results, err := surrealdb.Query[any](ctx, a.db, ddl, nil)
-	if err != nil {
-		return fmt.Errorf("apply schema: %w", err)
-	}
+	// Split DDL into individual statements and execute sequentially.
+	// Sending one giant multi-statement query causes SurrealDB to time out
+	// on large datasets (HNSW index rebuilds are especially slow).
+	stmts := splitStatements(ddl)
+	a.log.Info("applying schema DDL", "version", schemaVersion, "statements", len(stmts))
 
-	// Surface any per-statement errors from the multi-statement DDL.
-	// "already exists" errors are expected when re-applying — skip them.
-	if results != nil {
-		for i, r := range *results {
-			if r.Status == "ERR" {
-				errMsg := fmt.Sprintf("%v", r.Error)
-				if isSchemaAlreadyExistsErr(errMsg) {
-					continue
+	for i, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+
+		// Log DEFINE/REMOVE statements for progress visibility
+		firstLine := stmt
+		if idx := strings.IndexByte(stmt, '\n'); idx > 0 {
+			firstLine = stmt[:idx]
+		}
+		if len(firstLine) > 80 {
+			firstLine = firstLine[:80] + "..."
+		}
+		a.log.Debug("schema statement", "i", i+1, "of", len(stmts), "stmt", firstLine)
+
+		results, err := surrealdb.Query[any](ctx, a.db, stmt+";", nil)
+		if err != nil {
+			return fmt.Errorf("apply schema statement %d (%s): %w", i+1, firstLine, err)
+		}
+
+		if results != nil {
+			for _, r := range *results {
+				if r.Status == "ERR" {
+					errMsg := fmt.Sprintf("%v", r.Error)
+					if isSchemaAlreadyExistsErr(errMsg) {
+						continue
+					}
+					return fmt.Errorf("apply schema statement %d: %v", i+1, r.Error)
 				}
-				return fmt.Errorf("apply schema statement %d: %v", i, r.Error)
 			}
 		}
 	}
 
-	a.log.Info("schema applied", "version", schemaVersion)
+	a.log.Info("schema applied", "version", schemaVersion, "statements", len(stmts))
 	return nil
+}
+
+// splitStatements splits a multi-statement SurrealQL string into individual
+// statements. Splits on ";\n" boundaries (semicolons followed by newlines)
+// to avoid splitting inside string literals or inline expressions.
+func splitStatements(ddl string) []string {
+	raw := strings.Split(ddl, ";\n")
+	stmts := make([]string, 0, len(raw))
+	for _, s := range raw {
+		s = strings.TrimSpace(s)
+		// Skip empty lines and comments
+		if s == "" || strings.HasPrefix(s, "--") || strings.HasPrefix(s, "//") {
+			continue
+		}
+		// Strip trailing semicolons (we add them back on execution)
+		s = strings.TrimRight(s, ";")
+		s = strings.TrimSpace(s)
+		if s != "" {
+			stmts = append(stmts, s)
+		}
+	}
+	return stmts
 }
 
 // isSchemaAlreadyExistsErr returns true if the error is a benign "already exists"

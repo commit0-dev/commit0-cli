@@ -148,6 +148,10 @@ type GraphStore interface {
 	// ListNodeIDs returns the record IDs of all indexable nodes for a repo.
 	// Used by the neighborhood re-embedding pass.
 	ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error)
+	// ListNodesByFile returns all nodes (functions, classes) defined in a file.
+	ListNodesByFile(ctx context.Context, repoSlug, filePath string) ([]types.CodeNode, error)
+	// ListNodesByConcepts returns nodes whose concepts overlap with the given tags.
+	ListNodesByConcepts(ctx context.Context, repoSlug string, concepts []string, limit int) ([]types.CodeNode, error)
 	UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
 	UpsertRepo(ctx context.Context, repo *types.Repo) error
 	GetRepo(ctx context.Context, slug string) (*types.Repo, error)
@@ -175,6 +179,10 @@ type Embedder interface {
 // LLMExplainer generates natural language explanations.
 type LLMExplainer interface {
 	Explain(ctx context.Context, req ExplainRequest) (<-chan ExplainChunk, error)
+	// ExplainStructured returns a structured JSON explanation using Gemini's
+	// response_json_schema feature. The caller unmarshals the result into the
+	// appropriate type based on req.QueryType ("search", "trace", "blast").
+	ExplainStructured(ctx context.Context, req ExplainRequest) ([]byte, error)
 }
 
 // Parser extracts code structure from source files.

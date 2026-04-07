@@ -30,11 +30,14 @@ type ServerConfig struct {
 
 // SurrealConfig holds SurrealDB connection settings.
 type SurrealConfig struct {
-	URL       string
-	User      string
-	Pass      string
-	Namespace string
-	Database  string
+	URL              string
+	User             string
+	Pass             string
+	Namespace        string
+	Database         string
+	ConnectTimeoutS  int // Max seconds to wait for initial connection (default 30)
+	RPCTimeoutS      int // Max seconds per RPC call (default 300)
+	StartupRetries   int // Number of retries for connection + schema on startup (default 5)
 }
 
 // GeminiConfig holds Gemini API settings.
@@ -165,6 +168,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("surreal.pass", "root")
 	v.SetDefault("surreal.namespace", "commit0")
 	v.SetDefault("surreal.database", "codebase")
+	v.SetDefault("surreal.connect_timeout_s", 30)
+	v.SetDefault("surreal.rpc_timeout_s", 300)
+	v.SetDefault("surreal.startup_retries", 5)
 
 	v.SetDefault("embed.provider", "gemini")
 

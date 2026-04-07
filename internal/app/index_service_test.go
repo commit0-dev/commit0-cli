@@ -44,7 +44,7 @@ func TestIndexServiceIndexHappyPath(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 
 	result, err := svc.Index(context.Background(), IndexRequest{
 		RepoPath: "/repo",
@@ -87,7 +87,7 @@ func TestIndexServiceIndexWalkerError(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 
 	_, err := svc.Index(context.Background(), IndexRequest{
 		RepoPath: "/invalid",
@@ -120,7 +120,7 @@ func TestIndexServiceIndexParseFailure(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 
 	result, err := svc.Index(context.Background(), IndexRequest{
 		RepoPath: "/repo",
@@ -168,7 +168,7 @@ func TestIndexServiceIndexEmbedFailure(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 
 	result, err := svc.Index(context.Background(), IndexRequest{
 		RepoPath: "/repo",
@@ -216,7 +216,7 @@ func TestIndexServiceIndexStoreFailure(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 
 	result, err := svc.Index(context.Background(), IndexRequest{
 		RepoPath: "/repo",
@@ -254,7 +254,7 @@ func TestIndexServiceZeroFiles(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 
 	result, err := svc.Index(context.Background(), IndexRequest{
 		RepoPath: "/repo",
@@ -299,7 +299,7 @@ func TestIndexServiceCustomChannelBuffers(t *testing.T) {
 			BatchSize:       10,
 		},
 	}
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 	svc.parsedChBuf = 8 // positive → parsedCap = 8
 	svc.embedChBuf = 4  // positive → embedCap = 4
 
@@ -327,7 +327,7 @@ func TestIndexServiceDefaultMaxWorkersParse(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 	result, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/repo", RepoSlug: "r"})
 
 	if err != nil {
@@ -370,7 +370,7 @@ func TestIndexServiceStoreContextCancelled(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 
 	// Cancel ctx BEFORE calling Index so all derived contexts (storeCtx) are also canceled.
 	cancel()
@@ -409,7 +409,7 @@ func TestIndexServiceParseContextCancelled(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 	svc.parsedChBuf = -1 // unbuffered: send blocks → cancel wins
 	cancel()             // pre-cancel context
 
@@ -460,7 +460,7 @@ func TestIndexServiceStoreStageFatalError(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 	// Both stages have large buffers so items flow through before context check fires.
 	svc.parsedChBuf = 8
 	svc.embedChBuf = 8
@@ -503,7 +503,7 @@ func TestIndexServiceEmbedContextCancelled(t *testing.T) {
 		},
 	}
 
-	svc := NewIndexService(walker, parser, embedder, store, cfg)
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 	svc.embedChBuf = -1 // unbuffered: send blocks → cancel wins
 	cancel()
 
@@ -523,7 +523,7 @@ func TestReembedNeighborhoodHappyPath(t *testing.T) {
 	}
 
 	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
-	svc := NewIndexService(nil, nil, embedder, store, cfg)
+	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
 	if err != nil {
@@ -539,7 +539,7 @@ func TestReembedNeighborhoodListIDsError(t *testing.T) {
 	store.err = domain.NotFound("forced list error")
 
 	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
-	svc := NewIndexService(nil, nil, nil, store, cfg)
+	svc := NewIndexService(nil, nil, nil, store, nil, cfg)
 
 	_, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
 	if err == nil {
@@ -558,7 +558,7 @@ func TestReembedNeighborhoodGetNodeError(t *testing.T) {
 	}
 
 	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
-	svc := NewIndexService(nil, nil, embedder, store, cfg)
+	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
 	if err != nil {
@@ -581,7 +581,7 @@ func TestReembedNeighborhoodEmbedError(t *testing.T) {
 	}
 
 	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
-	svc := NewIndexService(nil, nil, embedder, store, cfg)
+	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
 	if err != nil {
@@ -608,7 +608,7 @@ func TestReembedNeighborhoodUpsertError(t *testing.T) {
 
 	// upsertFailStore overrides UpsertNode to always error while GetNode works fine.
 	failStore := &upsertFailStore{stubGraphStore: goodStore}
-	svc2 := NewIndexService(nil, nil, embedder, failStore, cfg)
+	svc2 := NewIndexService(nil, nil, embedder, failStore, nil, cfg)
 
 	result, err := svc2.ReembedNeighborhood(context.Background(), "my-repo")
 	if err != nil {
@@ -631,7 +631,7 @@ func TestReembedNeighborhoodDefaultBatchSize(t *testing.T) {
 	}
 
 	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 0}} // triggers default=100
-	svc := NewIndexService(nil, nil, embedder, store, cfg)
+	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
 	if err != nil {

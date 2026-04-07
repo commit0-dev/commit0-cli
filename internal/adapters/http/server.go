@@ -12,6 +12,7 @@ import (
 
 	"github.com/commit0-dev/commit0/internal/app"
 	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/domain"
 )
 
 // Server wraps an Echo instance with all application services.
@@ -22,6 +23,7 @@ type Server struct {
 	traceSvc *app.TraceService
 	blastSvc *app.BlastService
 	repoSvc  *app.RepoService
+	db       domain.GraphStore
 	cfg      *config.ServerConfig
 	log      *slog.Logger
 	jobs     *indexJobStore
@@ -34,6 +36,7 @@ func NewServer(
 	traceSvc *app.TraceService,
 	blastSvc *app.BlastService,
 	repoSvc *app.RepoService,
+	db domain.GraphStore,
 	cfg *config.ServerConfig,
 ) *Server {
 	e := echo.New()
@@ -47,6 +50,7 @@ func NewServer(
 		traceSvc: traceSvc,
 		blastSvc: blastSvc,
 		repoSvc:  repoSvc,
+		db:       db,
 		cfg:      cfg,
 		log:      slog.Default(),
 		jobs:     newIndexJobStore(),
@@ -84,7 +88,13 @@ func (s *Server) registerRoutes() {
 	// Analysis
 	v1.POST("/query", s.handleQuery)
 	v1.POST("/trace", s.handleTrace)
+	v1.POST("/trace/json", s.handleTraceJSON)
 	v1.POST("/blast", s.handleBlast)
+
+	// Nodes (for VSCode extension: CodeLens, graph, hover)
+	v1.GET("/nodes/lookup", s.handleNodeLookup)
+	v1.GET("/nodes/by-file", s.handleNodesByFile)
+	v1.GET("/nodes/:id/neighborhood", s.handleGetNeighborhood)
 }
 
 // Start binds the server to the configured port and blocks until stopped.

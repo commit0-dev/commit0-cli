@@ -90,6 +90,14 @@ func (s *httpTestGraphStore) ListNodeIDs(_ context.Context, _ string) ([]string,
 	return nil, nil
 }
 
+func (s *httpTestGraphStore) ListNodesByFile(_ context.Context, _, _ string) ([]types.CodeNode, error) {
+	return nil, nil
+}
+
+func (s *httpTestGraphStore) ListNodesByConcepts(_ context.Context, _ string, _ []string, _ int) ([]types.CodeNode, error) {
+	return nil, nil
+}
+
 type httpTestVectorIndex struct {
 	err     error
 	results []types.ScoredNode
@@ -138,6 +146,13 @@ func (s *httpTestExplainer) Explain(ctx context.Context, req domain.ExplainReque
 	return ch, nil
 }
 
+func (s *httpTestExplainer) ExplainStructured(_ context.Context, _ domain.ExplainRequest) ([]byte, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []byte(`{"overview":"test","evidence":[],"insights":[]}`), nil
+}
+
 type httpTestParser struct{}
 
 func (s *httpTestParser) Parse(ctx context.Context, f domain.FileEntry) (*domain.ParsedFile, error) {
@@ -167,7 +182,7 @@ func newTestServer(store *httpTestGraphStore, embedder *httpTestEmbedder, explai
 	vi := &httpTestVectorIndex{}
 	ti := &httpTestTextIndex{}
 
-	indexSvc := app.NewIndexService(&httpTestWalker{}, &httpTestParser{}, embedder, store, cfg)
+	indexSvc := app.NewIndexService(&httpTestWalker{}, &httpTestParser{}, embedder, store, nil, cfg)
 	querySvc := app.NewQueryService(embedder, vi, ti, store, explainer, cfg)
 	traceSvc := app.NewTraceService(store, embedder, vi, explainer, cfg)
 	blastSvc := app.NewBlastService(store, explainer, cfg)
@@ -179,7 +194,7 @@ func newTestServer(store *httpTestGraphStore, embedder *httpTestEmbedder, explai
 		ReadTimeoutSec:  30,
 		WriteTimeoutSec: 120,
 	}
-	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, serverCfg)
+	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, store, serverCfg)
 }
 
 func defaultTestServer() *Server {

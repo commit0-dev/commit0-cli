@@ -9,14 +9,16 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
+// docPrefix is prepended to document embeddings so they align with query
+// embeddings in the same Gemini Embedding 2 task space.
+// Queries use: "task: code retrieval | query: ..."
+// Documents use: "task: code retrieval | document: ..."
+const docPrefix = "task: code retrieval | document: "
+
 // ContextBuilder constructs embedding-ready context text from code nodes.
 //
-// Output follows the Gemini Embedding 2 document format:
-//
-//	title: [KIND] {Qualified} | text: {structured description}\n---\n{body}
-//
-// The embedder does NOT prepend an additional prefix — this builder produces
-// the complete text sent to the embedding API.
+// The output prioritizes semantic content (Summary, Concepts) over raw metadata,
+// ensuring the embedding captures WHAT code does, not just WHERE it is.
 type ContextBuilder struct {
 	store        domain.GraphStore
 	maxBodyRunes int
@@ -47,44 +49,47 @@ func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) 
 		return cb.ForNode(node)
 	}
 
-	switch node.Kind {
-	case types.NodeFunction:
-		return cb.forFunctionCtx(ctx, node)
-	case types.NodeClass:
-		return cb.forClassCtx(ctx, node)
-	case types.NodeFile:
-		return cb.forFileCtx(ctx, node)
-	case types.NodeModule:
-		return cb.forModuleCtx(ctx, node)
-	default:
-		return cb.ForNode(node)
-	}
-}
-
-// forFunctionCtx enriches a function node using GetNeighborhood — a single
-// round-trip that returns callers, callees (with signatures), and data-flow
-// sources/sinks. Falls back to ForNode if the neighborhood is empty.
-func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNode) string {
 	nb, err := cb.store.GetNeighborhood(ctx, node.ID)
 	if err != nil || nb == nil || nb.IsEmpty() {
 		return cb.ForNode(node)
 	}
 
+	return cb.forNodeWithNeighborhood(node, nb)
+}
+
+// forNodeWithNeighborhood builds embedding text with semantic summary + graph context.
+func (cb *ContextBuilder) forNodeWithNeighborhood(node *types.CodeNode, nb *domain.Neighborhood) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "title: [FUNCTION] %s | text: ", node.Qualified)
-	fmt.Fprintf(&sb, "%s function defined in %s, lines %d–%d.", node.Language, node.FilePath, node.StartLine, node.EndLine)
-	if node.Signature != "" {
-		fmt.Fprintf(&sb, " Signature: %s.", node.Signature)
+
+	// 1. Task prefix + Kind + Name
+	sb.WriteString(docPrefix)
+	fmt.Fprintf(&sb, "[%s] %s", strings.ToUpper(string(node.Kind)), node.Qualified)
+
+	// 2. Semantic summary (MOST IMPORTANT — what the code DOES)
+	if node.Summary != "" {
+		fmt.Fprintf(&sb, " — %s", node.Summary)
+	} else if node.Docstring != "" {
+		fmt.Fprintf(&sb, " — %s", node.Docstring)
 	}
-	if node.Docstring != "" {
-		fmt.Fprintf(&sb, " %s.", node.Docstring)
+
+	// 3. Concept tags
+	if len(node.Concepts) > 0 {
+		fmt.Fprintf(&sb, " Concepts: %s.", strings.Join(node.Concepts, ", "))
 	}
+
 	sb.WriteByte('\n')
-	if len(nb.Callees) > 0 {
-		fmt.Fprintf(&sb, "Calls: %s\n", strings.Join(neighborSigs(nb.Callees), ", "))
+
+	// 4. Signature
+	if node.Signature != "" {
+		fmt.Fprintf(&sb, "Signature: %s\n", node.Signature)
 	}
+
+	// 5. Graph context
 	if len(nb.Callers) > 0 {
-		fmt.Fprintf(&sb, "Called by: %s\n", strings.Join(neighborSigs(nb.Callers), ", "))
+		fmt.Fprintf(&sb, "Callers: %s\n", strings.Join(neighborSigs(nb.Callers), ", "))
+	}
+	if len(nb.Callees) > 0 {
+		fmt.Fprintf(&sb, "Callees: %s\n", strings.Join(neighborSigs(nb.Callees), ", "))
 	}
 	if len(nb.DataSinks) > 0 {
 		parts := make([]string, 0, len(nb.DataSinks))
@@ -92,8 +97,6 @@ func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNo
 			part := s.Qualified
 			if s.ParamName != "" {
 				part += fmt.Sprintf(" (param %q)", s.ParamName)
-			} else if s.ArgExpr != "" {
-				part += fmt.Sprintf(" (arg %q)", s.ArgExpr)
 			}
 			parts = append(parts, part)
 		}
@@ -111,87 +114,97 @@ func (cb *ContextBuilder) forFunctionCtx(ctx context.Context, node *types.CodeNo
 		fmt.Fprintf(&sb, "Data flows from: %s\n", strings.Join(parts, ", "))
 	}
 	if len(nb.Reads) > 0 {
-		fmt.Fprintf(&sb, "Reads fields: %s\n", strings.Join(nb.Reads, ", "))
+		fmt.Fprintf(&sb, "Reads: %s\n", strings.Join(nb.Reads, ", "))
 	}
 	if len(nb.Writes) > 0 {
-		fmt.Fprintf(&sb, "Writes fields: %s\n", strings.Join(nb.Writes, ", "))
+		fmt.Fprintf(&sb, "Writes: %s\n", strings.Join(nb.Writes, ", "))
 	}
+
+	// 6. Body (secondary — code body for exact matching)
 	sb.WriteString("---\n")
-	sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
+	bodyLimit := cb.bodyLimit(node.Kind)
+	sb.WriteString(cb.truncate(node.Body, bodyLimit))
+
 	return sb.String()
 }
 
-// forClassCtx enriches a class/struct node with its methods, inheritance chain,
-// and which functions use it.
-func (cb *ContextBuilder) forClassCtx(ctx context.Context, node *types.CodeNode) string {
-	nb, err := cb.store.GetNeighborhood(ctx, node.ID)
-	if err != nil || nb == nil || nb.IsEmpty() {
-		return cb.ForNode(node)
+// ForNode generates embedding input text from a code node.
+// Uses semantic summary if available, falls back to metadata.
+func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
+	if node == nil {
+		return ""
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "title: [CLASS] %s | text: ", node.Qualified)
-	fmt.Fprintf(&sb, "%s type defined in %s.", node.Language, node.FilePath)
-	if node.Docstring != "" {
-		fmt.Fprintf(&sb, " %s.", node.Docstring)
+
+	// Task prefix + Kind + Name
+	sb.WriteString(docPrefix)
+	fmt.Fprintf(&sb, "[%s] %s", strings.ToUpper(string(node.Kind)), cb.nodeLabel(node))
+
+	// Semantic summary (priority) or docstring (fallback)
+	if node.Summary != "" {
+		fmt.Fprintf(&sb, " — %s", node.Summary)
+	} else if node.Docstring != "" {
+		fmt.Fprintf(&sb, " — %s", node.Docstring)
+	} else {
+		// Minimal fallback: location metadata
+		fmt.Fprintf(&sb, " — %s %s defined in %s", node.Language, node.Kind, node.FilePath)
+		if node.StartLine > 0 {
+			fmt.Fprintf(&sb, ", lines %d–%d", node.StartLine, node.EndLine)
+		}
 	}
-	sb.WriteByte('\n')
-	// Callers for a class node are functions that call its methods (uses edges).
-	if len(nb.Callers) > 0 {
-		fmt.Fprintf(&sb, "Used by: %s\n", strings.Join(neighborNames(nb.Callers), ", "))
+
+	// Concept tags
+	if len(node.Concepts) > 0 {
+		fmt.Fprintf(&sb, ". Concepts: %s", strings.Join(node.Concepts, ", "))
 	}
-	if len(nb.Callees) > 0 {
-		fmt.Fprintf(&sb, "Calls: %s\n", strings.Join(neighborNames(nb.Callees), ", "))
+
+	// Signature
+	if node.Signature != "" {
+		fmt.Fprintf(&sb, "\nSignature: %s", node.Signature)
 	}
-	sb.WriteString("---\n")
-	classBodyLimit := min(2048, cb.maxBodyRunes)
-	sb.WriteString(cb.truncate(node.Body, classBodyLimit))
+
+	// Body
+	sb.WriteString("\n---\n")
+	bodyLimit := cb.bodyLimit(node.Kind)
+	sb.WriteString(cb.truncate(node.Body, bodyLimit))
+
 	return sb.String()
 }
 
-// forFileCtx enriches a file node with its import modules and defined symbols.
-func (cb *ContextBuilder) forFileCtx(ctx context.Context, node *types.CodeNode) string {
-	nb, err := cb.store.GetNeighborhood(ctx, node.ID)
-	if err != nil || nb == nil || nb.IsEmpty() {
-		return cb.ForNode(node)
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "title: [FILE] %s | text: ", node.FilePath)
-	fmt.Fprintf(&sb, "%s source file.", node.Language)
-	sb.WriteByte('\n')
-	if len(nb.Callees) > 0 {
-		fmt.Fprintf(&sb, "Imports: %s\n", strings.Join(neighborNames(nb.Callees), ", "))
-	}
-	if len(nb.Callers) > 0 {
-		fmt.Fprintf(&sb, "Defines: %s\n", strings.Join(neighborNames(nb.Callers), ", "))
-	}
-	sb.WriteString("---\n")
-	fileBodyLimit := min(4096, cb.maxBodyRunes)
-	sb.WriteString(cb.truncate(node.Body, fileBodyLimit))
-	return sb.String()
+// ForQuery generates embedding input text for a user query.
+func (cb *ContextBuilder) ForQuery(question string) string {
+	return "task: code retrieval | query: " + question
 }
 
-// forModuleCtx enriches a module node with its importers (reverse imports).
-func (cb *ContextBuilder) forModuleCtx(ctx context.Context, node *types.CodeNode) string {
-	nb, _ := cb.store.GetNeighborhood(ctx, node.ID)
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "title: [MODULE] %s | text: ", node.Name)
-	fmt.Fprintf(&sb, "External %s package imported as %q.", node.Language, node.Qualified)
-	if node.Docstring != "" {
-		fmt.Fprintf(&sb, " Version: %s.", node.Docstring)
+// nodeLabel returns the best label for a node (qualified name or file path).
+func (cb *ContextBuilder) nodeLabel(node *types.CodeNode) string {
+	switch node.Kind {
+	case types.NodeFile:
+		return node.FilePath
+	case types.NodeModule:
+		if node.Name != "" {
+			return node.Name
+		}
+		return node.Qualified
+	default:
+		return node.Qualified
 	}
-	sb.WriteByte('\n')
-	if nb != nil && len(nb.Callers) > 0 {
-		fmt.Fprintf(&sb, "Imported by: %s\n", strings.Join(neighborNames(nb.Callers), ", "))
-	}
-	fmt.Fprintf(&sb, "Package %s provides functionality imported via %q.\n", node.Name, node.Qualified)
-	return sb.String()
 }
 
-// neighborSigs formats neighbors as "Qualified(Signature)" when a signature is
-// available, falling back to qualified name only.
+// bodyLimit returns the max body runes for a given node kind.
+func (cb *ContextBuilder) bodyLimit(kind types.NodeKind) int {
+	switch kind {
+	case types.NodeClass:
+		return min(2048, cb.maxBodyRunes)
+	case types.NodeFile:
+		return min(4096, cb.maxBodyRunes)
+	default:
+		return cb.maxBodyRunes
+	}
+}
+
+// neighborSigs formats neighbors as "Qualified(Signature)".
 func neighborSigs(nodes []domain.NeighborNode) []string {
 	out := make([]string, 0, len(nodes))
 	for _, n := range nodes {
@@ -215,77 +228,7 @@ func neighborNames(nodes []domain.NeighborNode) []string {
 	return out
 }
 
-// ForNode generates embedding input text from a code node, formatted for the
-// Gemini Embedding 2 document convention: title: {title} | text: {description}.
-func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
-	if node == nil {
-		return ""
-	}
-
-	var sb strings.Builder
-
-	switch node.Kind {
-	case types.NodeFunction:
-		fmt.Fprintf(&sb, "title: [FUNCTION] %s | text: ", node.Qualified)
-		fmt.Fprintf(&sb, "%s function defined in %s, lines %d–%d.", node.Language, node.FilePath, node.StartLine, node.EndLine)
-		if node.Signature != "" {
-			fmt.Fprintf(&sb, " Signature: %s.", node.Signature)
-		}
-		if node.Docstring != "" {
-			fmt.Fprintf(&sb, " %s.", node.Docstring)
-		}
-		sb.WriteString("\n---\n")
-		sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
-
-	case types.NodeClass:
-		fmt.Fprintf(&sb, "title: [CLASS] %s | text: ", node.Qualified)
-		fmt.Fprintf(&sb, "%s type defined in %s.", node.Language, node.FilePath)
-		if node.Docstring != "" {
-			fmt.Fprintf(&sb, " %s.", node.Docstring)
-		}
-		sb.WriteString("\n---\n")
-		// Cap class bodies at 2048 runes (512 tokens equivalent)
-		classBodyLimit := 2048
-		if cb.maxBodyRunes < classBodyLimit {
-			classBodyLimit = cb.maxBodyRunes
-		}
-		sb.WriteString(cb.truncate(node.Body, classBodyLimit))
-
-	case types.NodeFile:
-		fmt.Fprintf(&sb, "title: [FILE] %s | text: ", node.FilePath)
-		fmt.Fprintf(&sb, "%s source file.", node.Language)
-		sb.WriteString("\n---\n")
-		// Cap file bodies at 4096 runes
-		fileBodyLimit := 4096
-		if cb.maxBodyRunes < fileBodyLimit {
-			fileBodyLimit = cb.maxBodyRunes
-		}
-		sb.WriteString(cb.truncate(node.Body, fileBodyLimit))
-
-	case types.NodeModule:
-		fmt.Fprintf(&sb, "title: [MODULE] %s | text: ", node.Name)
-		fmt.Fprintf(&sb, "External %s package imported as %q.", node.Language, node.Qualified)
-		if node.Docstring != "" {
-			fmt.Fprintf(&sb, " Version: %s.", node.Docstring)
-		}
-		sb.WriteByte('\n')
-		fmt.Fprintf(&sb, "Package %s provides functionality imported via %q.\n", node.Name, node.Qualified)
-
-	default:
-		sb.WriteString("title: code | text: ")
-		sb.WriteString(cb.truncate(node.Body, cb.maxBodyRunes))
-	}
-
-	return sb.String()
-}
-
-// ForQuery generates embedding input text for a user query using the
-// Gemini Embedding 2 code-retrieval task prefix.
-func (cb *ContextBuilder) ForQuery(question string) string {
-	return "task: code retrieval | query: " + question
-}
-
-// truncate safely truncates a string to maxRunes runes, counting Unicode properly.
+// truncate safely truncates a string to maxRunes runes.
 func (cb *ContextBuilder) truncate(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return ""

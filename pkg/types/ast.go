@@ -49,6 +49,8 @@ type CodeNode struct {
 	Signature   string
 	ContentHash string
 	Body        string
+	Summary     string   // LLM-generated semantic description of what this code does
+	Concepts    []string // Semantic tags: ["caching", "auth", "middleware"]
 	Embedding   []float32
 	StartLine   int
 	EndLine     int

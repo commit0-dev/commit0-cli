@@ -113,6 +113,61 @@ func (e *GeminiExplainer) Explain(ctx context.Context, req domain.ExplainRequest
 	return ch, nil
 }
 
+// ExplainStructured returns a structured JSON explanation using Gemini's
+// response_json_schema feature. The returned bytes are valid JSON matching the
+// schema for the given QueryType.
+func (e *GeminiExplainer) ExplainStructured(ctx context.Context, req domain.ExplainRequest) ([]byte, error) {
+	if req.UserQuery == "" {
+		return nil, domain.Validation("ExplainStructured: UserQuery must not be empty")
+	}
+
+	prompt := buildExplainPrompt(req)
+	schema := schemaForQueryType(req.QueryType)
+
+	contents := []*genai.Content{
+		genai.NewContentFromText(prompt, genai.RoleUser),
+	}
+
+	cfg := &genai.GenerateContentConfig{
+		ResponseMIMEType:   "application/json",
+		ResponseJsonSchema: schema,
+	}
+
+	resp, err := e.client.Models.GenerateContent(ctx, e.model, contents, cfg)
+	if err != nil {
+		return nil, classifyError(err)
+	}
+
+	if resp == nil || len(resp.Candidates) == 0 {
+		return nil, fmt.Errorf("gemini: ExplainStructured: empty response")
+	}
+
+	var result strings.Builder
+	for _, cand := range resp.Candidates {
+		if cand.Content == nil {
+			continue
+		}
+		for _, part := range cand.Content.Parts {
+			if part.Text != "" {
+				result.WriteString(part.Text)
+			}
+		}
+	}
+
+	raw := result.String()
+	if raw == "" {
+		return nil, fmt.Errorf("gemini: ExplainStructured: no text in response")
+	}
+
+	e.log.DebugContext(ctx, "ExplainStructured complete",
+		slog.String("model", e.model),
+		slog.String("queryType", req.QueryType),
+		slog.Int("bytes", len(raw)),
+	)
+
+	return []byte(raw), nil
+}
+
 // buildExplainPrompt constructs a structured prompt tailored to the query type.
 func buildExplainPrompt(req domain.ExplainRequest) string {
 	var sb strings.Builder

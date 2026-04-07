@@ -11,6 +11,7 @@ export CGO_ENABLED := 1
         fmt vet lint \
         test test-cover test-race \
         install-hooks uninstall-hooks hooks-run \
+        ext-build ext-package \
         help
 
 all: build
@@ -84,6 +85,15 @@ uninstall-hooks:
 hooks-run:
 	pre-commit run --all-files
 	pre-commit run golangci-lint --hook-stage pre-push --all-files
+
+# ── VSCode Extension ───────────────────────────────────────────────────────
+## ext-build: compile the VSCode extension
+ext-build:
+	cd vscode-extension && npm run compile
+
+## ext-package: package the VSCode extension as .vsix
+ext-package:
+	cd vscode-extension && npx @vscode/vsce package
 
 # ── Help ───────────────────────────────────────────────────────────────────
 help:

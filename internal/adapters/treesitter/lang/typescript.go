@@ -165,6 +165,7 @@ func extractTSFunction(n *sitter.Node, src []byte, filePath, scopeQual, language
 		EndLine:    int(n.EndPoint().Row) + 1,
 		Signature:  extractTSSignature(n, src),
 		Body:       nodeText(n, src),
+		Docstring:  extractJSDoc(n, src),
 		Visibility: tsVisibility(n, src),
 	}
 }
@@ -187,6 +188,7 @@ func extractTSMethod(n *sitter.Node, src []byte, filePath, classQual, language s
 		Qualified:  qualified,
 		FilePath:   filePath,
 		Language:   language,
+		Docstring:  extractJSDoc(n, src),
 		StartLine:  int(n.StartPoint().Row) + 1,
 		EndLine:    int(n.EndPoint().Row) + 1,
 		Signature:  extractTSSignature(n, src),
@@ -229,6 +231,7 @@ func extractTSArrowFunction(n *sitter.Node, src []byte, filePath, scopeQual, lan
 			EndLine:    int(n.EndPoint().Row) + 1,
 			Signature:  name + extractTSSignature(valNode, src),
 			Body:       nodeText(valNode, src),
+			Docstring:  extractJSDoc(n, src),
 			Visibility: tsVisibility(n, src),
 		}
 	}
@@ -257,6 +260,7 @@ func extractTSClass(n *sitter.Node, src []byte, filePath, scopeQual, language st
 		StartLine:  int(n.StartPoint().Row) + 1,
 		EndLine:    int(n.EndPoint().Row) + 1,
 		Body:       nodeText(n, src),
+		Docstring:  extractJSDoc(n, src),
 		Visibility: visibility,
 	}
 
@@ -380,6 +384,41 @@ func tsVisibility(n *sitter.Node, src []byte) string {
 		}
 	}
 	return "private"
+}
+
+// extractJSDoc looks for a JSDoc or line comment immediately preceding a node.
+// Returns the comment text (cleaned) or empty string.
+func extractJSDoc(n *sitter.Node, src []byte) string {
+	prev := n.PrevNamedSibling()
+	if prev == nil || prev.Type() != "comment" {
+		// Also check parent's previous sibling (e.g., exported functions)
+		if p := n.Parent(); p != nil {
+			prev = p.PrevNamedSibling()
+			if prev == nil || prev.Type() != "comment" {
+				return ""
+			}
+		} else {
+			return ""
+		}
+	}
+	text := nodeText(prev, src)
+	// Strip JSDoc markers
+	text = strings.TrimPrefix(text, "/**")
+	text = strings.TrimSuffix(text, "*/")
+	text = strings.TrimPrefix(text, "//")
+	// Clean up leading * on each line
+	lines := strings.Split(text, "\n")
+	var cleaned []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "* ")
+		line = strings.TrimPrefix(line, "*")
+		line = strings.TrimSpace(line)
+		if line != "" {
+			cleaned = append(cleaned, line)
+		}
+	}
+	return strings.Join(cleaned, " ")
 }
 
 // e.g. "src/services/auth.ts" → "src.services.auth".

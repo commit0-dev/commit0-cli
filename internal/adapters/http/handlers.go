@@ -111,6 +111,35 @@ func (s *Server) handleTrace(c echo.Context) error {
 	return nil
 }
 
+// handleTraceJSON handles POST /api/v1/trace/json — returns the full trace
+// result as a single JSON response (no SSE streaming). Used by the VSCode extension.
+func (s *Server) handleTraceJSON(c echo.Context) error {
+	var req traceRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	if req.Symbol == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "symbol is required")
+	}
+	if req.Direction == "" {
+		req.Direction = "forward"
+	}
+	if req.Depth <= 0 {
+		req.Depth = 5
+	}
+
+	result, err := s.traceSvc.Trace(c.Request().Context(), app.TraceRequest{
+		Symbol:    req.Symbol,
+		RepoSlug:  req.RepoSlug,
+		Direction: req.Direction,
+		Depth:     req.Depth,
+	})
+	if err != nil {
+		return httpError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 // ---- Blast ----------------------------------------------------------------
 
 type blastRequest struct {
@@ -204,6 +233,55 @@ func (s *Server) handleDeleteRepo(c echo.Context) error {
 		return httpError(err)
 	}
 	return c.JSON(http.StatusOK, repo)
+}
+
+// ---- Nodes (for VSCode extension) -----------------------------------------
+
+// handleNodeLookup handles GET /api/v1/nodes/lookup?repo=slug&qualified=name.
+func (s *Server) handleNodeLookup(c echo.Context) error {
+	repo := c.QueryParam("repo")
+	qualified := c.QueryParam("qualified")
+	if repo == "" || qualified == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "repo and qualified are required")
+	}
+
+	node, err := s.db.GetNodeByQualified(c.Request().Context(), repo, qualified)
+	if err != nil {
+		return httpError(err)
+	}
+	return c.JSON(http.StatusOK, node)
+}
+
+// handleNodesByFile handles GET /api/v1/nodes/by-file?repo=slug&path=relative/path.
+func (s *Server) handleNodesByFile(c echo.Context) error {
+	repo := c.QueryParam("repo")
+	path := c.QueryParam("path")
+	if repo == "" || path == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "repo and path are required")
+	}
+
+	nodes, err := s.db.ListNodesByFile(c.Request().Context(), repo, path)
+	if err != nil {
+		return httpError(err)
+	}
+	if nodes == nil {
+		nodes = []types.CodeNode{}
+	}
+	return c.JSON(http.StatusOK, nodes)
+}
+
+// handleGetNeighborhood handles GET /api/v1/nodes/:id/neighborhood.
+func (s *Server) handleGetNeighborhood(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "node id is required")
+	}
+
+	neighborhood, err := s.db.GetNeighborhood(c.Request().Context(), id)
+	if err != nil {
+		return httpError(err)
+	}
+	return c.JSON(http.StatusOK, neighborhood)
 }
 
 // ---- SSE helpers ----------------------------------------------------------
