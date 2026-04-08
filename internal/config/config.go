@@ -18,6 +18,8 @@ type Config struct {
 	Server        ServerConfig
 	Index         IndexConfig
 	Query         QueryConfig
+	LocalModel    string // Ollama model name (e.g. "gemma3:4b"). If set, uses local model.
+	OllamaURL     string // Ollama API URL (default: http://localhost:11434)
 }
 
 // ServerConfig holds HTTP server settings.
@@ -111,6 +113,8 @@ func Load(cfgPath string) (*Config, error) {
 			Database:  v.GetString("surreal.database"),
 		},
 		EmbedProvider: v.GetString("embed.provider"),
+		LocalModel:    v.GetString("local.model"),
+		OllamaURL:     v.GetString("local.ollama_url"),
 		Gemini: GeminiConfig{
 			APIKey:         v.GetString("gemini.api_key"),
 			EmbedModel:     v.GetString("gemini.embed_model"),
@@ -173,6 +177,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("surreal.startup_retries", 5)
 
 	v.SetDefault("embed.provider", "gemini")
+	v.SetDefault("local.model", "")
+	v.SetDefault("local.ollama_url", "http://localhost:11434")
 
 	v.SetDefault("voyage.model", "voyage-code-3")
 	v.SetDefault("voyage.embed_dimension", 1024)
@@ -209,7 +215,9 @@ func bindEnvs(v *viper.Viper) {
 		"surreal.namespace": "SURREAL_NAMESPACE",
 		"surreal.database":  "SURREAL_DATABASE",
 
-		"embed.provider": "EMBED_PROVIDER",
+		"embed.provider":    "EMBED_PROVIDER",
+		"local.model":       "LOCAL_MODEL",
+		"local.ollama_url":  "OLLAMA_URL",
 
 		"voyage.api_key":         "VOYAGE_API_KEY",
 		"voyage.model":           "VOYAGE_MODEL",

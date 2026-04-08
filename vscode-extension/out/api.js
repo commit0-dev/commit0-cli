@@ -105,6 +105,25 @@ class Commit0Api {
         return this.request('GET', `/api/v1/index/${encodeURIComponent(jobId)}`);
     }
     // ---- Health ----
+    // ---- Field Flow ----
+    async flowTrace(symbol, repoSlug, fieldPath = '', direction = 'both') {
+        return this.request('POST', '/api/v1/flow', {
+            symbol, repo_slug: repoSlug, field_path: fieldPath, direction, depth: 10, show_mutations: true,
+        });
+    }
+    // ---- Temporal History ----
+    async history(symbol, repoSlug) {
+        return this.request('POST', '/api/v1/history', {
+            symbol, repo_slug: repoSlug,
+        });
+    }
+    // ---- Find Root Cause ----
+    async findRoot(description, repoSlug) {
+        return this.request('POST', '/api/v1/find-root', {
+            description, repo_slug: repoSlug,
+        });
+    }
+    // ---- Health ----
     async health() {
         try {
             await this.request('GET', '/health');

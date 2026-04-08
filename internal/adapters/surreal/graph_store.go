@@ -32,10 +32,14 @@ type nodeRow struct {
 	Body        string           `json:"body"`
 	Summary     string           `json:"summary"`
 	Concepts    []string         `json:"concepts"`
-	Embedding   []float32        `json:"embedding"`
-	EndLine     int              `json:"end_line"`
-	StartLine   int              `json:"start_line"`
-	Centrality  int              `json:"centrality"`
+	Embedding          []float32        `json:"embedding"`
+	EndLine            int              `json:"end_line"`
+	StartLine          int              `json:"start_line"`
+	Centrality         int              `json:"centrality"`
+	IntroducedCommit   string           `json:"introduced_commit"`
+	IntroducedAt       *time.Time       `json:"introduced_at"`
+	LastModifiedCommit string           `json:"last_modified_commit"`
+	LastModifiedAt     *time.Time       `json:"last_modified_at"`
 }
 
 type repoRow struct {
@@ -73,11 +77,15 @@ func rowToCodeNode(r nodeRow, kind types.NodeKind) types.CodeNode {
 		Signature:   r.Signature,
 		Docstring:   r.Docstring,
 		Body:        r.Body,
-		Summary:     r.Summary,
-		Concepts:    r.Concepts,
-		ContentHash: r.ContentHash,
-		Embedding:   r.Embedding,
-		Visibility:  r.Visibility,
+		Summary:            r.Summary,
+		Concepts:           r.Concepts,
+		ContentHash:        r.ContentHash,
+		Embedding:          r.Embedding,
+		Visibility:         r.Visibility,
+		IntroducedCommit:   r.IntroducedCommit,
+		IntroducedAt:       r.IntroducedAt,
+		LastModifiedCommit: r.LastModifiedCommit,
+		LastModifiedAt:     r.LastModifiedAt,
 	}
 }
 
@@ -944,6 +952,42 @@ func (a *SurrealAdapter) ListNodesByFile(ctx context.Context, repoSlug, filePath
 		}
 	}
 	return nodes, nil
+}
+
+// UpdateRepoIndexedAt sets last_indexed_at using MERGE to avoid wiping other fields.
+func (a *SurrealAdapter) UpdateRepoIndexedAt(ctx context.Context, slug string, t time.Time) error {
+	const q = `UPDATE type::record($id) MERGE { last_indexed_at: $ts };`
+	_, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+		"id": models.NewRecordID("repo", slug),
+		"ts": t,
+	})
+	if err != nil {
+		return fmt.Errorf("update repo indexed_at %s: %w", slug, err)
+	}
+	return nil
+}
+
+// FindRepoByRemoteURL finds a repo by its normalized remote URL.
+func (a *SurrealAdapter) FindRepoByRemoteURL(ctx context.Context, remoteURL string) (*types.Repo, error) {
+	const q = `SELECT * FROM repo WHERE remote_url = $url LIMIT 1;`
+	results, err := surrealdb.Query[[]repoRow](ctx, a.db, q, map[string]any{"url": remoteURL})
+	if err != nil {
+		return nil, fmt.Errorf("find repo by remote url: %w", err)
+	}
+	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		return nil, nil // not found — not an error
+	}
+	r := (*results)[0].Result[0]
+	return &types.Repo{
+		Slug:          r.Slug,
+		Path:          r.Path,
+		RemoteURL:     r.RemoteURL,
+		DefaultBranch: r.DefaultBranch,
+		LastCommit:    r.LastCommit,
+		Languages:     r.Languages,
+		LastIndexedAt: r.LastIndexedAt,
+		CreatedAt:     r.CreatedAt,
+	}, nil
 }
 
 // ListNodesByConcepts returns nodes whose concepts array overlaps with the given tags.

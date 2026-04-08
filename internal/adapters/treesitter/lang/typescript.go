@@ -65,6 +65,7 @@ func extractTS(root *sitter.Node, file domain.FileEntry, language string) ([]typ
 			fn := extractTSFunction(n, src, file.Path, scope, language)
 			if fn != nil {
 				nodes = append(nodes, *fn)
+				edges = append(edges, extractTSMutations(n, src, file.Path, fn.Qualified)...)
 				newScope := fn.Qualified
 				for i := 0; i < int(n.ChildCount()); i++ {
 					queue = append(queue, frame{n.Child(i), newScope, clsQual})
@@ -76,6 +77,7 @@ func extractTS(root *sitter.Node, file domain.FileEntry, language string) ([]typ
 		case "method_definition":
 			fn := extractTSMethod(n, src, file.Path, clsQual, language)
 			if fn != nil {
+				edges = append(edges, extractTSMutations(n, src, file.Path, fn.Qualified)...)
 				nodes = append(nodes, *fn)
 				newScope := fn.Qualified
 				for i := 0; i < int(n.ChildCount()); i++ {
@@ -384,6 +386,68 @@ func tsVisibility(n *sitter.Node, src []byte) string {
 		}
 	}
 	return "private"
+}
+
+// extractTSMutations detects data mutations inside a function body.
+// A mutation is an assignment where the RHS is a function call that transforms
+// the LHS value, e.g. `email = email.toLowerCase()` or `x = transform(x)`.
+func extractTSMutations(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return nil
+	}
+
+	fromID := makeNodeID(string(types.NodeFunction), scopeQual)
+	var edges []types.CodeEdge
+
+	var walk func(node *sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+
+		// Look for assignment_expression: lhs = rhs
+		if node.Type() == "assignment_expression" {
+			lhs := node.ChildByFieldName("left")
+			rhs := node.ChildByFieldName("right")
+			if lhs != nil && rhs != nil && rhs.Type() == "call_expression" {
+				lhsText := strings.TrimSpace(nodeText(lhs, src))
+				rhsText := strings.TrimSpace(nodeText(rhs, src))
+				calleeNode := rhs.ChildByFieldName("function")
+				if calleeNode != nil && lhsText != "" {
+					calleeText := strings.TrimSpace(nodeText(calleeNode, src))
+					meta := map[string]string{
+						"arg_expr":      lhsText,
+						"mutation_type": string(types.MutationTransform),
+						"mutation_expr": rhsText,
+						"mutation_line": fmt.Sprintf("%d", node.StartPoint().Row+1),
+					}
+					// Extract field_path from member_expression: user.email
+					if lhs.Type() == "member_expression" {
+						obj := lhs.ChildByFieldName("object")
+						prop := lhs.ChildByFieldName("property")
+						if obj != nil && prop != nil {
+							meta["field_path"] = nodeText(obj, src) + "." + nodeText(prop, src)
+						}
+					}
+					edges = append(edges, types.CodeEdge{
+						Kind:     types.EdgeDataFlow,
+						FromID:   fromID,
+						ToID:     calleeText,
+						CallSite: fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1),
+						Metadata: meta,
+					})
+				}
+			}
+		}
+
+		for i := range int(node.ChildCount()) {
+			walk(node.Child(i))
+		}
+	}
+
+	walk(body)
+	return edges
 }
 
 // extractJSDoc looks for a JSDoc or line comment immediately preceding a node.

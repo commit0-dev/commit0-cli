@@ -44,6 +44,7 @@ type IndexService struct {
 	parsedChBuf int          // channel buffer override: <0 = unbuffered, 0 = default (64), >0 = exact size
 	progressFn  ProgressFunc // set during IndexWithProgress, nil otherwise
 	embedChBuf  int // channel buffer override: <0 = unbuffered, 0 = default (32), >0 = exact size
+	temporalSvc *TemporalService // optional: set via SetTemporalService for commit-aware indexing
 }
 
 // NewIndexService creates a new index service.
@@ -68,6 +69,12 @@ func NewIndexService(
 	}
 }
 
+// SetTemporalService attaches a TemporalService for commit-aware indexing.
+// When set, Index() will run temporal indexing after the main pipeline.
+func (is *IndexService) SetTemporalService(svc *TemporalService) {
+	is.temporalSvc = svc
+}
+
 // Index executes the 4-stage indexing pipeline.
 func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResult, error) {
 	startTime := time.Now()
@@ -82,15 +89,47 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		is.log.Info("deleted existing nodes", "repo", req.RepoSlug)
 	}
 
-	// Ensure the repo record exists — nodes reference it via record<repo>.
-	// Must run after the force delete so the repo is recreated if it was wiped.
-	if err := is.store.UpsertRepo(ctx, &types.Repo{
-		Slug:      req.RepoSlug,
-		Path:      req.RepoPath,
-		Languages: []string{},
-	}); err != nil {
+	// Extract git metadata for repo identity and deduplication.
+	git := ExtractGitMetadata(req.RepoPath)
+	canonicalSlug := req.RepoSlug
+	if git.Slug != "" {
+		canonicalSlug = git.Slug
+		is.log.Info("detected git repo", "remote", git.RemoteURL, "branch", git.Branch,
+			"commit", git.CommitHash, "canonical_slug", canonicalSlug)
+	}
+
+	// Deduplicate: if a repo with the same remote URL exists, reuse its slug.
+	if git.RemoteURL != "" {
+		existing, _ := is.store.FindRepoByRemoteURL(ctx, git.RemoteURL)
+		if existing != nil && existing.Slug != canonicalSlug {
+			is.log.Info("reusing existing repo", "existing_slug", existing.Slug, "requested_slug", req.RepoSlug)
+			canonicalSlug = existing.Slug
+		}
+	}
+
+	// Ensure the repo record exists — preserve existing fields via fetch+merge.
+	existingRepo, _ := is.store.GetRepo(ctx, canonicalSlug)
+	repo := &types.Repo{
+		Slug:          canonicalSlug,
+		Path:          req.RepoPath,
+		RemoteURL:     git.RemoteURL,
+		DefaultBranch: git.Branch,
+		LastCommit:    git.CommitHash,
+		Languages:     []string{},
+	}
+	if existingRepo != nil {
+		repo.LastIndexedAt = existingRepo.LastIndexedAt
+		repo.CreatedAt = existingRepo.CreatedAt
+		if len(existingRepo.Languages) > 0 {
+			repo.Languages = existingRepo.Languages
+		}
+	}
+	if err := is.store.UpsertRepo(ctx, repo); err != nil {
 		return nil, fmt.Errorf("upsert repo: %w", err)
 	}
+
+	// Use canonical slug for all downstream operations.
+	req.RepoSlug = canonicalSlug
 
 	// Stage 1: Walk filesystem
 	is.log.Info("starting walk", "repo", req.RepoSlug, "path", req.RepoPath)
@@ -123,6 +162,17 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 					is.log.Warn("parse failed", "file", file.Path, "err", err)
 					run.addError()
 					return nil // non-fatal
+				}
+
+				// Incremental indexing: skip files whose content hasn't changed.
+				// Compare the parsed file's content hash against the stored hash.
+				if !req.Force && parsed.ContentHash != "" {
+					existingFile, err := is.store.GetNode(parseCtx, "file:"+file.Path)
+					if err == nil && existingFile != nil && existingFile.ContentHash == parsed.ContentHash {
+						is.log.Debug("skipping unchanged file", "file", file.Path)
+						run.addFilesIndexed(1) // count for progress but don't re-process
+						return nil
+					}
 				}
 
 				// Stamp repo slug onto every node so the store can build record IDs.
@@ -228,13 +278,23 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		// Non-fatal: base embeddings are still valid.
 	}
 
-	// Mark repo as indexed so the UI shows the correct status.
-	now := time.Now()
-	if err := is.store.UpsertRepo(ctx, &types.Repo{
-		Slug:          req.RepoSlug,
-		Path:          req.RepoPath,
-		LastIndexedAt: &now,
-	}); err != nil {
+	// Temporal indexing: walk recent git history to stamp introduced_commit /
+	// last_modified_commit on nodes and edges.
+	if is.temporalSvc != nil && req.RepoPath != "" {
+		is.log.Info("running temporal indexing", "repo", req.RepoSlug)
+		if err := is.temporalSvc.IndexCommitRange(ctx, TemporalIndexRequest{
+			RepoPath:   req.RepoPath,
+			RepoSlug:   req.RepoSlug,
+			FromCommit: "HEAD~50", // last 50 commits for incremental
+			ToCommit:   "HEAD",
+		}); err != nil {
+			is.log.Warn("temporal indexing failed", "repo", req.RepoSlug, "err", err)
+			// Non-fatal: core indexing is still valid.
+		}
+	}
+
+	// Mark repo as indexed using MERGE (doesn't wipe other fields).
+	if err := is.store.UpdateRepoIndexedAt(ctx, req.RepoSlug, time.Now()); err != nil {
 		is.log.Warn("failed to update LastIndexedAt", "repo", req.RepoSlug, "err", err)
 	}
 

@@ -60,6 +60,7 @@ func (e *PythonExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]t
 			fn := extractPyFunction(inner, src, file.Path, scope)
 			if fn != nil {
 				nodes = append(nodes, *fn)
+				edges = append(edges, extractPyMutations(inner, src, file.Path, fn.Qualified)...)
 				newScope := fn.Qualified
 				for i := 0; i < int(inner.ChildCount()); i++ {
 					queue = append(queue, frame{node: inner.Child(i), scopeQual: newScope})
@@ -299,6 +300,67 @@ func pyVisibility(name string) string {
 		return "private"
 	}
 	return "public"
+}
+
+// extractPyMutations detects data mutations inside a Python function body.
+// A mutation is `x = func(x)` or `self.field = transform(self.field)`.
+func extractPyMutations(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return nil
+	}
+
+	fromID := makeNodeID(string(types.NodeFunction), scopeQual)
+	var edges []types.CodeEdge
+
+	var walk func(node *sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+
+		// Python assignment: target = value (type "assignment")
+		if node.Type() == "assignment" {
+			lhs := node.ChildByFieldName("left")
+			rhs := node.ChildByFieldName("right")
+			if lhs != nil && rhs != nil && rhs.Type() == "call" {
+				lhsText := strings.TrimSpace(nodeText(lhs, src))
+				rhsText := strings.TrimSpace(nodeText(rhs, src))
+				calleeNode := rhs.ChildByFieldName("function")
+				if calleeNode != nil && lhsText != "" {
+					calleeText := strings.TrimSpace(nodeText(calleeNode, src))
+					meta := map[string]string{
+						"arg_expr":      lhsText,
+						"mutation_type": string(types.MutationTransform),
+						"mutation_expr": rhsText,
+						"mutation_line": fmt.Sprintf("%d", node.StartPoint().Row+1),
+					}
+					// self.field → field_path
+					if lhs.Type() == "attribute" {
+						obj := lhs.ChildByFieldName("object")
+						attr := lhs.ChildByFieldName("attribute")
+						if obj != nil && attr != nil {
+							meta["field_path"] = nodeText(obj, src) + "." + nodeText(attr, src)
+						}
+					}
+					edges = append(edges, types.CodeEdge{
+						Kind:     types.EdgeDataFlow,
+						FromID:   fromID,
+						ToID:     calleeText,
+						CallSite: fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1),
+						Metadata: meta,
+					})
+				}
+			}
+		}
+
+		for i := range int(node.ChildCount()) {
+			walk(node.Child(i))
+		}
+	}
+
+	walk(body)
+	return edges
 }
 
 // e.g. "myapp/utils/helpers.py" → "myapp.utils.helpers".

@@ -92,6 +92,32 @@ export class Commit0Api {
 
   // ---- Health ----
 
+  // ---- Field Flow ----
+
+  async flowTrace(symbol: string, repoSlug: string, fieldPath = '', direction = 'both'): Promise<FieldFlowResult> {
+    return this.request<FieldFlowResult>('POST', '/api/v1/flow', {
+      symbol, repo_slug: repoSlug, field_path: fieldPath, direction, depth: 10, show_mutations: true,
+    });
+  }
+
+  // ---- Temporal History ----
+
+  async history(symbol: string, repoSlug: string): Promise<TemporalChange[]> {
+    return this.request<TemporalChange[]>('POST', '/api/v1/history', {
+      symbol, repo_slug: repoSlug,
+    });
+  }
+
+  // ---- Find Root Cause ----
+
+  async findRoot(description: string, repoSlug: string): Promise<RootCauseReport> {
+    return this.request<RootCauseReport>('POST', '/api/v1/find-root', {
+      description, repo_slug: repoSlug,
+    });
+  }
+
+  // ---- Health ----
+
   async health(): Promise<boolean> {
     try {
       await this.request<{ status: string }>('GET', '/health');
@@ -239,6 +265,67 @@ export interface Neighborhood {
   DataSources: NeighborNode[];
   Reads: string[];
   Writes: string[];
+}
+
+// ---- Field Flow ----
+
+export interface FieldFlowResult {
+  Root: CodeNode;
+  Direction: string;
+  Chains: FieldFlowChain[];
+  Explanation: string;
+}
+
+export interface FieldFlowChain {
+  FieldPath: string;
+  Hops: FieldFlowHop[];
+  Mutations: FieldFlowHop[];
+  TaintPoint?: FieldFlowHop;
+}
+
+export interface FieldFlowHop {
+  Node: CodeNode;
+  FieldPath: string;
+  MutationType: string;
+  MutationExpr: string;
+  MutationLine: number;
+  Depth: number;
+}
+
+// ---- Temporal ----
+
+export interface TemporalChange {
+  CommitHash: string;
+  CommitMessage: string;
+  Author: string;
+  Timestamp: string;
+  NodesAdded: CodeNode[];
+  NodesModified: CodeNode[];
+  NodesRemoved: string[];
+}
+
+// ---- Root Cause ----
+
+export interface RootCauseReport {
+  CommitHash: string;
+  CommitMessage: string;
+  Author: string;
+  Timestamp: string;
+  Confidence: number;
+  CausalChain: FieldFlowHop[];
+  Explanation: string;
+  SuggestedFix: string;
+  SuspectCommits: SuspectCommit[];
+  Timing: TimingInfo;
+}
+
+export interface SuspectCommit {
+  Hash: string;
+  Message: string;
+  Author: string;
+  Timestamp: string;
+  Score: number;
+  Reasoning: string;
 }
 
 export interface IndexJob {

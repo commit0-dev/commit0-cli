@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 // QueryResult represents the result of a query operation.
 type QueryResult struct {
 	Explanation          string              // plain text (backward compat)
@@ -132,4 +134,110 @@ type TimingInfo struct {
 	GraphMS   int64 // Time spent on graph operations
 	ExplainMS int64 // Time spent generating explanations
 	TotalMS   int64 // Total operation time
+}
+
+// ---------------------------------------------------------------------------
+// Field-Level Data Flow Tracing
+// ---------------------------------------------------------------------------
+
+// FieldFlowHop represents a single step in a field-level data flow trace.
+type FieldFlowHop struct {
+	Node         CodeNode
+	Edge         CodeEdge
+	FieldPath    string       // e.g. "user.Email"
+	ParamName    string       // callee parameter receiving the data
+	ArgExpr      string       // expression passed at call site
+	MutationType MutationKind // what mutation occurs here
+	MutationExpr string       // e.g. "strings.ToLower(email)"
+	MutationLine int
+	Depth        int
+}
+
+// FieldFlowChain is one end-to-end path of a specific field through functions.
+type FieldFlowChain struct {
+	FieldPath  string          // the tracked field, e.g. "user.Email"
+	Hops       []FieldFlowHop
+	Mutations  []FieldFlowHop  // subset where MutationType != "none"
+	TaintPoint *FieldFlowHop   // the first mutation point (if any)
+}
+
+// FieldFlowResult represents the full result of a field-level data flow query.
+type FieldFlowResult struct {
+	Root        CodeNode
+	Direction   string
+	Chains      []FieldFlowChain
+	Explanation string
+	Timing      TimingInfo
+}
+
+// ---------------------------------------------------------------------------
+// Temporal Code Graph
+// ---------------------------------------------------------------------------
+
+// TemporalChange records what changed in the code graph at a specific commit.
+type TemporalChange struct {
+	CommitHash    string
+	CommitMessage string
+	Author        string
+	Timestamp     time.Time
+	NodesAdded    []CodeNode
+	NodesModified []CodeNode
+	NodesRemoved  []string // qualified names
+	EdgesAdded    []CodeEdge
+	EdgesRemoved  []CodeEdge
+}
+
+// ---------------------------------------------------------------------------
+// Root Cause Detection (Commit Zero)
+// ---------------------------------------------------------------------------
+
+// SuspectCommit is a candidate commit that may have caused the bug.
+type SuspectCommit struct {
+	Hash        string
+	Message     string
+	Author      string
+	Timestamp   time.Time
+	Score       float64 // composite: temporal_proximity × data_flow_position × change_magnitude
+	Reasoning   string  // LLM explanation of why this commit is suspicious
+	DiffSummary string  // summarized diff
+}
+
+// RootCauseReport is the final output of commit zero detection.
+type RootCauseReport struct {
+	CommitHash     string          // the commit zero
+	CommitMessage  string
+	Author         string
+	Timestamp      time.Time
+	Confidence     float64         // 0.0 - 1.0
+	CausalChain    []FieldFlowHop  // data flow from root cause to symptom
+	Explanation    string          // LLM-generated full explanation
+	SuggestedFix   string          // LLM-suggested fix
+	SuspectCommits []SuspectCommit // ranked candidates
+	Timing         TimingInfo
+}
+
+// ---------------------------------------------------------------------------
+// Memory Management
+// ---------------------------------------------------------------------------
+
+// MemoryTier identifies which tier of the memory hierarchy an entry belongs to.
+type MemoryTier string
+
+const (
+	MemoryWorking    MemoryTier = "working"
+	MemorySession    MemoryTier = "session"
+	MemoryPersistent MemoryTier = "persistent"
+)
+
+// MemoryEntry is a single piece of stored memory.
+type MemoryEntry struct {
+	ID         string
+	Tier       MemoryTier
+	SessionID  string
+	RepoSlug   string
+	Content    string
+	Concepts   []string  // semantic tags for retrieval
+	Embedding  []float32
+	CreatedAt  time.Time
+	TokenCount int
 }

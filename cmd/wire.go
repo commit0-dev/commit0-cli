@@ -9,6 +9,8 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/commit0-dev/commit0/internal/adapters/gemini"
+	gitadapter "github.com/commit0-dev/commit0/internal/adapters/git"
+	localadapter "github.com/commit0-dev/commit0/internal/adapters/local"
 	"github.com/commit0-dev/commit0/internal/adapters/surreal"
 	agentpkg "github.com/commit0-dev/commit0/internal/app/agent"
 	"github.com/commit0-dev/commit0/internal/adapters/treesitter"
@@ -23,7 +25,7 @@ import (
 type deps struct {
 	db        *surreal.SurrealAdapter
 	embedder  domain.Embedder
-	explainer *gemini.GeminiExplainer
+	explainer domain.LLMExplainer
 	parser    *treesitter.TreeSitterParser
 	walker    *walker.FSWalker
 }
@@ -118,14 +120,24 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 		}
 	}
 
-	// 4. Explainer (always Gemini).
-	var exp *gemini.GeminiExplainer
-	if genaiClient != nil {
-		exp, err = gemini.NewGeminiExplainer(genaiClient, &cfg.Gemini, log)
+	// 4. Explainer — local Ollama or cloud Gemini.
+	var exp domain.LLMExplainer
+	if cfg.LocalModel != "" {
+		ollamaExp := localadapter.NewOllamaExplainer(cfg.OllamaURL, cfg.LocalModel, log)
+		if err := ollamaExp.Ping(ctx); err != nil {
+			log.Warn("ollama not available, falling back to Gemini", "err", err)
+		} else {
+			log.Info("using local model via Ollama", "model", cfg.LocalModel, "url", cfg.OllamaURL)
+			exp = ollamaExp
+		}
+	}
+	if exp == nil && genaiClient != nil {
+		geminiExp, err := gemini.NewGeminiExplainer(genaiClient, &cfg.Gemini, log)
 		if err != nil {
 			db.Close(ctx)
 			return nil, nil, fmt.Errorf("gemini explainer: %w", err)
 		}
+		exp = geminiExp
 	}
 
 	// 5. tree-sitter parser
@@ -153,6 +165,10 @@ func wireIndexService(ctx context.Context, cfg *config.Config) (*app.IndexServic
 		return nil, nil, err
 	}
 	svc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg)
+	// Wire temporal service for CLI indexing
+	gitW := gitadapter.NewWalker(slog.Default())
+	tempSvc := app.NewTemporalService(d.db, nil, gitW, d.parser)
+	svc.SetTemporalService(tempSvc)
 	return svc, cleanup, nil
 }
 
@@ -194,14 +210,17 @@ func wireRepoService(ctx context.Context, cfg *config.Config) (*app.RepoService,
 
 // serveServices holds all services wired from a single shared deps instance.
 type serveServices struct {
-	index   *app.IndexService
-	query   *app.QueryService
-	trace   *app.TraceService
-	blast   *app.BlastService
-	repo    *app.RepoService
-	db      domain.GraphStore
-	agent   domain.AgentRunner
-	cleanup func()
+	index     *app.IndexService
+	query     *app.QueryService
+	trace     *app.TraceService
+	blast     *app.BlastService
+	repo      *app.RepoService
+	db        domain.GraphStore
+	agent     domain.AgentRunner
+	flow      *app.FieldFlowService
+	temporal  *app.TemporalService
+	rootCause *app.RootCauseAnalysisService
+	cleanup   func()
 }
 
 // wireServeServices builds all services from one shared deps instance so the
@@ -216,10 +235,19 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	traceSvc := app.NewTraceService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg)
 	blastSvc := app.NewBlastService(d.db, d.explainer, cfg)
 
+	// Field flow + temporal services (for root cause analysis)
+	flowSvc := app.NewFieldFlowService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg)
+	gitW := gitadapter.NewWalker(log)
+	tempSvc := app.NewTemporalService(d.db, nil, gitW, d.parser)
+	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, tempSvc, d.db, gitW, d.explainer, cfg)
+
 	// Agent service (optional — requires Gemini API key)
 	var agentRunner domain.AgentRunner
 	if cfg.Gemini.APIKey != "" {
-		agentSvc, err := agentpkg.NewAgentService(querySvc, traceSvc, blastSvc, d.db, cfg)
+		agentSvc, err := agentpkg.NewAgentService(
+			querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc,
+			d.db, gitW, d.explainer, cfg,
+		)
 		if err != nil {
 			log.Warn("agent service unavailable", "err", err)
 		} else {
@@ -227,14 +255,20 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		}
 	}
 
+	indexSvc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg)
+	indexSvc.SetTemporalService(tempSvc)
+
 	return &serveServices{
-		index:   app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg),
-		query:   querySvc,
-		trace:   traceSvc,
-		blast:   blastSvc,
-		repo:    app.NewRepoService(d.db),
-		db:      d.db,
-		agent:   agentRunner,
-		cleanup: cleanup,
+		index:     indexSvc,
+		query:     querySvc,
+		trace:     traceSvc,
+		blast:     blastSvc,
+		repo:      app.NewRepoService(d.db),
+		db:        d.db,
+		agent:     agentRunner,
+		flow:      flowSvc,
+		temporal:  tempSvc,
+		rootCause: rootCauseSvc,
+		cleanup:   cleanup,
 	}, nil
 }

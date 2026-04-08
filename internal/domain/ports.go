@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"time"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 )
@@ -152,6 +153,11 @@ type GraphStore interface {
 	ListNodesByFile(ctx context.Context, repoSlug, filePath string) ([]types.CodeNode, error)
 	// ListNodesByConcepts returns nodes whose concepts overlap with the given tags.
 	ListNodesByConcepts(ctx context.Context, repoSlug string, concepts []string, limit int) ([]types.CodeNode, error)
+	// UpdateRepoIndexedAt sets the last_indexed_at timestamp using MERGE (not CONTENT)
+	// so it doesn't wipe other fields on the repo record.
+	UpdateRepoIndexedAt(ctx context.Context, slug string, t time.Time) error
+	// FindRepoByRemoteURL finds a repo by its normalized remote URL for deduplication.
+	FindRepoByRemoteURL(ctx context.Context, remoteURL string) (*types.Repo, error)
 	UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
 	UpsertRepo(ctx context.Context, repo *types.Repo) error
 	GetRepo(ctx context.Context, slug string) (*types.Repo, error)
@@ -204,6 +210,84 @@ type ChatEvent struct {
 // AgentRunner executes agentic conversations with tool use.
 type AgentRunner interface {
 	Chat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error)
+}
+
+// ---------------------------------------------------------------------------
+// Temporal Store — time-aware code graph operations
+// ---------------------------------------------------------------------------
+
+// TemporalStore extends GraphStore with commit-aware operations.
+type TemporalStore interface {
+	UpsertNodeTemporal(ctx context.Context, node *types.CodeNode, commitHash string, commitTime time.Time) error
+	UpsertEdgeTemporal(ctx context.Context, edge *types.CodeEdge, commitHash string, commitTime time.Time) error
+	MarkNodeRemoved(ctx context.Context, nodeID, commitHash string, commitTime time.Time) error
+	MarkEdgeRemoved(ctx context.Context, edgeID, commitHash string, commitTime time.Time) error
+	QueryTemporalRange(ctx context.Context, repoSlug, fromCommit, toCommit string) ([]types.TemporalChange, error)
+	NodeHistory(ctx context.Context, nodeID string) ([]types.TemporalChange, error)
+	EdgesIntroducedAt(ctx context.Context, repoSlug, commitHash string) ([]types.CodeEdge, error)
+}
+
+// ---------------------------------------------------------------------------
+// Field-Level Data Flow Store
+// ---------------------------------------------------------------------------
+
+// FieldFlowStore provides field-level data flow queries.
+type FieldFlowStore interface {
+	TraceFieldFlow(ctx context.Context, startID string, fieldPath string, depth int, direction string) ([]types.FieldFlowHop, error)
+	FindMutations(ctx context.Context, repoSlug string, fieldPath string) ([]types.FieldFlowHop, error)
+}
+
+// ---------------------------------------------------------------------------
+// Memory Store — three-tier persistent memory
+// ---------------------------------------------------------------------------
+
+// MemoryStore provides CRUD for the persistent memory tier.
+type MemoryStore interface {
+	StoreMemory(ctx context.Context, entry *types.MemoryEntry) error
+	RetrieveMemories(ctx context.Context, repoSlug string, queryVec []float32, topK int) ([]types.MemoryEntry, error)
+	ListSessionMemories(ctx context.Context, sessionID string) ([]types.MemoryEntry, error)
+	DeleteSessionMemories(ctx context.Context, sessionID string) error
+}
+
+// ---------------------------------------------------------------------------
+// Git Walker — access to git history
+// ---------------------------------------------------------------------------
+
+// GitCommit holds metadata about a git commit.
+type GitCommit struct {
+	Hash      string
+	Message   string
+	Author    string
+	Timestamp time.Time
+	Files     []string
+}
+
+// GitFileDiff describes a single file change in a commit.
+type GitFileDiff struct {
+	Path      string
+	OldPath   string // set if renamed
+	Status    string // "added", "modified", "deleted", "renamed"
+	Additions int
+	Deletions int
+	Patch     string // unified diff
+}
+
+// GitWalker provides access to git history for temporal indexing.
+type GitWalker interface {
+	ListCommits(ctx context.Context, repoPath string, fromRef, toRef string) ([]GitCommit, error)
+	DiffCommit(ctx context.Context, repoPath, commitHash string) ([]GitFileDiff, error)
+	ReadFileAtCommit(ctx context.Context, repoPath, commitHash, filePath string) ([]byte, error)
+	CommitInfo(ctx context.Context, repoPath, commitHash string) (*GitCommit, error)
+}
+
+// ---------------------------------------------------------------------------
+// Compressor — LLM-based context compression
+// ---------------------------------------------------------------------------
+
+// Compressor compresses context using LLM summarization.
+type Compressor interface {
+	CompressTurn(ctx context.Context, role, content string, toolCalls []string) (string, error)
+	CompressSession(ctx context.Context, turns []string) (string, error)
 }
 
 // Parser extracts code structure from source files.

@@ -251,7 +251,7 @@ DEFINE INDEX OVERWRITE fn_qualified_fts ON `function` FIELDS qualified
     FULLTEXT ANALYZER code_analyzer BM25;
 DEFINE INDEX OVERWRITE fn_doc_fts       ON `function` FIELDS docstring
     FULLTEXT ANALYZER nl_analyzer BM25;
-DEFINE INDEX OVERWRITE fn_summary_fts   ON `function` FIELDS summary
+DEFINE INDEX IF NOT EXISTS fn_summary_fts   ON `function` FIELDS summary
     FULLTEXT ANALYZER nl_analyzer BM25;
 
 DEFINE INDEX OVERWRITE cls_name_fts      ON class FIELDS name
@@ -260,7 +260,7 @@ DEFINE INDEX OVERWRITE cls_qualified_fts ON class FIELDS qualified
     FULLTEXT ANALYZER code_analyzer BM25;
 DEFINE INDEX OVERWRITE cls_doc_fts       ON class FIELDS docstring
     FULLTEXT ANALYZER nl_analyzer BM25;
-DEFINE INDEX OVERWRITE cls_summary_fts   ON class FIELDS summary
+DEFINE INDEX IF NOT EXISTS cls_summary_fts   ON class FIELDS summary
     FULLTEXT ANALYZER nl_analyzer BM25;
 
 DEFINE INDEX OVERWRITE file_path_fts ON file FIELDS path
@@ -272,6 +272,85 @@ DEFINE INDEX OVERWRITE mod_path_fts ON module FIELDS path
     FULLTEXT ANALYZER code_analyzer BM25;
 DEFINE INDEX OVERWRITE mod_doc_fts  ON module FIELDS docstring
     FULLTEXT ANALYZER nl_analyzer BM25;
+
+-- ─────────────────────────────────────────
+-- Temporal Fields on Nodes
+-- ─────────────────────────────────────────
+
+DEFINE FIELD IF NOT EXISTS introduced_commit    ON `function` TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at        ON `function` TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_modified_commit ON `function` TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_modified_at     ON `function` TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS removed_commit       ON `function` TYPE option<string>;
+
+DEFINE FIELD IF NOT EXISTS introduced_commit    ON class TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at        ON class TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_modified_commit ON class TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_modified_at     ON class TYPE option<datetime>;
+
+DEFINE FIELD IF NOT EXISTS introduced_commit    ON file TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at        ON file TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_modified_commit ON file TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_modified_at     ON file TYPE option<datetime>;
+
+-- ─────────────────────────────────────────
+-- Temporal + Enhanced Fields on Edges
+-- ─────────────────────────────────────────
+
+DEFINE FIELD IF NOT EXISTS introduced_commit ON calls TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at     ON calls TYPE option<datetime>;
+
+DEFINE FIELD IF NOT EXISTS introduced_commit ON data_flow TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at     ON data_flow TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS field_path        ON data_flow TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS mutation_type     ON data_flow TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS mutation_expr     ON data_flow TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS mutation_line     ON data_flow TYPE option<int>;
+
+DEFINE FIELD IF NOT EXISTS introduced_commit ON reads TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_commit ON writes TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_commit ON inherits TYPE option<string>;
+
+-- Temporal indexes
+DEFINE INDEX IF NOT EXISTS fn_introduced_idx ON `function` FIELDS introduced_commit;
+DEFINE INDEX IF NOT EXISTS fn_modified_idx   ON `function` FIELDS last_modified_commit;
+DEFINE INDEX IF NOT EXISTS df_field_path_idx ON data_flow FIELDS field_path;
+
+-- ─────────────────────────────────────────
+-- Memory Table (three-tier context storage)
+-- ─────────────────────────────────────────
+
+DEFINE TABLE IF NOT EXISTS memory SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE tier        ON memory TYPE string
+    ASSERT $value IN ["working", "session", "persistent"];
+DEFINE FIELD OVERWRITE session_id  ON memory TYPE option<string>;
+DEFINE FIELD OVERWRITE repo_slug   ON memory TYPE string;
+DEFINE FIELD OVERWRITE content     ON memory TYPE string;
+DEFINE FIELD OVERWRITE concepts    ON memory TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE embedding   ON memory TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE token_count ON memory TYPE int VALUE 0;
+DEFINE FIELD OVERWRITE created_at  ON memory TYPE datetime VALUE time::now();
+
+DEFINE INDEX IF NOT EXISTS mem_session_idx ON memory FIELDS session_id;
+DEFINE INDEX IF NOT EXISTS mem_tier_idx    ON memory FIELDS tier;
+
+-- ─────────────────────────────────────────
+-- Commit History Cache
+-- ─────────────────────────────────────────
+
+DEFINE TABLE IF NOT EXISTS commit_history SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE hash       ON commit_history TYPE string;
+DEFINE FIELD OVERWRITE repo_slug  ON commit_history TYPE string;
+DEFINE FIELD OVERWRITE message    ON commit_history TYPE string;
+DEFINE FIELD OVERWRITE author     ON commit_history TYPE string;
+DEFINE FIELD OVERWRITE timestamp  ON commit_history TYPE datetime;
+DEFINE FIELD OVERWRITE files      ON commit_history TYPE array<string>;
+DEFINE FIELD OVERWRITE indexed    ON commit_history TYPE bool VALUE false;
+
+DEFINE INDEX IF NOT EXISTS ch_hash_idx ON commit_history FIELDS repo_slug, hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS ch_ts_idx   ON commit_history FIELDS repo_slug, timestamp;
 
 -- ─────────────────────────────────────────
 -- Schema Version (for migration tracking)

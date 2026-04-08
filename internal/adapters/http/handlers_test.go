@@ -98,6 +98,22 @@ func (s *httpTestGraphStore) ListNodesByConcepts(_ context.Context, _ string, _ 
 	return nil, nil
 }
 
+func (s *httpTestGraphStore) UpdateRepoIndexedAt(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+
+func (s *httpTestGraphStore) FindRepoByRemoteURL(_ context.Context, _ string) (*types.Repo, error) {
+	return nil, nil
+}
+
+func (s *httpTestGraphStore) TraceFieldFlow(_ context.Context, _ string, _ string, _ int, _ string) ([]types.FieldFlowHop, error) {
+	return nil, nil
+}
+
+func (s *httpTestGraphStore) FindMutations(_ context.Context, _ string, _ string) ([]types.FieldFlowHop, error) {
+	return nil, nil
+}
+
 type httpTestVectorIndex struct {
 	err     error
 	results []types.ScoredNode
@@ -194,7 +210,7 @@ func newTestServer(store *httpTestGraphStore, embedder *httpTestEmbedder, explai
 		ReadTimeoutSec:  30,
 		WriteTimeoutSec: 120,
 	}
-	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, store, nil, serverCfg)
+	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, store, nil, nil, nil, nil, serverCfg)
 }
 
 func defaultTestServer() *Server {

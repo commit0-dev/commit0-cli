@@ -16,6 +16,9 @@ export declare class Commit0Api {
         job_id: string;
     }>;
     indexJobStatus(jobId: string): Promise<IndexJob>;
+    flowTrace(symbol: string, repoSlug: string, fieldPath?: string, direction?: string): Promise<FieldFlowResult>;
+    history(symbol: string, repoSlug: string): Promise<TemporalChange[]>;
+    findRoot(description: string, repoSlug: string): Promise<RootCauseReport>;
     health(): Promise<boolean>;
 }
 export interface Repo {
@@ -137,6 +140,55 @@ export interface Neighborhood {
     DataSources: NeighborNode[];
     Reads: string[];
     Writes: string[];
+}
+export interface FieldFlowResult {
+    Root: CodeNode;
+    Direction: string;
+    Chains: FieldFlowChain[];
+    Explanation: string;
+}
+export interface FieldFlowChain {
+    FieldPath: string;
+    Hops: FieldFlowHop[];
+    Mutations: FieldFlowHop[];
+    TaintPoint?: FieldFlowHop;
+}
+export interface FieldFlowHop {
+    Node: CodeNode;
+    FieldPath: string;
+    MutationType: string;
+    MutationExpr: string;
+    MutationLine: number;
+    Depth: number;
+}
+export interface TemporalChange {
+    CommitHash: string;
+    CommitMessage: string;
+    Author: string;
+    Timestamp: string;
+    NodesAdded: CodeNode[];
+    NodesModified: CodeNode[];
+    NodesRemoved: string[];
+}
+export interface RootCauseReport {
+    CommitHash: string;
+    CommitMessage: string;
+    Author: string;
+    Timestamp: string;
+    Confidence: number;
+    CausalChain: FieldFlowHop[];
+    Explanation: string;
+    SuggestedFix: string;
+    SuspectCommits: SuspectCommit[];
+    Timing: TimingInfo;
+}
+export interface SuspectCommit {
+    Hash: string;
+    Message: string;
+    Author: string;
+    Timestamp: string;
+    Score: number;
+    Reasoning: string;
 }
 export interface IndexJob {
     id: string;

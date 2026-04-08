@@ -61,6 +61,8 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 			if fn != nil {
 				nodes = append(nodes, *fn)
 				edges = append(edges, fnEdges...)
+				// Extract field-level mutations inside the function body.
+				edges = append(edges, extractGoMutations(n, src, file.Path, fn.Qualified)...)
 				// Descend into function body with updated scope.
 				scope = fn.Qualified
 				for i := 0; i < int(n.ChildCount()); i++ {
@@ -75,6 +77,7 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 			if fn != nil {
 				nodes = append(nodes, *fn)
 				edges = append(edges, fnEdges...)
+				edges = append(edges, extractGoMutations(n, src, file.Path, fn.Qualified)...)
 				scope = fn.Qualified
 				for i := 0; i < int(n.ChildCount()); i++ {
 					queue = append(queue, frame{node: n.Child(i), scopeQual: scope})
@@ -322,8 +325,8 @@ func extractGoCall(n *sitter.Node, src []byte, filePath, scopeQual string) *type
 }
 
 // extractGoDataFlow emits EdgeDataFlow edges for each non-literal argument
-// passed at a call site. param_name is left empty because callee parameter
-// names require cross-file resolution; arg_expr carries the source expression.
+// passed at a call site. Includes field_path for selector expressions (e.g.
+// user.Email) so field-level data flow can be traced.
 func extractGoDataFlow(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
 	fnNode := n.ChildByFieldName("function")
 	argsNode := n.ChildByFieldName("arguments")
@@ -341,11 +344,9 @@ func extractGoDataFlow(n *sitter.Node, src []byte, filePath, scopeQual string) [
 	var edges []types.CodeEdge
 	for i := range int(argsNode.ChildCount()) {
 		arg := argsNode.Child(i)
-		// Skip punctuation tokens.
 		if t := arg.Type(); t == "," || t == "(" || t == ")" {
 			continue
 		}
-		// Skip plain literals — they carry no meaningful data-flow information.
 		if isGoLiteral(arg) {
 			continue
 		}
@@ -353,14 +354,95 @@ func extractGoDataFlow(n *sitter.Node, src []byte, filePath, scopeQual string) [
 		if argText == "" {
 			continue
 		}
+
+		meta := map[string]string{"arg_expr": argText}
+
+		// Extract field_path from selector expressions: user.Email → "user.Email"
+		if arg.Type() == "selector_expression" {
+			operand := arg.ChildByFieldName("operand")
+			field := arg.ChildByFieldName("field")
+			if operand != nil && field != nil {
+				meta["field_path"] = nodeText(operand, src) + "." + nodeText(field, src)
+			}
+		}
+
 		edges = append(edges, types.CodeEdge{
 			Kind:     types.EdgeDataFlow,
 			FromID:   fromID,
 			ToID:     callee,
 			CallSite: callSite,
-			Metadata: map[string]string{"arg_expr": argText},
+			Metadata: meta,
 		})
 	}
+	return edges
+}
+
+// extractGoMutations detects data mutations inside a function body.
+// A mutation is an assignment where the RHS is a function call that transforms
+// the LHS value, e.g. `email = strings.ToLower(email)` or `x.Field = transform(x.Field)`.
+// Returns data_flow edges with mutation metadata.
+func extractGoMutations(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
+	if n.Type() != "function_declaration" && n.Type() != "method_declaration" {
+		return nil
+	}
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return nil
+	}
+
+	fromID := makeNodeID(string(types.NodeFunction), scopeQual)
+	var edges []types.CodeEdge
+
+	// Walk body looking for assignment_statement or short_var_declaration
+	var walk func(node *sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+
+		switch node.Type() {
+		case "assignment_statement":
+			// LHS = RHS — check if RHS is a call_expression
+			lhs := node.ChildByFieldName("left")
+			rhs := node.ChildByFieldName("right")
+			if lhs != nil && rhs != nil && rhs.Type() == "call_expression" {
+				lhsText := strings.TrimSpace(nodeText(lhs, src))
+				rhsText := strings.TrimSpace(nodeText(rhs, src))
+				calleeNode := rhs.ChildByFieldName("function")
+				if calleeNode != nil && lhsText != "" {
+					calleeText := strings.TrimSpace(nodeText(calleeNode, src))
+					meta := map[string]string{
+						"arg_expr":      lhsText,
+						"mutation_type": string(types.MutationTransform),
+						"mutation_expr": rhsText,
+						"mutation_line": fmt.Sprintf("%d", node.StartPoint().Row+1),
+					}
+					// If LHS is a selector (user.Email), extract field_path
+					if lhs.Type() == "selector_expression" {
+						operand := lhs.ChildByFieldName("operand")
+						field := lhs.ChildByFieldName("field")
+						if operand != nil && field != nil {
+							meta["field_path"] = nodeText(operand, src) + "." + nodeText(field, src)
+						}
+					}
+					edges = append(edges, types.CodeEdge{
+						Kind:     types.EdgeDataFlow,
+						FromID:   fromID,
+						ToID:     calleeText,
+						CallSite: fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1),
+						Metadata: meta,
+					})
+				}
+			}
+		}
+
+		// Recurse into children
+		for i := range int(node.ChildCount()) {
+			walk(node.Child(i))
+		}
+	}
+
+	walk(body)
 	return edges
 }
 

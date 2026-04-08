@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/commit0-dev/commit0/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
@@ -211,6 +212,22 @@ func (s *stubGraphStore) ListNodesByFile(_ context.Context, _, _ string) ([]type
 }
 
 func (s *stubGraphStore) ListNodesByConcepts(_ context.Context, _ string, _ []string, _ int) ([]types.CodeNode, error) {
+	return nil, nil
+}
+
+func (s *stubGraphStore) UpdateRepoIndexedAt(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+
+func (s *stubGraphStore) FindRepoByRemoteURL(_ context.Context, _ string) (*types.Repo, error) {
+	return nil, nil
+}
+
+func (s *stubGraphStore) TraceFieldFlow(_ context.Context, _ string, _ string, _ int, _ string) ([]types.FieldFlowHop, error) {
+	return nil, nil
+}
+
+func (s *stubGraphStore) FindMutations(_ context.Context, _ string, _ string) ([]types.FieldFlowHop, error) {
 	return nil, nil
 }
 

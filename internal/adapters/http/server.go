@@ -23,9 +23,12 @@ type Server struct {
 	traceSvc *app.TraceService
 	blastSvc *app.BlastService
 	repoSvc  *app.RepoService
-	db          domain.GraphStore
-	agentRunner domain.AgentRunner
-	cfg         *config.ServerConfig
+	db           domain.GraphStore
+	agentRunner  domain.AgentRunner
+	flowSvc      *app.FieldFlowService
+	tempSvc      *app.TemporalService
+	rootCauseSvc *app.RootCauseAnalysisService
+	cfg          *config.ServerConfig
 	log      *slog.Logger
 	jobs     *indexJobStore
 }
@@ -39,6 +42,9 @@ func NewServer(
 	repoSvc *app.RepoService,
 	db domain.GraphStore,
 	agentRunner domain.AgentRunner,
+	flowSvc *app.FieldFlowService,
+	tempSvc *app.TemporalService,
+	rootCauseSvc *app.RootCauseAnalysisService,
 	cfg *config.ServerConfig,
 ) *Server {
 	e := echo.New()
@@ -52,9 +58,12 @@ func NewServer(
 		traceSvc: traceSvc,
 		blastSvc: blastSvc,
 		repoSvc:  repoSvc,
-		db:          db,
-		agentRunner: agentRunner,
-		cfg:         cfg,
+		db:           db,
+		agentRunner:  agentRunner,
+		flowSvc:      flowSvc,
+		tempSvc:      tempSvc,
+		rootCauseSvc: rootCauseSvc,
+		cfg:          cfg,
 		log:      slog.Default(),
 		jobs:     newIndexJobStore(),
 	}
@@ -96,6 +105,11 @@ func (s *Server) registerRoutes() {
 
 	// Agent (agentic conversation with tool use)
 	v1.POST("/agent/chat", s.handleAgentChat)
+
+	// Root cause analysis
+	v1.POST("/flow", s.handleFieldFlow)
+	v1.POST("/history", s.handleHistory)
+	v1.POST("/find-root", s.handleFindRoot)
 
 	// Nodes (for VSCode extension: CodeLens, graph, hover)
 	v1.GET("/nodes/lookup", s.handleNodeLookup)

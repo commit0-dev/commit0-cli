@@ -12,16 +12,25 @@ import (
 	"github.com/commit0-dev/commit0/internal/domain"
 )
 
-// BuildTools creates ADK tools wrapping commit0's existing services.
+// BuildTools creates ADK tools wrapping commit0's services.
 func BuildTools(
 	querySvc *app.QueryService,
 	traceSvc *app.TraceService,
 	blastSvc *app.BlastService,
+	flowSvc *app.FieldFlowService,
+	tempSvc *app.TemporalService,
+	rootCauseSvc *app.RootCauseAnalysisService,
 	store domain.GraphStore,
+	gitWalker domain.GitWalker,
+	explainer domain.LLMExplainer,
 ) ([]tool.Tool, error) {
 	var tools []tool.Tool
+	var t tool.Tool
+	var err error
 
-	t, err := newSearchTool(querySvc)
+	// --- Existing tools ---
+
+	t, err = newSearchTool(querySvc)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
@@ -51,6 +60,40 @@ func BuildTools(
 	}
 	tools = append(tools, t)
 
+	// --- New tools for commit zero detection ---
+
+	if flowSvc != nil {
+		t, err = newFieldFlowTool(flowSvc)
+		if err != nil {
+			return nil, fmt.Errorf("flow: %w", err)
+		}
+		tools = append(tools, t)
+	}
+
+	if tempSvc != nil {
+		t, err = newTemporalTool(tempSvc)
+		if err != nil {
+			return nil, fmt.Errorf("temporal: %w", err)
+		}
+		tools = append(tools, t)
+	}
+
+	if gitWalker != nil && explainer != nil {
+		t, err = newAnalyzeCommitTool(gitWalker, explainer)
+		if err != nil {
+			return nil, fmt.Errorf("analyze_commit: %w", err)
+		}
+		tools = append(tools, t)
+	}
+
+	if rootCauseSvc != nil {
+		t, err = newFindRootCauseTool(rootCauseSvc)
+		if err != nil {
+			return nil, fmt.Errorf("find_root: %w", err)
+		}
+		tools = append(tools, t)
+	}
+
 	return tools, nil
 }
 
@@ -66,19 +109,30 @@ func getRepoSlug(ctx tool.Context) string {
 	return ""
 }
 
-// --- Search Tool ---
+func getRepoPath(ctx tool.Context) string {
+	if state := ctx.ReadonlyState(); state != nil {
+		if v, err := state.Get("repo_path"); err == nil {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+	}
+	return "."
+}
+
+// ==========================================================================
+// Existing tools (search, trace, blast, lookup, neighborhood)
+// ==========================================================================
 
 type searchInput struct {
 	Question string `json:"question"`
 	TopK     int    `json:"top_k"`
 }
-
 type searchOutput struct {
 	ResultCount int            `json:"result_count"`
 	Explanation string         `json:"explanation"`
 	Results     []searchResult `json:"results"`
 }
-
 type searchResult struct {
 	Qualified string  `json:"qualified"`
 	Kind      string  `json:"kind"`
@@ -98,9 +152,7 @@ func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
 			topK = 10
 		}
 		result, err := svc.Query(context.Background(), app.QueryRequest{
-			Question: input.Question,
-			RepoSlug: getRepoSlug(ctx),
-			TopK:     topK,
+			Question: input.Question, RepoSlug: getRepoSlug(ctx), TopK: topK,
 		})
 		if err != nil {
 			return searchOutput{}, err
@@ -117,14 +169,11 @@ func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
 	})
 }
 
-// --- Trace Tool ---
-
 type traceInput struct {
 	Symbol    string `json:"symbol"`
 	Direction string `json:"direction"`
 	Depth     int    `json:"depth"`
 }
-
 type traceOutput struct {
 	Direction   string `json:"direction"`
 	HopCount    int    `json:"hop_count"`
@@ -146,8 +195,7 @@ func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
 			depth = 5
 		}
 		result, err := svc.Trace(context.Background(), app.TraceRequest{
-			Symbol: input.Symbol, RepoSlug: getRepoSlug(ctx),
-			Direction: dir, Depth: depth,
+			Symbol: input.Symbol, RepoSlug: getRepoSlug(ctx), Direction: dir, Depth: depth,
 		})
 		if err != nil {
 			return traceOutput{}, err
@@ -159,13 +207,10 @@ func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
 	})
 }
 
-// --- Blast Tool ---
-
 type blastInput struct {
 	Symbol   string `json:"symbol"`
 	MaxDepth int    `json:"max_depth"`
 }
-
 type blastOutput struct {
 	AffectedCount int      `json:"affected_count"`
 	Summary       string   `json:"summary"`
@@ -195,8 +240,6 @@ func newBlastTool(svc *app.BlastService) (tool.Tool, error) {
 	})
 }
 
-// --- Lookup Tool ---
-
 type lookupInput struct {
 	Qualified string `json:"qualified"`
 }
@@ -215,8 +258,6 @@ func newLookupTool(store domain.GraphStore) (tool.Tool, error) {
 	})
 }
 
-// --- Neighborhood Tool ---
-
 type neighborhoodInput struct {
 	NodeID string `json:"node_id"`
 }
@@ -232,5 +273,283 @@ func newNeighborhoodTool(store domain.GraphStore) (tool.Tool, error) {
 		}
 		b, _ := json.Marshal(nb)
 		return b, nil
+	})
+}
+
+// ==========================================================================
+// New tools for commit zero detection
+// ==========================================================================
+
+// --- Field Flow Trace Tool ---
+
+type fieldFlowInput struct {
+	Symbol        string `json:"symbol"`
+	FieldPath     string `json:"field_path"`
+	Direction     string `json:"direction"`
+	ShowMutations bool   `json:"show_mutations"`
+}
+type fieldFlowOutput struct {
+	ChainCount    int              `json:"chain_count"`
+	MutationCount int              `json:"mutation_count"`
+	TaintPoints   []taintPointInfo `json:"taint_points"`
+	Chains        []chainInfo      `json:"chains"`
+}
+type taintPointInfo struct {
+	Function     string `json:"function"`
+	FilePath     string `json:"file_path"`
+	Line         int    `json:"line"`
+	MutationType string `json:"mutation_type"`
+	MutationExpr string `json:"mutation_expr"`
+	FieldPath    string `json:"field_path"`
+}
+type chainInfo struct {
+	FieldPath string   `json:"field_path"`
+	HopCount  int      `json:"hop_count"`
+	Functions []string `json:"functions"`
+}
+
+func newFieldFlowTool(svc *app.FieldFlowService) (tool.Tool, error) {
+	return functiontool.New(functiontool.Config{
+		Name: "flow_trace",
+		Description: "Trace field-level data flow through the codebase. Shows how a specific " +
+			"data field (e.g. user.Email) flows through functions, and where it gets mutated. " +
+			"Use this to find taint chains — where data is transformed in ways that cause downstream bugs.",
+	}, func(ctx tool.Context, input fieldFlowInput) (fieldFlowOutput, error) {
+		dir := input.Direction
+		if dir == "" {
+			dir = "both"
+		}
+		result, err := svc.TraceFieldFlow(context.Background(), app.FieldFlowRequest{
+			Symbol:        input.Symbol,
+			FieldPath:     input.FieldPath,
+			RepoSlug:      getRepoSlug(ctx),
+			Direction:     dir,
+			Depth:         10,
+			ShowMutations: input.ShowMutations,
+		})
+		if err != nil {
+			return fieldFlowOutput{}, err
+		}
+		out := fieldFlowOutput{ChainCount: len(result.Chains)}
+		for _, chain := range result.Chains {
+			out.MutationCount += len(chain.Mutations)
+			// Collect taint points
+			if chain.TaintPoint != nil {
+				tp := chain.TaintPoint
+				out.TaintPoints = append(out.TaintPoints, taintPointInfo{
+					Function:     tp.Node.Qualified,
+					FilePath:     tp.Node.FilePath,
+					Line:         tp.MutationLine,
+					MutationType: string(tp.MutationType),
+					MutationExpr: tp.MutationExpr,
+					FieldPath:    tp.FieldPath,
+				})
+			}
+			// Summarize chain
+			var funcs []string
+			for _, hop := range chain.Hops {
+				funcs = append(funcs, hop.Node.Qualified)
+			}
+			out.Chains = append(out.Chains, chainInfo{
+				FieldPath: chain.FieldPath, HopCount: len(chain.Hops), Functions: funcs,
+			})
+		}
+		return out, nil
+	})
+}
+
+// --- Temporal Query Tool ---
+
+type temporalInput struct {
+	Symbol     string `json:"symbol"`
+	FromCommit string `json:"from_commit"`
+	ToCommit   string `json:"to_commit"`
+}
+type temporalOutput struct {
+	IntroducedCommit   string       `json:"introduced_commit"`
+	IntroducedAt       string       `json:"introduced_at"`
+	LastModifiedCommit string       `json:"last_modified_commit"`
+	LastModifiedAt     string       `json:"last_modified_at"`
+	ChangeCount        int          `json:"change_count"`
+	Changes            []changeInfo `json:"changes"`
+}
+type changeInfo struct {
+	CommitHash string `json:"commit_hash"`
+	Author     string `json:"author"`
+	Message    string `json:"message"`
+	Timestamp  string `json:"timestamp"`
+	ChangeType string `json:"change_type"`
+}
+
+func newTemporalTool(svc *app.TemporalService) (tool.Tool, error) {
+	return functiontool.New(functiontool.Config{
+		Name: "temporal_query",
+		Description: "Query the temporal history of a code element. Shows when a function was " +
+			"introduced, when it was last modified, and what commits changed it. " +
+			"Use this to find WHEN a suspicious change was made.",
+	}, func(ctx tool.Context, input temporalInput) (temporalOutput, error) {
+		changes, err := svc.QueryHistory(context.Background(), app.TemporalQueryRequest{
+			RepoSlug:      getRepoSlug(ctx),
+			NodeQualified: input.Symbol,
+			FromCommit:    input.FromCommit,
+			ToCommit:      input.ToCommit,
+		})
+		if err != nil {
+			return temporalOutput{}, err
+		}
+		out := temporalOutput{ChangeCount: len(changes)}
+		for _, c := range changes {
+			ct := "modified"
+			if len(c.NodesAdded) > 0 {
+				ct = "introduced"
+			}
+			if len(c.NodesRemoved) > 0 {
+				ct = "removed"
+			}
+			out.Changes = append(out.Changes, changeInfo{
+				CommitHash: c.CommitHash, Author: c.Author,
+				Message: c.CommitMessage, Timestamp: c.Timestamp.Format("2006-01-02 15:04"),
+				ChangeType: ct,
+			})
+		}
+		// Set top-level fields from first/last change
+		if len(changes) > 0 {
+			first := changes[0]
+			out.IntroducedCommit = first.CommitHash
+			out.IntroducedAt = first.Timestamp.Format("2006-01-02 15:04")
+			last := changes[len(changes)-1]
+			out.LastModifiedCommit = last.CommitHash
+			out.LastModifiedAt = last.Timestamp.Format("2006-01-02 15:04")
+		}
+		return out, nil
+	})
+}
+
+// --- Analyze Commit Diff Tool ---
+
+type analyzeCommitInput struct {
+	CommitHash string `json:"commit_hash"`
+}
+type analyzeCommitOutput struct {
+	Hash         string   `json:"hash"`
+	Author       string   `json:"author"`
+	Message      string   `json:"message"`
+	FilesChanged int      `json:"files_changed"`
+	Summary      string   `json:"summary"`
+	RiskAreas    []string `json:"risk_areas"`
+}
+
+func newAnalyzeCommitTool(gitWalker domain.GitWalker, explainer domain.LLMExplainer) (tool.Tool, error) {
+	return functiontool.New(functiontool.Config{
+		Name: "analyze_commit_diff",
+		Description: "Analyze a specific git commit's diff to understand what changed and assess " +
+			"its risk. Shows files changed, a summary of the modifications, and potential risk areas. " +
+			"Use this to VERIFY whether a suspect commit could have caused a bug.",
+	}, func(ctx tool.Context, input analyzeCommitInput) (analyzeCommitOutput, error) {
+		repoPath := getRepoPath(ctx)
+
+		info, err := gitWalker.CommitInfo(context.Background(), repoPath, input.CommitHash)
+		if err != nil {
+			return analyzeCommitOutput{}, err
+		}
+		diffs, err := gitWalker.DiffCommit(context.Background(), repoPath, input.CommitHash)
+		if err != nil {
+			return analyzeCommitOutput{}, err
+		}
+
+		out := analyzeCommitOutput{
+			Hash:         info.Hash,
+			Author:       info.Author,
+			Message:      info.Message,
+			FilesChanged: len(diffs),
+		}
+
+		// Build diff summary for LLM analysis
+		var diffDesc string
+		for _, d := range diffs {
+			diffDesc += fmt.Sprintf("  %s %s (+%d -%d)\n", d.Status, d.Path, d.Additions, d.Deletions)
+			if d.Patch != "" && len(d.Patch) < 2000 {
+				diffDesc += d.Patch + "\n"
+			}
+		}
+
+		// Ask LLM to summarize the commit
+		if explainer != nil {
+			raw, err := explainer.ExplainStructured(context.Background(), domain.ExplainRequest{
+				QueryType: "search",
+				UserQuery: fmt.Sprintf(
+					"Analyze this commit and identify risk areas:\nCommit: %s\nAuthor: %s\nMessage: %s\n\nChanges:\n%s",
+					info.Hash[:8], info.Author, info.Message, diffDesc,
+				),
+			})
+			if err == nil {
+				var result struct {
+					Overview string   `json:"overview"`
+					Insights []string `json:"insights"`
+				}
+				if json.Unmarshal(raw, &result) == nil {
+					out.Summary = result.Overview
+					out.RiskAreas = result.Insights
+				}
+			}
+		}
+
+		if out.Summary == "" {
+			out.Summary = fmt.Sprintf("Commit %s by %s: %s (%d files changed)", info.Hash[:8], info.Author, info.Message, len(diffs))
+		}
+
+		return out, nil
+	})
+}
+
+// --- Find Root Cause Tool (automated pipeline) ---
+
+type findRootInput struct {
+	Description string `json:"description"`
+	Since       string `json:"since"`
+}
+type findRootOutput struct {
+	CommitZero    string   `json:"commit_zero"`
+	Author        string   `json:"author"`
+	Message       string   `json:"message"`
+	Confidence    float64  `json:"confidence"`
+	Explanation   string   `json:"explanation"`
+	SuggestedFix  string   `json:"suggested_fix"`
+	CausalChain   []string `json:"causal_chain"`
+	SuspectCount  int      `json:"suspect_count"`
+}
+
+func newFindRootCauseTool(svc *app.RootCauseAnalysisService) (tool.Tool, error) {
+	return functiontool.New(functiontool.Config{
+		Name: "find_root_cause",
+		Description: "Automatically find the commit that introduced a bug (commit zero). " +
+			"This runs the full 6-step root cause analysis: LOCATE relevant functions, " +
+			"TRACE data flow for mutations, query TIMELINE for when changes were introduced, " +
+			"CORRELATE to score suspect commits, VERIFY the top suspect, and REPORT findings. " +
+			"Use this for complex investigations that span multiple functions and commits.",
+	}, func(ctx tool.Context, input findRootInput) (findRootOutput, error) {
+		result, err := svc.FindRootCause(context.Background(), app.RootCauseRequest{
+			Description: input.Description,
+			RepoSlug:    getRepoSlug(ctx),
+			RepoPath:    getRepoPath(ctx),
+			Since:       input.Since,
+		})
+		if err != nil {
+			return findRootOutput{}, err
+		}
+		out := findRootOutput{
+			CommitZero:   result.CommitHash,
+			Author:       result.Author,
+			Message:      result.CommitMessage,
+			Confidence:   result.Confidence,
+			Explanation:  result.Explanation,
+			SuggestedFix: result.SuggestedFix,
+			SuspectCount: len(result.SuspectCommits),
+		}
+		for _, hop := range result.CausalChain {
+			out.CausalChain = append(out.CausalChain,
+				fmt.Sprintf("%s (%s:%d)", hop.Node.Qualified, hop.Node.FilePath, hop.Node.StartLine))
+		}
+		return out, nil
 	})
 }
