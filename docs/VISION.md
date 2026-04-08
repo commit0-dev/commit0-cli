@@ -389,19 +389,46 @@ commit0 investigate --resume session-id  # resume previous investigation
 
 ---
 
-## 6. Implementation Priority
+## 6. Implementation Priority & Progress
 
-| Priority | Feature | Why First |
-|----------|---------|-----------|
-| **P0** | Field-level data flow extraction | Foundation for everything — without precise data flow, we can't trace bugs |
-| **P0** | Temporal graph (commit metadata on nodes/edges) | Enables "when was this introduced" queries |
-| **P1** | Data flow query engine | `commit0 flow` command — the core value proposition |
-| **P1** | Context compression + memory tiers | Enables long investigations without losing context |
-| **P1** | Commit zero detection algorithm | The headline feature — combines flow + temporal + reasoning |
-| **P2** | Background watcher + incremental temporal updates | Real-time graph evolution tracking |
-| **P2** | Code review with data flow awareness | Review diffs for data flow mutations |
-| **P3** | Security scanner (taint analysis) | Natural extension of data flow tracing |
-| **P3** | Auto documentation | Nice-to-have, lower priority than core mission |
+> **Last updated:** 2026-04-08
+
+### Core Features
+
+| Priority | Feature | Status | Notes |
+|----------|---------|--------|-------|
+| **P0** | Field-level data flow extraction | **Done** | `FieldFlowService` + `FieldFlowStore` + `data_flow`/`reads`/`writes` edges in SurrealDB |
+| **P0** | Temporal graph (commit metadata on nodes/edges) | **Done** | `TemporalService` + `TemporalStore` with `introduced_commit`, `last_modified_commit` on nodes/edges |
+| **P1** | Data flow query engine | **Done** | `flow_trace` agent tool; `FieldFlowService.TraceForward/Reverse`; mutation tracking |
+| **P1** | Context compression + memory tiers | **Done** | `MemoryManager` (3-tier: working→session→persistent) + `Compressor` adapter. Minor TODO: eviction policy for old entries |
+| **P1** | Commit zero detection algorithm | **Done** | `RootCauseAnalysisService` implements the full 6-step algorithm (LOCATE→TRACE→TIMELINE→CORRELATE→VERIFY→REPORT); `find_root_cause` agent tool |
+| **P2** | Background watcher + incremental temporal updates | **Done** | `WatcherService` with fsnotify + debounced re-indexing |
+| **P2** | Code review with data flow awareness | **Done** | `ReviewService` analyzes git diffs using code graph + LLM; identifies issues, blast radius, missing tests |
+| **P3** | Security scanner (taint analysis) | **Done** | `AnalysisService` with taint rules (SQL injection, command injection, XSS, path traversal) + severity classification |
+| **P3** | Auto documentation | **Done** | `DocsService` generates README, architecture docs, API docs from graph + LLM |
+
+### AppSec Roadmap (graph enrichment for security analysis)
+
+**Principle:** The code graph stores neutral facts. Security vulnerabilities are properties of **flows** (unsanitized user input reaching a sensitive operation), not properties of individual nodes. No security classifications are persisted on nodes — all security reasoning happens at analysis time.
+
+| Phase | Feature | Status | What It Adds |
+|-------|---------|--------|-------------|
+| **1** | Return-value taint propagation | **Done** | `data_flow` edges with `flow_type: "return_value"` track data through function return values across call boundaries. Catches `result := helper(input); sink(result)` patterns invisible to mutation-only tracking. Go, Python, TypeScript extractors. |
+| **2** | API surface discovery & exposure mapping | **Done** | `EdgeRoute` edges from tree-sitter detect HTTP route registrations (Echo, Flask/FastAPI, Express/NestJS). Request binding detection (`c.Param`, `c.Bind`, `c.JSON`). `APISurfaceService` discovers endpoints, traces taint from API inputs, detects PII in responses, generates OpenAPI 3.0 specs. `commit0 api discover`, `commit0 api spec` CLI commands. |
+| **3** | CPG-inspired edges (control flow + data dependence) | **Done** | `EdgeControlFlow` connects basic blocks within functions (if/else branches, loops, returns). `EdgeDataDep` connects variable definitions to their uses (def-use chains). Enables path-sensitive taint analysis — determines whether a sanitizer in an `if` branch protects the `else` branch. Go, Python, TypeScript extractors. |
+
+**What these enable together:**
+
+The graph now contains 13 edge types: `calls`, `imports`, `defines`, `inherits`, `uses`, `data_flow`, `reads`, `writes`, `route`, `control_flow`, `data_dep` — plus return-value flow metadata on `data_flow` edges. This is a **Code Property Graph** (CPG) built entirely from tree-sitter, staying multi-language with no compiler dependencies.
+
+The security analysis layer (`AnalysisService`, `FieldFlowService`, `APISurfaceService`) reads this enriched graph at query time to answer:
+
+- "Which API endpoints accept user input that reaches a database query without sanitization?"
+- "Does the sanitizer in the `if` branch protect all execution paths to the sink?"
+- "What PII fields does `GET /api/v1/users/:id` expose in its response?"
+- "Which variable definition reaches this `db.Query()` call?"
+
+See `docs/SECURITY_ROADMAP.md` for the full product analysis.
 
 ---
 
@@ -409,14 +436,18 @@ commit0 investigate --resume session-id  # resume previous investigation
 
 No existing tool does what commit0 does:
 
-| Capability | git bisect | Sentry | Datadog | Sourcegraph | **commit0** |
+| Capability | git bisect | Sentry | Semgrep | Sourcegraph | **commit0** |
 |------------|-----------|--------|---------|-------------|-------------|
-| Finds failing commit | Yes (manual) | No | No | No | **Yes (automated)** |
-| Data flow tracing | No | No | Runtime only | Static only | **Static + semantic** |
-| Temporal code graph | No | No | No | No | **Yes** |
-| Causal reasoning | No | No | No | No | **Yes (LLM agent)** |
-| Works offline | Yes | No | No | No | **Yes** |
-| Zero cost | Yes | No | No | No | **Yes** |
-| Understands WHY | No | No | No | No | **Yes** |
+| Finds failing commit | Yes (manual) | No | No | No | **Yes (automated)** ✅ |
+| Data flow tracing | No | No | Single-file | Static only | **Cross-function + return-value** ✅ |
+| Temporal code graph | No | No | No | No | **Yes** ✅ |
+| Causal reasoning | No | No | No | No | **Yes (LLM agent)** ✅ |
+| Control flow graph | No | No | No | No | **Yes (CPG edges)** ✅ |
+| Path-sensitive taint | No | No | No | No | **Yes (CFG + data dep)** ✅ |
+| API surface discovery | No | No | Pattern only | No | **Route → handler → sink** ✅ |
+| OpenAPI from code | No | No | No | No | **Yes (auto-generated)** ✅ |
+| PII exposure detection | No | No | No | No | **Yes (response field analysis)** ✅ |
+| Works offline | Yes | No | Yes | No | **Yes (Ollama)** ✅ |
+| Multi-tool agent | No | No | No | No | **Yes (10 tools via ADK)** ✅ |
 
-`git bisect` finds the commit but doesn't explain WHY. Sentry/Datadog show the error but not the cause. Sourcegraph searches code but doesn't reason about data flow. **commit0 does all of this: finds the commit, traces the data flow, explains the causality, and suggests the fix.**
+**Why Semgrep can't do what commit0 does:** Semgrep matches syntactic patterns within single files. It can find `db.Query($ARG)` but cannot follow `$ARG` through function return values across call boundaries. It cannot discover that `repo.FindByEmail` is a database sink by tracing the call graph. It cannot determine whether a sanitizer in an `if` branch protects the `else` branch. It cannot discover API endpoints and trace user input from HTTP parameters through 4 layers of service calls to a database query. These require a **code graph** — which commit0 has and Semgrep architecturally does not.

@@ -222,6 +222,40 @@ DEFINE FIELD OVERWRITE repo       ON writes TYPE record<repo>;
 DEFINE INDEX OVERWRITE writes_in_idx  ON writes FIELDS in;
 DEFINE INDEX OVERWRITE writes_out_idx ON writes FIELDS out;
 
+-- route: HTTP route registration (file registers handler at path)
+DEFINE TABLE OVERWRITE route TYPE RELATION SCHEMAFULL;
+DEFINE FIELD OVERWRITE http_method   ON route TYPE string;
+DEFINE FIELD OVERWRITE http_path     ON route TYPE string;
+DEFINE FIELD OVERWRITE middleware     ON route TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE group_prefix   ON route TYPE option<string>;
+DEFINE FIELD OVERWRITE repo           ON route TYPE option<string>;
+
+DEFINE INDEX OVERWRITE route_in_idx        ON route FIELDS in;
+DEFINE INDEX OVERWRITE route_out_idx       ON route FIELDS out;
+DEFINE INDEX OVERWRITE route_repo_path_idx ON route FIELDS repo, http_path;
+
+-- control_flow: intra-procedural control flow edges (basic block → basic block)
+DEFINE TABLE OVERWRITE control_flow TYPE RELATION SCHEMAFULL;
+DEFINE FIELD OVERWRITE branch_type ON control_flow TYPE string;
+DEFINE FIELD OVERWRITE condition   ON control_flow TYPE option<string>;
+DEFINE FIELD OVERWRITE from_line   ON control_flow TYPE option<int>;
+DEFINE FIELD OVERWRITE to_line     ON control_flow TYPE option<int>;
+DEFINE FIELD OVERWRITE repo        ON control_flow TYPE option<string>;
+
+DEFINE INDEX OVERWRITE cf_in_idx  ON control_flow FIELDS in;
+DEFINE INDEX OVERWRITE cf_out_idx ON control_flow FIELDS out;
+
+-- data_dep: intra-procedural data dependence (variable def → variable use)
+DEFINE TABLE OVERWRITE data_dep TYPE RELATION SCHEMAFULL;
+DEFINE FIELD OVERWRITE var_name ON data_dep TYPE string;
+DEFINE FIELD OVERWRITE def_line ON data_dep TYPE option<int>;
+DEFINE FIELD OVERWRITE use_line ON data_dep TYPE option<int>;
+DEFINE FIELD OVERWRITE def_type ON data_dep TYPE option<string>;
+DEFINE FIELD OVERWRITE repo     ON data_dep TYPE option<string>;
+
+DEFINE INDEX OVERWRITE dd_in_idx  ON data_dep FIELDS in;
+DEFINE INDEX OVERWRITE dd_out_idx ON data_dep FIELDS out;
+
 -- ─────────────────────────────────────────
 -- Vector Indexes (HNSW — dimension set by EMBED_DIM config)
 -- ─────────────────────────────────────────

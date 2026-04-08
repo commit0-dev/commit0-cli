@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 
 	"github.com/commit0-dev/commit0/internal/domain"
@@ -63,8 +62,11 @@ func TestLoadEnvOverrides(t *testing.T) {
 }
 
 func TestLoadMissingAPIKey(t *testing.T) {
-	// Unset GEMINI_API_KEY
-	os.Unsetenv("GEMINI_API_KEY")
+	// Ensure no API keys or local provider bypasses are set.
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("EMBED_PROVIDER", "gemini")
+	t.Setenv("OLLAMA_MODEL", "")
+	t.Setenv("VOYAGE_API_KEY", "")
 
 	_, err := Load("")
 	if err == nil {
@@ -73,7 +75,7 @@ func TestLoadMissingAPIKey(t *testing.T) {
 
 	domErr, ok := err.(*domain.DomainError)
 	if !ok {
-		t.Errorf("error type = %T, want *DomainError", err)
+		t.Fatalf("error type = %T, want *DomainError", err)
 	}
 
 	if domErr.Code != domain.ErrValidation {

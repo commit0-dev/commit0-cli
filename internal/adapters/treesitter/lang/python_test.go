@@ -346,3 +346,231 @@ func TestPythonExtractor_ReturnAnnotation(t *testing.T) {
 		t.Errorf("Signature = %q; expected to contain '->'", found.Signature)
 	}
 }
+
+// ── TestPythonExtractor_ReturnValueFlow ─────────────────────────────────────
+
+func TestPythonExtractor_ReturnValueFlow_Simple(t *testing.T) {
+	src := `def handler(input):
+    result = process(input)
+    sink(result)
+`
+
+	root := parsePyAST(t, src)
+	e := &PythonExtractor{}
+	fe := domain.FileEntry{Path: "app.py", Language: "python", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	var found *types.CodeEdge
+	for i := range edges {
+		if edges[i].Kind == types.EdgeDataFlow &&
+			edges[i].Metadata["flow_type"] == "return_value" &&
+			edges[i].Metadata["via_var"] == "result" {
+			found = &edges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no return_value data_flow edge via 'result'; edges: %v", edges)
+	}
+	if found.Metadata["from_call"] != "process" {
+		t.Errorf("from_call = %q; want %q", found.Metadata["from_call"], "process")
+	}
+}
+
+func TestPythonExtractor_ReturnValueFlow_Chain(t *testing.T) {
+	src := `def pipeline(input):
+    a = step1(input)
+    b = step2(a)
+    final(b)
+`
+
+	root := parsePyAST(t, src)
+	e := &PythonExtractor{}
+	fe := domain.FileEntry{Path: "pipeline.py", Language: "python", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	viaVars := map[string]bool{}
+	for _, edge := range edges {
+		if edge.Kind == types.EdgeDataFlow && edge.Metadata["flow_type"] == "return_value" {
+			viaVars[edge.Metadata["via_var"]] = true
+		}
+	}
+	if !viaVars["a"] {
+		t.Error("missing return_value edge via variable 'a'")
+	}
+	if !viaVars["b"] {
+		t.Error("missing return_value edge via variable 'b'")
+	}
+}
+
+// ── TestPythonExtractor_CFG ──────────────────────────────────────────────────
+
+func TestPythonExtractor_CFG_IfElse(t *testing.T) {
+	src := `def handler(ok):
+    x = 1
+    if ok:
+        x = 2
+    else:
+        x = 3
+    use(x)
+`
+	root := parsePyAST(t, src)
+	e := &PythonExtractor{}
+	fe := domain.FileEntry{Path: "app.py", Language: "python", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	cfgEdges := pyFilterEdges(edges, types.EdgeControlFlow)
+	if len(cfgEdges) == 0 {
+		t.Fatal("no control_flow edges found")
+	}
+
+	hasTrueBranch := false
+	hasFalseBranch := false
+	for _, edge := range cfgEdges {
+		switch edge.Metadata["branch_type"] {
+		case "if_true":
+			hasTrueBranch = true
+		case "if_false":
+			hasFalseBranch = true
+		}
+	}
+	if !hasTrueBranch {
+		t.Error("missing if_true branch edge")
+	}
+	if !hasFalseBranch {
+		t.Error("missing if_false branch edge")
+	}
+}
+
+func TestPythonExtractor_DataDep_ParamToUse(t *testing.T) {
+	src := `def handler(input):
+    sink(input)
+`
+	root := parsePyAST(t, src)
+	e := &PythonExtractor{}
+	fe := domain.FileEntry{Path: "app.py", Language: "python", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	depEdges := pyFilterEdges(edges, types.EdgeDataDep)
+	var found *types.CodeEdge
+	for i := range depEdges {
+		if depEdges[i].Metadata["var_name"] == "input" {
+			found = &depEdges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no data_dep edge for 'input'")
+	}
+	if found.Metadata["def_type"] != "parameter" {
+		t.Errorf("def_type = %q; want parameter", found.Metadata["def_type"])
+	}
+}
+
+func pyFilterEdges(edges []types.CodeEdge, kind types.EdgeKind) []types.CodeEdge {
+	var result []types.CodeEdge
+	for _, e := range edges {
+		if e.Kind == kind {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+// ── TestPythonExtractor_RouteExtraction ─────────────────────────────────────
+
+func TestPythonExtractor_RouteExtraction_FlaskGet(t *testing.T) {
+	src := `from flask import Flask
+app = Flask(__name__)
+
+@app.get("/users")
+def list_users():
+    return []
+`
+	root := parsePyAST(t, src)
+	e := &PythonExtractor{}
+	fe := domain.FileEntry{Path: "app.py", Language: "python", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	var found *types.CodeEdge
+	for i := range edges {
+		if edges[i].Kind == types.EdgeRoute {
+			found = &edges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no EdgeRoute found for @app.get")
+	}
+	if found.Metadata["http_method"] != "GET" {
+		t.Errorf("method = %q; want GET", found.Metadata["http_method"])
+	}
+	if found.Metadata["http_path"] != "/users" {
+		t.Errorf("path = %q; want /users", found.Metadata["http_path"])
+	}
+	if !strings.Contains(found.ToID, "list_users") {
+		t.Errorf("handler = %q; want list_users", found.ToID)
+	}
+}
+
+func TestPythonExtractor_RouteExtraction_FlaskRoute(t *testing.T) {
+	src := `from flask import Flask
+app = Flask(__name__)
+
+@app.route("/data", methods=["POST"])
+def create_data():
+    pass
+`
+	root := parsePyAST(t, src)
+	e := &PythonExtractor{}
+	fe := domain.FileEntry{Path: "app.py", Language: "python", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	var found *types.CodeEdge
+	for i := range edges {
+		if edges[i].Kind == types.EdgeRoute {
+			found = &edges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no EdgeRoute found for @app.route")
+	}
+	if found.Metadata["http_method"] != "POST" {
+		t.Errorf("method = %q; want POST", found.Metadata["http_method"])
+	}
+	if found.Metadata["http_path"] != "/data" {
+		t.Errorf("path = %q; want /data", found.Metadata["http_path"])
+	}
+}
+
+func TestPythonExtractor_RouteExtraction_FastAPI(t *testing.T) {
+	src := `from fastapi import FastAPI
+app = FastAPI()
+
+@app.post("/items")
+def create_item(item: Item):
+    return item
+`
+	root := parsePyAST(t, src)
+	e := &PythonExtractor{}
+	fe := domain.FileEntry{Path: "main.py", Language: "python", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	var found *types.CodeEdge
+	for i := range edges {
+		if edges[i].Kind == types.EdgeRoute {
+			found = &edges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no EdgeRoute found for @app.post")
+	}
+	if found.Metadata["http_method"] != "POST" {
+		t.Errorf("method = %q; want POST", found.Metadata["http_method"])
+	}
+	if found.Metadata["http_path"] != "/items" {
+		t.Errorf("path = %q; want /items", found.Metadata["http_path"])
+	}
+}

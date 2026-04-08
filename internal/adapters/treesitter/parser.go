@@ -111,8 +111,9 @@ func (p *TreeSitterParser) Parse(ctx context.Context, file domain.FileEntry) (*d
 	// Extract raw nodes and edges from the AST.
 	nodes, edges := ext.Extract(root, file)
 
-	// Prepend the file node.
-	fileNode := makeFileNode(file)
+	// Prepend the file node (with content hash for incremental indexing).
+	contentHash := sha256Hex(file.Content)
+	fileNode := makeFileNode(file, contentHash)
 	nodes = append([]types.CodeNode{fileNode}, nodes...)
 
 	// Resolver pass: add EdgeDefines + attempt to resolve call targets.
@@ -121,7 +122,7 @@ func (p *TreeSitterParser) Parse(ctx context.Context, file domain.FileEntry) (*d
 	return &domain.ParsedFile{
 		Path:        file.Path,
 		Language:    file.Language,
-		ContentHash: sha256Hex(file.Content),
+		ContentHash: contentHash,
 		Nodes:       nodes,
 		Edges:       edges,
 		LineCount:   countLines(file.Content),
@@ -130,18 +131,20 @@ func (p *TreeSitterParser) Parse(ctx context.Context, file domain.FileEntry) (*d
 }
 
 // makeFileNode constructs a synthetic CodeNode representing the file itself.
-func makeFileNode(file domain.FileEntry) types.CodeNode {
+// contentHash is the SHA-256 of the file content, used for incremental indexing.
+func makeFileNode(file domain.FileEntry, contentHash string) types.CodeNode {
 	qualified := file.Path
 	return types.CodeNode{
-		ID:         makeNodeID(string(types.NodeFile), qualified),
-		Kind:       types.NodeFile,
-		Name:       lastPathSegment(file.Path),
-		Qualified:  qualified,
-		FilePath:   file.Path,
-		Language:   file.Language,
-		StartLine:  1,
-		EndLine:    countLines(file.Content),
-		Visibility: "public",
+		ID:          makeNodeID(string(types.NodeFile), qualified),
+		Kind:        types.NodeFile,
+		Name:        lastPathSegment(file.Path),
+		Qualified:   qualified,
+		FilePath:    file.Path,
+		Language:    file.Language,
+		StartLine:   1,
+		EndLine:     countLines(file.Content),
+		Visibility:  "public",
+		ContentHash: contentHash,
 	}
 }
 

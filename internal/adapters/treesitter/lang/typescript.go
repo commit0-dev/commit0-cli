@@ -43,6 +43,9 @@ func extractTS(root *sitter.Node, file domain.FileEntry, language string) ([]typ
 	var nodes []types.CodeNode
 	var edges []types.CodeEdge
 
+	// Extract HTTP route registrations (runs over full AST).
+	edges = append(edges, extractTSRoutes(root, src, file.Path)...)
+
 	type frame struct {
 		node      *sitter.Node
 		scopeQual string // enclosing function / class qualified name
@@ -66,6 +69,9 @@ func extractTS(root *sitter.Node, file domain.FileEntry, language string) ([]typ
 			if fn != nil {
 				nodes = append(nodes, *fn)
 				edges = append(edges, extractTSMutations(n, src, file.Path, fn.Qualified)...)
+				edges = append(edges, extractTSReturnFlows(n, src, file.Path, fn.Qualified)...)
+				edges = append(edges, extractTSCFG(n, src, file.Path, fn.Qualified)...)
+				edges = append(edges, extractTSDataDep(n, src, file.Path, fn.Qualified)...)
 				newScope := fn.Qualified
 				for i := 0; i < int(n.ChildCount()); i++ {
 					queue = append(queue, frame{n.Child(i), newScope, clsQual})
@@ -78,6 +84,9 @@ func extractTS(root *sitter.Node, file domain.FileEntry, language string) ([]typ
 			fn := extractTSMethod(n, src, file.Path, clsQual, language)
 			if fn != nil {
 				edges = append(edges, extractTSMutations(n, src, file.Path, fn.Qualified)...)
+				edges = append(edges, extractTSReturnFlows(n, src, file.Path, fn.Qualified)...)
+				edges = append(edges, extractTSCFG(n, src, file.Path, fn.Qualified)...)
+				edges = append(edges, extractTSDataDep(n, src, file.Path, fn.Qualified)...)
 				nodes = append(nodes, *fn)
 				newScope := fn.Qualified
 				for i := 0; i < int(n.ChildCount()); i++ {
@@ -483,6 +492,592 @@ func extractJSDoc(n *sitter.Node, src []byte) string {
 		}
 	}
 	return strings.Join(cleaned, " ")
+}
+
+// tsHTTPMethods maps method names to HTTP methods for Express/Fastify/NestJS.
+var tsHTTPMethods = map[string]string{
+	"get": "GET", "post": "POST", "put": "PUT",
+	"delete": "DELETE", "patch": "PATCH", "head": "HEAD", "options": "OPTIONS",
+	"Get": "GET", "Post": "POST", "Put": "PUT",
+	"Delete": "DELETE", "Patch": "PATCH", "Head": "HEAD",
+}
+
+// extractTSRoutes detects HTTP route registrations from Express/Fastify call patterns
+// and NestJS decorators.
+//
+// Patterns detected:
+//   - app.get("/path", handler), router.post("/path", mw, handler) — Express
+//   - @Get("/path"), @Post("/path") — NestJS decorators (on method_definition)
+func extractTSRoutes(root *sitter.Node, src []byte, filePath string) []types.CodeEdge {
+	var edges []types.CodeEdge
+	fileID := makeNodeID(string(types.NodeFile), filePath)
+
+	var walk func(node *sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+
+		// Express pattern: app.get("/path", handler) or router.post("/path", mw, handler)
+		if node.Type() == "call_expression" {
+			fnNode := node.ChildByFieldName("function")
+			if fnNode != nil && fnNode.Type() == "member_expression" {
+				prop := fnNode.ChildByFieldName("property")
+				if prop != nil {
+					methodName := nodeText(prop, src)
+					if httpMethod, ok := tsHTTPMethods[methodName]; ok {
+						argsNode := node.ChildByFieldName("arguments")
+						if argsNode != nil {
+							path := ""
+							handler := ""
+							var middleware []string
+							argIdx := 0
+							for i := range int(argsNode.ChildCount()) {
+								arg := argsNode.Child(i)
+								if t := arg.Type(); t == "," || t == "(" || t == ")" {
+									continue
+								}
+								switch argIdx {
+								case 0:
+									// First arg: path string
+									text := nodeText(arg, src)
+									path = strings.Trim(text, `"'`+"`")
+								default:
+									// Last non-path arg is handler, rest are middleware
+									if handler != "" {
+										middleware = append(middleware, handler)
+									}
+									handler = strings.TrimSpace(nodeText(arg, src))
+								}
+								argIdx++
+							}
+
+							if path != "" && handler != "" {
+								meta := map[string]string{
+									"http_method": httpMethod,
+									"http_path":   path,
+								}
+								if len(middleware) > 0 {
+									meta["middleware"] = strings.Join(middleware, ",")
+								}
+								edges = append(edges, types.CodeEdge{
+									Kind:     types.EdgeRoute,
+									FromID:   fileID,
+									ToID:     handler,
+									CallSite: fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1),
+									Metadata: meta,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// NestJS pattern: decorators on method_definition
+		// @Get("/path") or @Post("/path") preceding a method_definition
+		if node.Type() == "method_definition" {
+			// Check for decorator siblings (preceding nodes)
+			prev := node.PrevNamedSibling()
+			for prev != nil && prev.Type() == "decorator" {
+				routeEdge := parseTSDecorator(prev, node, src, filePath, fileID)
+				if routeEdge != nil {
+					edges = append(edges, *routeEdge)
+				}
+				prev = prev.PrevNamedSibling()
+			}
+		}
+
+		for i := range int(node.ChildCount()) {
+			walk(node.Child(i))
+		}
+	}
+
+	walk(root)
+	return edges
+}
+
+// parseTSDecorator checks if a decorator matches an HTTP method pattern (NestJS)
+// and returns a route edge if so.
+func parseTSDecorator(dec, method *sitter.Node, src []byte, filePath, fileID string) *types.CodeEdge {
+	// Decorator structure: @ call_expression(identifier("Get"), arguments("path"))
+	for i := range int(dec.ChildCount()) {
+		child := dec.Child(i)
+		if child.Type() != "call_expression" {
+			continue
+		}
+		fnNode := child.ChildByFieldName("function")
+		if fnNode == nil {
+			continue
+		}
+		decoratorName := nodeText(fnNode, src)
+		httpMethod, ok := tsHTTPMethods[decoratorName]
+		if !ok {
+			continue
+		}
+
+		// Extract path from arguments
+		argsNode := child.ChildByFieldName("arguments")
+		path := ""
+		if argsNode != nil {
+			for j := range int(argsNode.ChildCount()) {
+				arg := argsNode.Child(j)
+				if t := arg.Type(); t == "," || t == "(" || t == ")" {
+					continue
+				}
+				text := nodeText(arg, src)
+				path = strings.Trim(text, `"'`+"`")
+				break
+			}
+		}
+		if path == "" {
+			path = "/"
+		}
+
+		// Get handler name from the method_definition
+		nameNode := method.ChildByFieldName("name")
+		handler := ""
+		if nameNode != nil {
+			handler = nodeText(nameNode, src)
+		}
+		if handler == "" {
+			continue
+		}
+
+		return &types.CodeEdge{
+			Kind:     types.EdgeRoute,
+			FromID:   fileID,
+			ToID:     handler,
+			CallSite: fmt.Sprintf("%s:%d", filePath, dec.StartPoint().Row+1),
+			Metadata: map[string]string{
+				"http_method": httpMethod,
+				"http_path":   path,
+			},
+		}
+	}
+	return nil
+}
+
+// ── Control Flow Graph (CFG) extraction ──────────────────────────────────────
+
+// extractTSCFG builds intra-procedural control flow edges for a TypeScript/JS function.
+func extractTSCFG(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return nil
+	}
+
+	fnID := makeNodeID(string(types.NodeFunction), scopeQual)
+	var edges []types.CodeEdge
+
+	cfgEdge := func(fromLine, toLine int, branchType, condition string) {
+		meta := map[string]string{
+			"from_line":   fmt.Sprintf("%d", fromLine),
+			"to_line":     fmt.Sprintf("%d", toLine),
+			"branch_type": branchType,
+		}
+		if condition != "" {
+			meta["condition"] = condition
+		}
+		edges = append(edges, types.CodeEdge{
+			Kind:     types.EdgeControlFlow,
+			FromID:   fnID,
+			ToID:     fnID,
+			CallSite: fmt.Sprintf("%s:%d", filePath, fromLine),
+			Metadata: meta,
+		})
+	}
+
+	var walkBlock func(block *sitter.Node)
+	walkBlock = func(block *sitter.Node) {
+		if block == nil {
+			return
+		}
+		stmts := tsDirectStatements(block)
+		for i, stmt := range stmts {
+			line := int(stmt.StartPoint().Row) + 1
+
+			if i > 0 {
+				prevLine := int(stmts[i-1].StartPoint().Row) + 1
+				if stmts[i-1].Type() != "return_statement" {
+					cfgEdge(prevLine, line, "sequential", "")
+				}
+			}
+
+			switch stmt.Type() {
+			case "if_statement":
+				cond := stmt.ChildByFieldName("condition")
+				condText := ""
+				if cond != nil {
+					condText = strings.TrimSpace(nodeText(cond, src))
+				}
+
+				consequence := stmt.ChildByFieldName("consequence")
+				alternative := stmt.ChildByFieldName("alternative")
+
+				if consequence != nil {
+					firstTrue := tsFirstStmtLine(consequence)
+					if firstTrue > 0 {
+						cfgEdge(line, firstTrue, "if_true", condText)
+					}
+					walkBlock(consequence)
+				}
+
+				if alternative != nil {
+					firstFalse := tsFirstStmtLine(alternative)
+					if firstFalse > 0 {
+						cfgEdge(line, firstFalse, "if_false", condText)
+					}
+					walkBlock(alternative)
+				}
+
+			case "for_statement", "for_in_statement", "while_statement":
+				bodyNode := stmt.ChildByFieldName("body")
+				if bodyNode != nil {
+					firstBody := tsFirstStmtLine(bodyNode)
+					if firstBody > 0 {
+						cfgEdge(line, firstBody, "loop_entry", "")
+					}
+					lastBody := tsLastStmtLine(bodyNode)
+					if lastBody > 0 {
+						cfgEdge(lastBody, line, "loop_back", "")
+					}
+					walkBlock(bodyNode)
+				}
+
+			case "return_statement":
+				cfgEdge(line, line, "return", "")
+
+			case "switch_statement":
+				for j := range int(stmt.ChildCount()) {
+					child := stmt.Child(j)
+					if child.Type() == "switch_body" {
+						walkBlock(child)
+					}
+				}
+
+			case "try_statement":
+				for j := range int(stmt.ChildCount()) {
+					child := stmt.Child(j)
+					if child.Type() == "statement_block" || child.Type() == "catch_clause" || child.Type() == "finally_clause" {
+						walkBlock(child)
+					}
+				}
+			}
+		}
+	}
+
+	walkBlock(body)
+	return edges
+}
+
+// extractTSDataDep builds intra-procedural data dependence edges for TypeScript/JS.
+func extractTSDataDep(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return nil
+	}
+
+	fnID := makeNodeID(string(types.NodeFunction), scopeQual)
+
+	type varDef struct {
+		name    string
+		line    int
+		defType string
+	}
+
+	var defs []varDef
+
+	// Collect parameter definitions.
+	params := n.ChildByFieldName("parameters")
+	if params != nil {
+		for i := range int(params.ChildCount()) {
+			child := params.Child(i)
+			switch child.Type() {
+			case "required_parameter", "optional_parameter":
+				nameNode := child.ChildByFieldName("pattern")
+				if nameNode == nil {
+					nameNode = child.ChildByFieldName("name")
+				}
+				if nameNode != nil && nameNode.Type() == "identifier" {
+					name := nodeText(nameNode, src)
+					defs = append(defs, varDef{name: name, line: int(child.StartPoint().Row) + 1, defType: "parameter"})
+				}
+			case "identifier":
+				name := nodeText(child, src)
+				if name != "(" && name != ")" && name != "," {
+					defs = append(defs, varDef{name: name, line: int(child.StartPoint().Row) + 1, defType: "parameter"})
+				}
+			}
+		}
+	}
+
+	// Collect assignment definitions from body.
+	var collectDefs func(node *sitter.Node)
+	collectDefs = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+		switch node.Type() {
+		case "variable_declarator":
+			nameNode := node.ChildByFieldName("name")
+			valNode := node.ChildByFieldName("value")
+			defType := "assignment"
+			if valNode != nil && valNode.Type() == "call_expression" {
+				defType = "return_value"
+			}
+			if nameNode != nil && nameNode.Type() == "identifier" {
+				name := nodeText(nameNode, src)
+				defs = append(defs, varDef{name: name, line: int(node.StartPoint().Row) + 1, defType: defType})
+			}
+
+		case "assignment_expression":
+			lhs := node.ChildByFieldName("left")
+			rhs := node.ChildByFieldName("right")
+			defType := "assignment"
+			if rhs != nil && rhs.Type() == "call_expression" {
+				defType = "return_value"
+			}
+			if lhs != nil && lhs.Type() == "identifier" {
+				name := nodeText(lhs, src)
+				defs = append(defs, varDef{name: name, line: int(node.StartPoint().Row) + 1, defType: defType})
+			}
+		}
+		for i := range int(node.ChildCount()) {
+			collectDefs(node.Child(i))
+		}
+	}
+	collectDefs(body)
+
+	if len(defs) == 0 {
+		return nil
+	}
+
+	defMap := make(map[string]varDef)
+	for _, d := range defs {
+		defMap[d.name] = d
+	}
+
+	var edges []types.CodeEdge
+	var collectUses func(node *sitter.Node)
+	collectUses = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+		if node.Type() == "call_expression" {
+			argsNode := node.ChildByFieldName("arguments")
+			if argsNode != nil {
+				for i := range int(argsNode.ChildCount()) {
+					arg := argsNode.Child(i)
+					if t := arg.Type(); t == "," || t == "(" || t == ")" {
+						continue
+					}
+					varName := ""
+					if arg.Type() == "identifier" {
+						varName = nodeText(arg, src)
+					} else if arg.Type() == "member_expression" {
+						obj := arg.ChildByFieldName("object")
+						if obj != nil && obj.Type() == "identifier" {
+							varName = nodeText(obj, src)
+						}
+					}
+					if varName == "" {
+						continue
+					}
+					if def, ok := defMap[varName]; ok {
+						useLine := int(arg.StartPoint().Row) + 1
+						edges = append(edges, types.CodeEdge{
+							Kind:     types.EdgeDataDep,
+							FromID:   fnID,
+							ToID:     fnID,
+							CallSite: fmt.Sprintf("%s:%d", filePath, useLine),
+							Metadata: map[string]string{
+								"var_name": varName,
+								"def_line": fmt.Sprintf("%d", def.line),
+								"use_line": fmt.Sprintf("%d", useLine),
+								"def_type": def.defType,
+							},
+						})
+					}
+				}
+			}
+		}
+		for i := range int(node.ChildCount()) {
+			collectUses(node.Child(i))
+		}
+	}
+	collectUses(body)
+
+	return edges
+}
+
+func tsDirectStatements(block *sitter.Node) []*sitter.Node {
+	var stmts []*sitter.Node
+	for i := range int(block.ChildCount()) {
+		child := block.Child(i)
+		t := child.Type()
+		if t == "{" || t == "}" || t == "comment" {
+			continue
+		}
+		stmts = append(stmts, child)
+	}
+	return stmts
+}
+
+func tsFirstStmtLine(block *sitter.Node) int {
+	stmts := tsDirectStatements(block)
+	if len(stmts) > 0 {
+		return int(stmts[0].StartPoint().Row) + 1
+	}
+	return 0
+}
+
+func tsLastStmtLine(block *sitter.Node) int {
+	stmts := tsDirectStatements(block)
+	if len(stmts) > 0 {
+		return int(stmts[len(stmts)-1].StartPoint().Row) + 1
+	}
+	return 0
+}
+
+// extractTSReturnFlows detects return-value taint propagation within a
+// TypeScript/JavaScript function body. When a call's return value is assigned
+// to a variable and that variable is later passed as an argument to another
+// call, a data_flow edge is emitted connecting the producing call to the
+// consuming call.
+func extractTSReturnFlows(n *sitter.Node, src []byte, filePath, scopeQual string) []types.CodeEdge {
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return nil
+	}
+
+	fromID := makeNodeID(string(types.NodeFunction), scopeQual)
+
+	// Pass 1: collect variables assigned from call return values.
+	type callOrigin struct {
+		callee   string
+		callSite string
+	}
+	varMap := make(map[string]callOrigin)
+
+	var collectVars func(node *sitter.Node)
+	collectVars = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+
+		switch node.Type() {
+		case "variable_declarator":
+			// const result = someCall(...)
+			nameNode := node.ChildByFieldName("name")
+			valNode := node.ChildByFieldName("value")
+			if nameNode != nil && valNode != nil && valNode.Type() == "call_expression" {
+				calleeNode := valNode.ChildByFieldName("function")
+				if calleeNode != nil {
+					name := strings.TrimSpace(nodeText(nameNode, src))
+					callee := strings.TrimSpace(nodeText(calleeNode, src))
+					site := fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1)
+					if name != "_" {
+						varMap[name] = callOrigin{callee: callee, callSite: site}
+					}
+				}
+			}
+
+		case "assignment_expression":
+			// result = someCall(...)
+			lhs := node.ChildByFieldName("left")
+			rhs := node.ChildByFieldName("right")
+			if lhs != nil && rhs != nil && rhs.Type() == "call_expression" {
+				calleeNode := rhs.ChildByFieldName("function")
+				if calleeNode != nil && lhs.Type() == "identifier" {
+					name := nodeText(lhs, src)
+					callee := strings.TrimSpace(nodeText(calleeNode, src))
+					site := fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1)
+					varMap[name] = callOrigin{callee: callee, callSite: site}
+				}
+			}
+		}
+
+		for i := range int(node.ChildCount()) {
+			collectVars(node.Child(i))
+		}
+	}
+	collectVars(body)
+
+	if len(varMap) == 0 {
+		return nil
+	}
+
+	// Pass 2: find call_expression nodes where an argument references a tracked variable.
+	var edges []types.CodeEdge
+
+	var findConsumers func(node *sitter.Node)
+	findConsumers = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+		if node.Type() == "call_expression" {
+			fnNode := node.ChildByFieldName("function")
+			argsNode := node.ChildByFieldName("arguments")
+			if fnNode != nil && argsNode != nil {
+				consumerCallee := strings.TrimSpace(nodeText(fnNode, src))
+				for i := range int(argsNode.ChildCount()) {
+					arg := argsNode.Child(i)
+					if t := arg.Type(); t == "," || t == "(" || t == ")" {
+						continue
+					}
+					argText := strings.TrimSpace(nodeText(arg, src))
+					if origin, ok := varMap[argText]; ok {
+						edges = append(edges, types.CodeEdge{
+							Kind:     types.EdgeDataFlow,
+							FromID:   fromID,
+							ToID:     consumerCallee,
+							CallSite: fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1),
+							Metadata: map[string]string{
+								"flow_type": "return_value",
+								"via_var":   argText,
+								"from_call": origin.callee,
+								"arg_expr":  argText,
+							},
+						})
+					}
+					// member_expression on tracked var: result.field
+					if arg.Type() == "member_expression" {
+						obj := arg.ChildByFieldName("object")
+						if obj != nil {
+							opText := strings.TrimSpace(nodeText(obj, src))
+							if origin, ok := varMap[opText]; ok {
+								prop := arg.ChildByFieldName("property")
+								fieldPath := ""
+								if prop != nil {
+									fieldPath = opText + "." + nodeText(prop, src)
+								}
+								edges = append(edges, types.CodeEdge{
+									Kind:     types.EdgeDataFlow,
+									FromID:   fromID,
+									ToID:     consumerCallee,
+									CallSite: fmt.Sprintf("%s:%d", filePath, node.StartPoint().Row+1),
+									Metadata: map[string]string{
+										"flow_type":  "return_value",
+										"via_var":    opText,
+										"from_call":  origin.callee,
+										"arg_expr":   nodeText(arg, src),
+										"field_path": fieldPath,
+									},
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+		for i := range int(node.ChildCount()) {
+			findConsumers(node.Child(i))
+		}
+	}
+	findConsumers(body)
+
+	return edges
 }
 
 // e.g. "src/services/auth.ts" → "src.services.auth".

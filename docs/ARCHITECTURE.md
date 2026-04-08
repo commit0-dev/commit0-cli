@@ -834,49 +834,61 @@ lipo -create commit0-darwin-amd64 commit0-darwin-arm64 -output commit0-darwin
 
 ## 16. Phased Delivery Plan
 
-### Phase 1 — Core Indexer (MVP)
-- [ ] Go module scaffold + Cobra CLI skeleton + `cmd/wire.go` dependency injection
-- [ ] Domain core: port interfaces (`GraphStore`, `Embedder`, `Parser`, `FileWalker`) in `internal/domain/`
-- [ ] Application services: `IndexService`, `QueryService` in `internal/app/`
-- [ ] SurrealDB 3.0 adapter: connection, auth, `ApplySchema()` from embedded `schema.surql`
-- [ ] SurrealDB schema: HNSW indexes, COMPUTED fields, REFERENCE constraints, STRICT mode
-- [ ] FileWalker adapter: filesystem walker with .gitignore support
-- [ ] tree-sitter adapter: Parser for Go + Python languages with type resolution
-- [ ] Gemini adapter: Embedder (batch 100/request, retry with backoff, SHA-256 cache)
-- [ ] Context builder: code body + graph neighborhood → embedding input text
-- [ ] `EmbedBatcher`: accumulate → batch → flush to Gemini API
-- [ ] GraphStore: transactional upsert (SurrealDB 3.0 client-side transactions)
-- [ ] `commit0 index` command with 4-stage pipeline (walk→parse→embed→store)
-- [ ] `commit0 query` command (parallel vector+FTS → RRF → Gemini explanation)
-- [ ] `commit0 db start/stop` (manage local SurrealDB process)
-- [ ] Unit tests with mock port implementations
+### Phase 1 — Core Indexer (MVP) ✅ Complete
+- [x] Go module scaffold + Cobra CLI skeleton + `cmd/wire.go` dependency injection
+- [x] Domain core: port interfaces (`GraphStore`, `Embedder`, `Parser`, `FileWalker`) in `internal/domain/`
+- [x] Application services: `IndexService`, `QueryService` in `internal/app/`
+- [x] SurrealDB 3.0 adapter: connection, auth, `ApplySchema()` from embedded `schema.surql`
+- [x] SurrealDB schema: HNSW indexes, COMPUTED fields, REFERENCE constraints, STRICT mode
+- [x] FileWalker adapter: filesystem walker with .gitignore support
+- [x] tree-sitter adapter: Parser for Go + Python languages with type resolution
+- [x] Gemini adapter: Embedder (batch 100/request, retry with backoff, SHA-256 cache)
+- [x] Context builder: code body + graph neighborhood → embedding input text
+- [x] `EmbedBatcher`: accumulate → batch → flush to Gemini API
+- [x] GraphStore: transactional upsert (SurrealDB 3.0 client-side transactions)
+- [x] `commit0 index` command with 4-stage pipeline (walk→parse→embed→store)
+- [x] `commit0 query` command (parallel vector+FTS → RRF → Gemini explanation)
+- [x] `commit0 db start/stop` (manage local SurrealDB process)
+- [x] Unit tests with mock port implementations
 
-### Phase 2 — Graph Traversal + Blast Radius
-- [ ] Call graph edge extraction from tree-sitter call sites
-- [ ] `TraceService` + `BlastService` in `internal/app/`
-- [ ] GraphStore: forward/reverse graph traversal via SurrealQL
-- [ ] `commit0 trace` — forward call chain with streaming prose explanation
-- [ ] `commit0 blast` — reverse transitive traversal with module grouping
-- [ ] TypeScript + JavaScript language extractors
-- [ ] Graph-context re-embedding (neighborhood augmentation, Phase 1.5)
-- [ ] `commit0 serve` — Echo HTTP server with SSE streaming + REST handlers
-- [ ] SurrealDB DEFINE API endpoints (DB-native HTTP, parallel to Echo server)
-- [ ] Integration tests with testcontainers (SurrealDB)
+### Phase 2 — Graph Traversal + Blast Radius ✅ Complete
+- [x] Call graph edge extraction from tree-sitter call sites
+- [x] `TraceService` + `BlastService` in `internal/app/`
+- [x] GraphStore: forward/reverse graph traversal via SurrealQL
+- [x] `commit0 trace` — forward call chain with streaming prose explanation
+- [x] `commit0 blast` — reverse transitive traversal with module grouping
+- [x] TypeScript + JavaScript language extractors
+- [x] Graph-context re-embedding (neighborhood augmentation, Phase 1.5)
+- [x] `commit0 serve` — Echo HTTP server with SSE streaming + REST handlers
+- [x] SurrealDB DEFINE API endpoints (DB-native HTTP, parallel to Echo server)
+- [x] Integration tests with testcontainers (SurrealDB)
 
-### Phase 3 — Conversational Interface
-- [ ] `SessionService` — multi-turn conversation context stored in SurrealDB
-- [ ] Streaming SSE responses for long explanations (trace, blast, query)
-- [ ] Incremental re-indexing via SurrealDB changefeeds + git diff
+### Phase 3 — Conversational Interface ✅ Complete
+- [x] `SessionService` — multi-turn conversation context stored in SurrealDB
+- [x] Streaming SSE responses for long explanations (trace, blast, query)
+- [x] Incremental re-indexing via SurrealDB changefeeds + git diff
 - [ ] Web UI (embedded in binary via `go:embed`, served by Echo)
 - [ ] SurrealDB DEFINE BUCKET for embedding input cache
 
-### Phase 4 — Scale + Ecosystem
+### Phase 4 — Scale + Ecosystem (In Progress)
 - [ ] Java, Rust, Ruby language extractors (same `Parser` interface)
-- [ ] Multi-repo management + scope-based access control
-- [ ] VS Code extension using the HTTP API
-- [ ] `commit0 index` watch mode (inotify/FSEvents)
+- [x] Multi-repo management + scope-based access control
+- [x] VS Code extension using the HTTP API
+- [x] `commit0 index` watch mode (inotify/FSEvents) — `WatcherService` with fsnotify
 - [ ] Pure-Go CGO-free build path (tree-sitter WASM)
 - [ ] Surrealism WASM extensions (custom scoring, language-specific analyzers)
+
+### Phase 5 — Find Commit Zero (Vision Features) ✅ Complete
+- [x] Field-level data flow extraction (`FieldFlowService` + `FieldFlowStore`)
+- [x] Temporal code graph with commit metadata on nodes/edges (`TemporalService` + `TemporalStore`)
+- [x] Data flow query engine — `flow_trace` agent tool + `FieldFlowService.TraceForward/Reverse`
+- [x] Context compression + 3-tier memory (`MemoryManager`: working→session→persistent)
+- [x] Commit zero detection algorithm — `RootCauseAnalysisService` (6-step: LOCATE→TRACE→TIMELINE→CORRELATE→VERIFY→REPORT)
+- [x] Agentic orchestration — `AgentService` with 10 tools via Google ADK
+- [x] Code review with data flow awareness (`ReviewService`)
+- [x] Security scanner / taint analysis (`AnalysisService`)
+- [x] Auto documentation generation (`DocsService`)
+- [x] Multiple embedding providers — Gemini, Voyage AI, Ollama (local)
 
 ---
 

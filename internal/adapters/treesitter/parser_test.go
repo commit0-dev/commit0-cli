@@ -153,7 +153,7 @@ func TestMakeFileNode(t *testing.T) {
 		Language: "go",
 		Content:  []byte("package main\n"),
 	}
-	node := makeFileNode(fe)
+	node := makeFileNode(fe, "abc123")
 
 	if node.Kind != types.NodeFile {
 		t.Errorf("Kind = %q; want %q", node.Kind, types.NodeFile)
@@ -327,5 +327,110 @@ func TestParse_PythonFile(t *testing.T) {
 	}
 	if !hasGreet {
 		t.Errorf("no NodeFunction named 'greet' found; nodes: %v", result.Nodes)
+	}
+}
+
+// ── Parse with return-value flow edges ──────────────────────────────────────
+
+func TestParse_GoReturnValueFlowEdges(t *testing.T) {
+	src := `package main
+
+func fetch(url string) string { return "" }
+func parse(data string) {}
+
+func Run() {
+	data := fetch("http://example.com")
+	parse(data)
+}
+`
+	p := NewParser(nil)
+	result, err := p.Parse(context.Background(), domain.FileEntry{
+		Path:     "main.go",
+		Language: "go",
+		Content:  []byte(src),
+	})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// Verify return-value flow edges survive the full pipeline (including resolver pass)
+	var found bool
+	for _, edge := range result.Edges {
+		if edge.Kind == types.EdgeDataFlow &&
+			edge.Metadata["flow_type"] == "return_value" &&
+			edge.Metadata["via_var"] == "data" {
+			found = true
+			if edge.Metadata["from_call"] != "fetch" {
+				t.Errorf("from_call = %q; want %q", edge.Metadata["from_call"], "fetch")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("no return_value data_flow edge via 'data' after full parse pipeline")
+	}
+}
+
+func TestParse_PythonReturnValueFlowEdges(t *testing.T) {
+	src := `def fetch(url):
+    return ""
+
+def handler():
+    data = fetch("http://example.com")
+    process(data)
+`
+	p := NewParser(nil)
+	result, err := p.Parse(context.Background(), domain.FileEntry{
+		Path:     "app.py",
+		Language: "python",
+		Content:  []byte(src),
+	})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var found bool
+	for _, edge := range result.Edges {
+		if edge.Kind == types.EdgeDataFlow &&
+			edge.Metadata["flow_type"] == "return_value" &&
+			edge.Metadata["via_var"] == "data" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("no return_value data_flow edge via 'data' after full parse pipeline")
+	}
+}
+
+func TestParse_TypeScriptReturnValueFlowEdges(t *testing.T) {
+	src := `function fetch(url: string): string { return ""; }
+
+function handler() {
+  const data = fetch("http://example.com");
+  process(data);
+}
+`
+	p := NewParser(nil)
+	result, err := p.Parse(context.Background(), domain.FileEntry{
+		Path:     "handler.ts",
+		Language: "typescript",
+		Content:  []byte(src),
+	})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var found bool
+	for _, edge := range result.Edges {
+		if edge.Kind == types.EdgeDataFlow &&
+			edge.Metadata["flow_type"] == "return_value" &&
+			edge.Metadata["via_var"] == "data" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("no return_value data_flow edge via 'data' after full parse pipeline")
 	}
 }

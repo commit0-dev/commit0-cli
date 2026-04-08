@@ -75,6 +75,13 @@ func (is *IndexService) SetTemporalService(svc *TemporalService) {
 	is.temporalSvc = svc
 }
 
+// SetDocPrefix overrides the document embedding prefix on the ContextBuilder.
+// Called by wiring when the embedding provider uses a different prefix convention
+// (e.g. "search_document: " for nomic-embed-text via Ollama).
+func (is *IndexService) SetDocPrefix(prefix string) {
+	is.builder.SetDocPrefix(prefix)
+}
+
 // Index executes the 4-stage indexing pipeline.
 func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResult, error) {
 	startTime := time.Now()
@@ -165,9 +172,10 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 				}
 
 				// Incremental indexing: skip files whose content hasn't changed.
-				// Compare the parsed file's content hash against the stored hash.
+				// Look up the file node by qualified name (= file path) and compare
+				// its stored content hash against the freshly parsed one.
 				if !req.Force && parsed.ContentHash != "" {
-					existingFile, err := is.store.GetNode(parseCtx, "file:"+file.Path)
+					existingFile, err := is.store.GetNodeByQualified(parseCtx, req.RepoSlug, file.Path)
 					if err == nil && existingFile != nil && existingFile.ContentHash == parsed.ContentHash {
 						is.log.Debug("skipping unchanged file", "file", file.Path)
 						run.addFilesIndexed(1) // count for progress but don't re-process

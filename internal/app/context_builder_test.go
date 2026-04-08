@@ -25,7 +25,7 @@ func TestContextBuilderForFunction(t *testing.T) {
 
 	result := cb.ForNode(node)
 
-	if !strings.Contains(result, docPrefix+"[FUNCTION] pkg.Handler") {
+	if !strings.Contains(result, defaultDocPrefix+"[FUNCTION] pkg.Handler") {
 		t.Errorf("result missing document prefix, got: %q", result)
 	}
 	if !strings.Contains(result, "Handle HTTP requests") {

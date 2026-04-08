@@ -35,7 +35,13 @@ func init() {
 	rootCmd.PersistentFlags().String("log-level", "WARN", "Log level: DEBUG, INFO, WARN, ERROR")
 
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		// Flag takes precedence; fall back to LOG_LEVEL env var.
 		lvl, _ := cmd.Flags().GetString("log-level")
+		if !cmd.Flags().Changed("log-level") {
+			if envLvl := os.Getenv("LOG_LEVEL"); envLvl != "" {
+				lvl = envLvl
+			}
+		}
 		var level slog.Level
 		switch strings.ToUpper(lvl) {
 		case "DEBUG":

@@ -106,6 +106,10 @@ func (s *httpTestGraphStore) FindRepoByRemoteURL(_ context.Context, _ string) (*
 	return nil, nil
 }
 
+func (s *httpTestGraphStore) ListRoutes(_ context.Context, _ string) ([]types.CodeEdge, error) {
+	return nil, nil
+}
+
 func (s *httpTestGraphStore) TraceFieldFlow(_ context.Context, _ string, _ string, _ int, _ string) ([]types.FieldFlowHop, error) {
 	return nil, nil
 }

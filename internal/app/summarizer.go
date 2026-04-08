@@ -103,6 +103,13 @@ func (s *Summarizer) needsSummary(n *types.CodeNode) bool {
 
 // summarizeBatch summarizes a batch of nodes with a single LLM call.
 func (s *Summarizer) summarizeBatch(ctx context.Context, nodes []*types.CodeNode) {
+	// For single-node batches, use the single prompt directly — avoids
+	// array/object ambiguity from smaller models.
+	if len(nodes) == 1 {
+		s.summarizeSingle(ctx, nodes[0])
+		return
+	}
+
 	prompt := s.buildBatchPrompt(nodes)
 
 	req := domain.ExplainRequest{
@@ -120,14 +127,20 @@ func (s *Summarizer) summarizeBatch(ctx context.Context, nodes []*types.CodeNode
 		return
 	}
 
-	// Parse batch result
+	// Parse batch result — try array first, then single object (small models
+	// often return a bare object instead of a 1-element array).
 	var results []SummaryResult
 	if err := json.Unmarshal(raw, &results); err != nil {
-		s.log.Warn("batch JSON parse failed, trying individual", "err", err)
-		for _, n := range nodes {
-			s.summarizeSingle(ctx, n)
+		var single SummaryResult
+		if err2 := json.Unmarshal(raw, &single); err2 == nil && single.Summary != "" {
+			results = []SummaryResult{single}
+		} else {
+			s.log.Warn("batch JSON parse failed, trying individual", "err", err)
+			for _, n := range nodes {
+				s.summarizeSingle(ctx, n)
+			}
+			return
 		}
-		return
 	}
 
 	// Apply results to nodes (match by index)

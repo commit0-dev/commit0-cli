@@ -28,6 +28,7 @@ type stubGraphStore struct {
 	neighborhood   *domain.Neighborhood
 	dataFlowHops   []types.TraceHop
 	nodeIDs        []string
+	routeEdges     []types.CodeEdge
 }
 
 func newStubGraphStore() *stubGraphStore {
@@ -213,6 +214,13 @@ func (s *stubGraphStore) ListNodesByFile(_ context.Context, _, _ string) ([]type
 
 func (s *stubGraphStore) ListNodesByConcepts(_ context.Context, _ string, _ []string, _ int) ([]types.CodeNode, error) {
 	return nil, nil
+}
+
+func (s *stubGraphStore) ListRoutes(_ context.Context, _ string) ([]types.CodeEdge, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.routeEdges, nil
 }
 
 func (s *stubGraphStore) UpdateRepoIndexedAt(_ context.Context, _ string, _ time.Time) error {

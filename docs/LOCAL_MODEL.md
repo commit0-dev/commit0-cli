@@ -137,7 +137,7 @@ commit0 security watch             # continuous scanning
 - Auth gap detection: trace from HTTP handlers backward — missing authMiddleware in caller chain
 - Gemma 4 filters false positives and suggests fixes
 
-**Implementation**: `cmd/security.go` + `internal/app/security_service.go` + SARIF output
+**Implementation**: `cmd/security.go` + `internal/app/analysis_service.go` + SARIF output
 
 ---
 

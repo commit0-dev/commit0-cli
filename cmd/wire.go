@@ -36,9 +36,14 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	log := slog.Default()
 
 	// 1. SurrealDB — connect with retry for resilience against cold starts.
-	embedDim := cfg.Gemini.EmbedDimension
-	if cfg.EmbedProvider == "voyage" {
+	var embedDim int
+	switch cfg.EmbedProvider {
+	case "ollama":
+		embedDim = cfg.Ollama.EmbedDim
+	case "voyage":
 		embedDim = cfg.Voyage.EmbedDimension
+	default:
+		embedDim = cfg.Gemini.EmbedDimension
 	}
 
 	maxRetries := cfg.Surreal.StartupRetries
@@ -102,6 +107,10 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	// 3. Embedder — provider selected by config.
 	var emb domain.Embedder
 	switch cfg.EmbedProvider {
+	case "ollama":
+		emb = localadapter.NewOllamaEmbedder(cfg.Ollama.URL, cfg.Ollama.EmbedModel, cfg.Ollama.EmbedDim, log)
+		log.Info("using local embeddings via Ollama",
+			"model", cfg.Ollama.EmbedModel, "dim", cfg.Ollama.EmbedDim, "url", cfg.Ollama.URL)
 	case "voyage":
 		emb, err = voyage.NewVoyageEmbedder(&cfg.Voyage, log)
 		if err != nil {
@@ -122,12 +131,12 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 
 	// 4. Explainer — local Ollama or cloud Gemini.
 	var exp domain.LLMExplainer
-	if cfg.LocalModel != "" {
-		ollamaExp := localadapter.NewOllamaExplainer(cfg.OllamaURL, cfg.LocalModel, log)
+	if cfg.Ollama.Model != "" {
+		ollamaExp := localadapter.NewOllamaExplainer(cfg.Ollama.URL, cfg.Ollama.Model, log)
 		if err := ollamaExp.Ping(ctx); err != nil {
 			log.Warn("ollama not available, falling back to Gemini", "err", err)
 		} else {
-			log.Info("using local model via Ollama", "model", cfg.LocalModel, "url", cfg.OllamaURL)
+			log.Info("using local model via Ollama", "model", cfg.Ollama.Model, "url", cfg.Ollama.URL)
 			exp = ollamaExp
 		}
 	}
@@ -165,6 +174,9 @@ func wireIndexService(ctx context.Context, cfg *config.Config) (*app.IndexServic
 		return nil, nil, err
 	}
 	svc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg)
+	if cfg.EmbedProvider == "ollama" {
+		svc.SetDocPrefix(localadapter.DocPrefixForModel(cfg.Ollama.EmbedModel))
+	}
 	// Wire temporal service for CLI indexing
 	gitW := gitadapter.NewWalker(slog.Default())
 	tempSvc := app.NewTemporalService(d.db, nil, gitW, d.parser)
@@ -241,21 +253,22 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	tempSvc := app.NewTemporalService(d.db, nil, gitW, d.parser)
 	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, tempSvc, d.db, gitW, d.explainer, cfg)
 
-	// Agent service (optional — requires Gemini API key)
+	// Agent service (optional — constructor decides availability based on config).
 	var agentRunner domain.AgentRunner
-	if cfg.Gemini.APIKey != "" {
-		agentSvc, err := agentpkg.NewAgentService(
-			querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc,
-			d.db, gitW, d.explainer, cfg,
-		)
-		if err != nil {
-			log.Warn("agent service unavailable", "err", err)
-		} else {
-			agentRunner = agentSvc
-		}
+	agentSvc, err := agentpkg.NewAgentService(
+		querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc,
+		d.db, gitW, d.explainer, cfg,
+	)
+	if err != nil {
+		log.Warn("agent service unavailable", "err", err)
+	} else {
+		agentRunner = agentSvc
 	}
 
 	indexSvc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg)
+	if cfg.EmbedProvider == "ollama" {
+		indexSvc.SetDocPrefix(localadapter.DocPrefixForModel(cfg.Ollama.EmbedModel))
+	}
 	indexSvc.SetTemporalService(tempSvc)
 
 	return &serveServices{

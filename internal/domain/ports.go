@@ -153,6 +153,8 @@ type GraphStore interface {
 	ListNodesByFile(ctx context.Context, repoSlug, filePath string) ([]types.CodeNode, error)
 	// ListNodesByConcepts returns nodes whose concepts overlap with the given tags.
 	ListNodesByConcepts(ctx context.Context, repoSlug string, concepts []string, limit int) ([]types.CodeNode, error)
+	// ListRoutes returns all route edges for a repo (HTTP route registrations).
+	ListRoutes(ctx context.Context, repoSlug string) ([]types.CodeEdge, error)
 	// UpdateRepoIndexedAt sets the last_indexed_at timestamp using MERGE (not CONTENT)
 	// so it doesn't wipe other fields on the repo record.
 	UpdateRepoIndexedAt(ctx context.Context, slug string, t time.Time) error

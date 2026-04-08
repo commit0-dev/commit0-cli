@@ -79,6 +79,12 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 		req.MinScore = qs.cfg.Query.MinScore
 	}
 
+	// Exclude MODULE nodes by default — go.mod dependencies are noise for code questions.
+	// Users can explicitly request them with NodeKinds filter.
+	if len(req.NodeKinds) == 0 {
+		req.NodeKinds = []types.NodeKind{types.NodeFunction, types.NodeClass, types.NodeFile}
+	}
+
 	// Embed the query
 	embedStart := time.Now()
 	queryVec, err := qs.embedder.EmbedQuery(ctx, req.Question)

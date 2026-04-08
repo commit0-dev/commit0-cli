@@ -12,8 +12,8 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// SecurityIssue represents a vulnerability found by the scanner.
-type SecurityIssue struct {
+// AnalysisIssue represents a vulnerability found by the scanner.
+type AnalysisIssue struct {
 	Severity    string   `json:"severity"`    // "critical", "high", "medium", "low"
 	Category    string   `json:"category"`    // "sql-injection", "xss", "auth-bypass", "hardcoded-secret", "missing-auth"
 	Title       string   `json:"title"`
@@ -25,9 +25,9 @@ type SecurityIssue struct {
 	Fix         string   `json:"fix"`
 }
 
-// SecurityScanResult is the output of a security scan.
-type SecurityScanResult struct {
-	Issues       []SecurityIssue `json:"issues"`
+// AnalysisScanResult is the output of a security scan.
+type AnalysisScanResult struct {
+	Issues       []AnalysisIssue `json:"issues"`
 	ScannedNodes int             `json:"scanned_nodes"`
 	Timing       types.TimingInfo
 }
@@ -72,9 +72,9 @@ func DefaultTaintRules() []TaintRule {
 	}
 }
 
-// SecurityService scans code for vulnerabilities using the code graph's
+// AnalysisService scans code for vulnerabilities using the code graph's
 // data flow edges for taint propagation analysis.
-type SecurityService struct {
+type AnalysisService struct {
 	store     domain.GraphStore
 	flowStore domain.FieldFlowStore
 	flowSvc   *FieldFlowService
@@ -83,14 +83,14 @@ type SecurityService struct {
 	log       *slog.Logger
 }
 
-// NewSecurityService creates a security scanner.
-func NewSecurityService(
+// NewAnalysisService creates a security scanner.
+func NewAnalysisService(
 	store domain.GraphStore,
 	flowStore domain.FieldFlowStore,
 	flowSvc *FieldFlowService,
 	explainer domain.LLMExplainer,
-) *SecurityService {
-	return &SecurityService{
+) *AnalysisService {
+	return &AnalysisService{
 		store:     store,
 		flowStore: flowStore,
 		flowSvc:   flowSvc,
@@ -101,11 +101,11 @@ func NewSecurityService(
 }
 
 // Scan scans the entire codebase for vulnerabilities.
-func (s *SecurityService) Scan(ctx context.Context, repoSlug string) (*SecurityScanResult, error) {
+func (s *AnalysisService) Scan(ctx context.Context, repoSlug string) (*AnalysisScanResult, error) {
 	startTime := time.Now()
 	s.log.Info("starting security scan", "repo", repoSlug)
 
-	var issues []SecurityIssue
+	var issues []AnalysisIssue
 	scannedNodes := 0
 
 	// Strategy 1: Taint analysis via data flow graph
@@ -133,7 +133,7 @@ func (s *SecurityService) Scan(ctx context.Context, repoSlug string) (*SecurityS
 		"scanned", scannedNodes,
 	)
 
-	return &SecurityScanResult{
+	return &AnalysisScanResult{
 		Issues:       issues,
 		ScannedNodes: scannedNodes,
 		Timing: types.TimingInfo{
@@ -143,8 +143,8 @@ func (s *SecurityService) Scan(ctx context.Context, repoSlug string) (*SecurityS
 }
 
 // checkTaintRule traces data flow from sources to sinks for a single rule.
-func (s *SecurityService) checkTaintRule(ctx context.Context, repoSlug string, rule TaintRule) ([]SecurityIssue, int) {
-	var issues []SecurityIssue
+func (s *AnalysisService) checkTaintRule(ctx context.Context, repoSlug string, rule TaintRule) ([]AnalysisIssue, int) {
+	var issues []AnalysisIssue
 	scanned := 0
 
 	// Find mutations that match source patterns
@@ -188,7 +188,7 @@ func (s *SecurityService) checkTaintRule(ctx context.Context, repoSlug string, r
 									for _, h := range chain.Hops {
 										taintPath = append(taintPath, h.Node.Qualified)
 									}
-									issues = append(issues, SecurityIssue{
+									issues = append(issues, AnalysisIssue{
 										Severity:    rule.Severity,
 										Category:    rule.Category,
 										Title:       rule.Name,
@@ -211,8 +211,8 @@ func (s *SecurityService) checkTaintRule(ctx context.Context, repoSlug string, r
 }
 
 // checkAuthGaps finds HTTP handlers without auth middleware in their caller chain.
-func (s *SecurityService) checkAuthGaps(ctx context.Context, repoSlug string) []SecurityIssue {
-	var issues []SecurityIssue
+func (s *AnalysisService) checkAuthGaps(ctx context.Context, repoSlug string) []AnalysisIssue {
+	var issues []AnalysisIssue
 
 	// Search for handler functions (common patterns)
 	handlerPatterns := []string{"Handle", "ServeHTTP", "handler", "endpoint"}
@@ -240,7 +240,7 @@ func (s *SecurityService) checkAuthGaps(ctx context.Context, repoSlug string) []
 			}
 
 			if !hasAuth && len(nb.Callers) > 0 {
-				issues = append(issues, SecurityIssue{
+				issues = append(issues, AnalysisIssue{
 					Severity:    "medium",
 					Category:    "missing-auth",
 					Title:       "Missing Authentication",
@@ -259,7 +259,7 @@ func (s *SecurityService) checkAuthGaps(ctx context.Context, repoSlug string) []
 }
 
 // llmVerifyIssues uses the LLM to filter false positives.
-func (s *SecurityService) llmVerifyIssues(ctx context.Context, issues []SecurityIssue) []SecurityIssue {
+func (s *AnalysisService) llmVerifyIssues(ctx context.Context, issues []AnalysisIssue) []AnalysisIssue {
 	if len(issues) == 0 {
 		return issues
 	}

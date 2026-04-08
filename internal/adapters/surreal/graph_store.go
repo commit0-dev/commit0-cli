@@ -954,6 +954,60 @@ func (a *SurrealAdapter) ListNodesByFile(ctx context.Context, repoSlug, filePath
 	return nodes, nil
 }
 
+// ListRoutes returns all route edges for a repo.
+func (a *SurrealAdapter) ListRoutes(ctx context.Context, repoSlug string) ([]types.CodeEdge, error) {
+	type routeRow struct {
+		In          *models.RecordID `json:"in"`
+		Out         *models.RecordID `json:"out"`
+		HTTPMethod  string           `json:"http_method"`
+		HTTPPath    string           `json:"http_path"`
+		Middleware  []string         `json:"middleware"`
+		GroupPrefix string           `json:"group_prefix"`
+	}
+
+	q := `SELECT * FROM route WHERE repo = $repo;`
+	params := map[string]any{"repo": repoSlug}
+
+	results, err := surrealdb.Query[[]routeRow](ctx, a.db, q, params)
+	if err != nil {
+		return nil, fmt.Errorf("list routes: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+
+	var edges []types.CodeEdge
+	for _, r := range (*results)[0].Result {
+		meta := map[string]string{
+			"http_method": r.HTTPMethod,
+			"http_path":   r.HTTPPath,
+		}
+		if r.GroupPrefix != "" {
+			meta["group_prefix"] = r.GroupPrefix
+		}
+		if len(r.Middleware) > 0 {
+			meta["middleware"] = strings.Join(r.Middleware, ",")
+		}
+
+		fromID := ""
+		if r.In != nil {
+			fromID = fmt.Sprintf("%s:%s", r.In.Table, r.In.ID)
+		}
+		toID := ""
+		if r.Out != nil {
+			toID = fmt.Sprintf("%s:%s", r.Out.Table, r.Out.ID)
+		}
+
+		edges = append(edges, types.CodeEdge{
+			Kind:     types.EdgeRoute,
+			FromID:   fromID,
+			ToID:     toID,
+			Metadata: meta,
+		})
+	}
+	return edges, nil
+}
+
 // UpdateRepoIndexedAt sets last_indexed_at using MERGE to avoid wiping other fields.
 func (a *SurrealAdapter) UpdateRepoIndexedAt(ctx context.Context, slug string, t time.Time) error {
 	const q = `UPDATE type::record($id) MERGE { last_indexed_at: $ts };`

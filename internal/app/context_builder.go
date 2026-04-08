@@ -9,11 +9,11 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// docPrefix is prepended to document embeddings so they align with query
+// defaultDocPrefix is prepended to document embeddings so they align with query
 // embeddings in the same Gemini Embedding 2 task space.
 // Queries use: "task: code retrieval | query: ..."
 // Documents use: "task: code retrieval | document: ..."
-const docPrefix = "task: code retrieval | document: "
+const defaultDocPrefix = "task: code retrieval | document: "
 
 // ContextBuilder constructs embedding-ready context text from code nodes.
 //
@@ -22,6 +22,7 @@ const docPrefix = "task: code retrieval | document: "
 type ContextBuilder struct {
 	store        domain.GraphStore
 	maxBodyRunes int
+	docPrefix    string // prepended to each document embedding text
 }
 
 // NewContextBuilder creates a new context builder with a max body size in runes.
@@ -30,7 +31,13 @@ func NewContextBuilder(maxBodyRunes int) *ContextBuilder {
 	if maxBodyRunes <= 0 {
 		maxBodyRunes = 32768
 	}
-	return &ContextBuilder{maxBodyRunes: maxBodyRunes}
+	return &ContextBuilder{maxBodyRunes: maxBodyRunes, docPrefix: defaultDocPrefix}
+}
+
+// SetDocPrefix overrides the document embedding prefix. Each embedding provider
+// may use a different prefix convention (e.g. "search_document: " for nomic-embed-text).
+func (cb *ContextBuilder) SetDocPrefix(prefix string) {
+	cb.docPrefix = prefix
 }
 
 // NewContextBuilderWithStore creates a ContextBuilder that also injects
@@ -62,7 +69,7 @@ func (cb *ContextBuilder) forNodeWithNeighborhood(node *types.CodeNode, nb *doma
 	var sb strings.Builder
 
 	// 1. Task prefix + Kind + Name
-	sb.WriteString(docPrefix)
+	sb.WriteString(cb.docPrefix)
 	fmt.Fprintf(&sb, "[%s] %s", strings.ToUpper(string(node.Kind)), node.Qualified)
 
 	// 2. Semantic summary (MOST IMPORTANT — what the code DOES)
@@ -138,7 +145,7 @@ func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 	var sb strings.Builder
 
 	// Task prefix + Kind + Name
-	sb.WriteString(docPrefix)
+	sb.WriteString(cb.docPrefix)
 	fmt.Fprintf(&sb, "[%s] %s", strings.ToUpper(string(node.Kind)), cb.nodeLabel(node))
 
 	// Semantic summary (priority) or docstring (fallback)

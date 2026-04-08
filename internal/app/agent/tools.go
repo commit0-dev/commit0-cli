@@ -94,6 +94,13 @@ func BuildTools(
 		tools = append(tools, t)
 	}
 
+	// write_report — presentation tool for structured terminal output.
+	t, err = newWriteReportTool()
+	if err != nil {
+		return nil, fmt.Errorf("write_report: %w", err)
+	}
+	tools = append(tools, t)
+
 	return tools, nil
 }
 
@@ -130,16 +137,20 @@ type searchInput struct {
 }
 type searchOutput struct {
 	ResultCount int            `json:"result_count"`
-	Explanation string         `json:"explanation"`
 	Results     []searchResult `json:"results"`
 }
 type searchResult struct {
-	Qualified string  `json:"qualified"`
-	Kind      string  `json:"kind"`
-	FilePath  string  `json:"file_path"`
-	StartLine int     `json:"start_line"`
-	Score     float64 `json:"score"`
-	Summary   string  `json:"summary"`
+	Qualified string   `json:"qualified"`
+	Kind      string   `json:"kind"`
+	FilePath  string   `json:"file_path"`
+	StartLine int      `json:"start_line"`
+	EndLine   int      `json:"end_line"`
+	Score     float64  `json:"score"`
+	Signature string   `json:"signature,omitempty"`
+	Summary   string   `json:"summary,omitempty"`
+	Docstring string   `json:"docstring,omitempty"`
+	Concepts  []string `json:"concepts,omitempty"`
+	Body      string   `json:"body,omitempty"` // truncated to 1500 chars
 }
 
 func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
@@ -157,12 +168,19 @@ func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
 		if err != nil {
 			return searchOutput{}, err
 		}
-		out := searchOutput{ResultCount: len(result.Nodes), Explanation: result.Explanation}
+		out := searchOutput{ResultCount: len(result.Nodes)}
 		for _, n := range result.Nodes {
+			body := n.Node.Body
+			if len(body) > 1500 {
+				body = body[:1500] + "\n// ... truncated"
+			}
 			out.Results = append(out.Results, searchResult{
 				Qualified: n.Node.Qualified, Kind: string(n.Node.Kind),
 				FilePath: n.Node.FilePath, StartLine: n.Node.StartLine,
-				Score: n.FusedScore, Summary: n.Node.Summary,
+				EndLine: n.Node.EndLine, Score: n.FusedScore,
+				Signature: n.Node.Signature, Summary: n.Node.Summary,
+				Docstring: n.Node.Docstring, Concepts: n.Node.Concepts,
+				Body: body,
 			})
 		}
 		return out, nil
@@ -174,11 +192,18 @@ type traceInput struct {
 	Direction string `json:"direction"`
 	Depth     int    `json:"depth"`
 }
+type traceHop struct {
+	Qualified string `json:"qualified"`
+	FilePath  string `json:"file_path"`
+	Line      int    `json:"line"`
+	Signature string `json:"signature,omitempty"`
+	Depth     int    `json:"depth"`
+}
 type traceOutput struct {
-	Direction   string `json:"direction"`
-	HopCount    int    `json:"hop_count"`
-	Explanation string `json:"explanation"`
-	Root        string `json:"root"`
+	Direction string     `json:"direction"`
+	Root      string     `json:"root"`
+	HopCount  int        `json:"hop_count"`
+	Hops      []traceHop `json:"hops"`
 }
 
 func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
@@ -200,10 +225,18 @@ func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
 		if err != nil {
 			return traceOutput{}, err
 		}
-		return traceOutput{
+		out := traceOutput{
 			Direction: result.Direction, HopCount: len(result.Tree),
-			Explanation: result.Explanation, Root: result.Root.Qualified,
-		}, nil
+			Root: result.Root.Qualified,
+		}
+		for _, hop := range result.Tree {
+			out.Hops = append(out.Hops, traceHop{
+				Qualified: hop.Node.Qualified, FilePath: hop.Node.FilePath,
+				Line: hop.Node.StartLine, Signature: hop.Node.Signature,
+				Depth: hop.Depth,
+			})
+		}
+		return out, nil
 	})
 }
 
@@ -551,5 +584,44 @@ func newFindRootCauseTool(svc *app.RootCauseAnalysisService) (tool.Tool, error) 
 				fmt.Sprintf("%s (%s:%d)", hop.Node.Qualified, hop.Node.FilePath, hop.Node.StartLine))
 		}
 		return out, nil
+	})
+}
+
+// ==========================================================================
+// Presentation tool — structured terminal output
+// ==========================================================================
+
+// ReportSection is a single section of a structured report.
+// Exported so the CLI can deserialize and render it.
+type ReportSection struct {
+	Heading    string   `json:"heading"`
+	Content    string   `json:"content,omitempty"`
+	Code       string   `json:"code,omitempty"`
+	CodeLang   string   `json:"code_lang,omitempty"`
+	CallChain  []string `json:"call_chain,omitempty"`
+	References []string `json:"references,omitempty"`
+}
+
+// ReportInput is the structured input for the write_report tool.
+// Exported so the CLI can deserialize and render it.
+type ReportInput struct {
+	Title    string          `json:"title"`
+	Summary  string          `json:"summary"`
+	Sections []ReportSection `json:"sections"`
+}
+
+type reportAck struct {
+	Status string `json:"status"`
+}
+
+func newWriteReportTool() (tool.Tool, error) {
+	return functiontool.New(functiontool.Config{
+		Name: "write_report",
+		Description: "Present your analysis as a structured report. ALWAYS use this tool to deliver " +
+			"your final answer instead of writing raw text. Structure your findings into sections with " +
+			"headings, explanations, code snippets, call chains, and file references. " +
+			"The report will be rendered with proper formatting for the user's display.",
+	}, func(_ tool.Context, _ ReportInput) (reportAck, error) {
+		return reportAck{Status: "rendered"}, nil
 	})
 }

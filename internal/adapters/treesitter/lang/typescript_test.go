@@ -501,3 +501,230 @@ func TestTypeScriptExtractor_AccessibilityModifierPublic(t *testing.T) {
 	}
 	t.Logf("method 'run' not found in nodes %v (accessibility modifier may combine with export check — acceptable)", nodes)
 }
+
+// ── TestTypeScriptExtractor_ReturnValueFlow ─────────────────────────────────
+
+func TestTypeScriptExtractor_ReturnValueFlow_Simple(t *testing.T) {
+	src := `function handler(input: string) {
+  const result = process(input);
+  sink(result);
+}`
+
+	root := parseTSAST(t, src)
+	e := &TypeScriptExtractor{}
+	fe := domain.FileEntry{Path: "handler.ts", Language: "typescript", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	var found *types.CodeEdge
+	for i := range edges {
+		if edges[i].Kind == types.EdgeDataFlow &&
+			edges[i].Metadata["flow_type"] == "return_value" &&
+			edges[i].Metadata["via_var"] == "result" {
+			found = &edges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no return_value data_flow edge via 'result'; edges: %v", edges)
+	}
+	if found.Metadata["from_call"] != "process" {
+		t.Errorf("from_call = %q; want %q", found.Metadata["from_call"], "process")
+	}
+}
+
+func TestTypeScriptExtractor_ReturnValueFlow_Chain(t *testing.T) {
+	src := `function pipeline(input: string) {
+  const a = step1(input);
+  const b = step2(a);
+  final(b);
+}`
+
+	root := parseTSAST(t, src)
+	e := &TypeScriptExtractor{}
+	fe := domain.FileEntry{Path: "pipeline.ts", Language: "typescript", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	viaVars := map[string]bool{}
+	for _, edge := range edges {
+		if edge.Kind == types.EdgeDataFlow && edge.Metadata["flow_type"] == "return_value" {
+			viaVars[edge.Metadata["via_var"]] = true
+		}
+	}
+	if !viaVars["a"] {
+		t.Error("missing return_value edge via variable 'a'")
+	}
+	if !viaVars["b"] {
+		t.Error("missing return_value edge via variable 'b'")
+	}
+}
+
+func TestJavaScriptExtractor_ReturnValueFlow(t *testing.T) {
+	src := `function handler(input) {
+  const result = process(input);
+  sink(result);
+}`
+
+	root := parseJSAST(t, src)
+	e := &JavaScriptExtractor{}
+	fe := domain.FileEntry{Path: "handler.js", Language: "javascript", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	var found *types.CodeEdge
+	for i := range edges {
+		if edges[i].Kind == types.EdgeDataFlow &&
+			edges[i].Metadata["flow_type"] == "return_value" &&
+			edges[i].Metadata["via_var"] == "result" {
+			found = &edges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no return_value data_flow edge via 'result'; edges: %v", edges)
+	}
+}
+
+// ── TestTypeScriptExtractor_CFG ──────────────────────────────────────────────
+
+func TestTypeScriptExtractor_CFG_IfElse(t *testing.T) {
+	src := `function handler(ok: boolean) {
+  let x = 1;
+  if (ok) {
+    x = 2;
+  } else {
+    x = 3;
+  }
+  use(x);
+}`
+
+	root := parseTSAST(t, src)
+	e := &TypeScriptExtractor{}
+	fe := domain.FileEntry{Path: "handler.ts", Language: "typescript", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	cfgEdges := tsFilterEdges(edges, types.EdgeControlFlow)
+	if len(cfgEdges) == 0 {
+		t.Fatal("no control_flow edges found")
+	}
+
+	hasTrueBranch := false
+	hasFalseBranch := false
+	for _, edge := range cfgEdges {
+		switch edge.Metadata["branch_type"] {
+		case "if_true":
+			hasTrueBranch = true
+		case "if_false":
+			hasFalseBranch = true
+		}
+	}
+	if !hasTrueBranch {
+		t.Error("missing if_true branch edge")
+	}
+	if !hasFalseBranch {
+		t.Error("missing if_false branch edge")
+	}
+}
+
+func TestTypeScriptExtractor_DataDep_ParamToUse(t *testing.T) {
+	src := `function handler(input: string) {
+  sink(input);
+}`
+
+	root := parseTSAST(t, src)
+	e := &TypeScriptExtractor{}
+	fe := domain.FileEntry{Path: "handler.ts", Language: "typescript", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	depEdges := tsFilterEdges(edges, types.EdgeDataDep)
+	var found *types.CodeEdge
+	for i := range depEdges {
+		if depEdges[i].Metadata["var_name"] == "input" {
+			found = &depEdges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no data_dep edge for 'input'")
+	}
+	if found.Metadata["def_type"] != "parameter" {
+		t.Errorf("def_type = %q; want parameter", found.Metadata["def_type"])
+	}
+}
+
+func tsFilterEdges(edges []types.CodeEdge, kind types.EdgeKind) []types.CodeEdge {
+	var result []types.CodeEdge
+	for _, e := range edges {
+		if e.Kind == kind {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+// ── TestTypeScriptExtractor_RouteExtraction ─────────────────────────────────
+
+func TestTypeScriptExtractor_RouteExtraction_Express(t *testing.T) {
+	src := `import express from 'express';
+const app = express();
+
+function getUsers(req, res) { res.json([]); }
+function createUser(req, res) { res.json({}); }
+
+app.get("/users", getUsers);
+app.post("/users", authMiddleware, createUser);
+`
+	root := parseTSAST(t, src)
+	e := &TypeScriptExtractor{}
+	fe := domain.FileEntry{Path: "server.ts", Language: "typescript", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	type routeKey struct{ method, path string }
+	routes := map[routeKey]*types.CodeEdge{}
+	for i := range edges {
+		if edges[i].Kind == types.EdgeRoute {
+			k := routeKey{edges[i].Metadata["http_method"], edges[i].Metadata["http_path"]}
+			routes[k] = &edges[i]
+		}
+	}
+
+	if _, ok := routes[routeKey{"GET", "/users"}]; !ok {
+		t.Error("missing route for GET /users")
+	}
+
+	if r, ok := routes[routeKey{"POST", "/users"}]; !ok {
+		t.Error("missing route for POST /users")
+	} else {
+		// Handler should be createUser (last arg), middleware should include authMiddleware
+		if !strings.Contains(r.ToID, "createUser") {
+			t.Errorf("POST /users handler = %q; want createUser", r.ToID)
+		}
+		if mw := r.Metadata["middleware"]; !strings.Contains(mw, "authMiddleware") {
+			t.Errorf("POST /users middleware = %q; should contain authMiddleware", mw)
+		}
+	}
+}
+
+func TestJavaScriptExtractor_RouteExtraction_Express(t *testing.T) {
+	src := `const express = require('express');
+const app = express();
+
+app.get("/health", function(req, res) { res.send("ok"); });
+`
+	root := parseJSAST(t, src)
+	e := &JavaScriptExtractor{}
+	fe := domain.FileEntry{Path: "app.js", Language: "javascript", Content: []byte(src)}
+	_, edges := e.Extract(root, fe)
+
+	var found *types.CodeEdge
+	for i := range edges {
+		if edges[i].Kind == types.EdgeRoute {
+			found = &edges[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no EdgeRoute found for app.get")
+	}
+	if found.Metadata["http_path"] != "/health" {
+		t.Errorf("path = %q; want /health", found.Metadata["http_path"])
+	}
+}

@@ -11,15 +11,22 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	EmbedProvider string // "gemini" (default) or "voyage"
+	EmbedProvider string // "gemini" (default), "voyage", or "ollama"
 	Surreal       SurrealConfig
 	Gemini        GeminiConfig
 	Voyage        VoyageConfig
+	Ollama        OllamaConfig
 	Server        ServerConfig
 	Index         IndexConfig
 	Query         QueryConfig
-	LocalModel    string // Ollama model name (e.g. "gemma3:4b"). If set, uses local model.
-	OllamaURL     string // Ollama API URL (default: http://localhost:11434)
+}
+
+// OllamaConfig holds local Ollama settings for LLM and embeddings.
+type OllamaConfig struct {
+	URL        string // Ollama API URL (default: http://localhost:11434)
+	Model      string // LLM model name (e.g. "gemma3:4b"). If set, uses local LLM.
+	EmbedModel string // Embedding model (default: "nomic-embed-text")
+	EmbedDim   int    // Embedding dimension (default: 768)
 }
 
 // ServerConfig holds HTTP server settings.
@@ -113,8 +120,12 @@ func Load(cfgPath string) (*Config, error) {
 			Database:  v.GetString("surreal.database"),
 		},
 		EmbedProvider: v.GetString("embed.provider"),
-		LocalModel:    v.GetString("local.model"),
-		OllamaURL:     v.GetString("local.ollama_url"),
+		Ollama: OllamaConfig{
+			URL:        v.GetString("ollama.url"),
+			Model:      v.GetString("ollama.model"),
+			EmbedModel: v.GetString("ollama.embed_model"),
+			EmbedDim:   v.GetInt("ollama.embed_dim"),
+		},
 		Gemini: GeminiConfig{
 			APIKey:         v.GetString("gemini.api_key"),
 			EmbedModel:     v.GetString("gemini.embed_model"),
@@ -151,6 +162,8 @@ func Load(cfgPath string) (*Config, error) {
 
 	// Validate API key for the selected provider.
 	switch cfg.EmbedProvider {
+	case "ollama":
+		// Fully local — no cloud API keys needed for embeddings.
 	case "voyage":
 		if cfg.Voyage.APIKey == "" {
 			return nil, domain.Validation("VOYAGE_API_KEY is required when EMBED_PROVIDER=voyage")
@@ -159,6 +172,11 @@ func Load(cfgPath string) (*Config, error) {
 		// "gemini" or empty (default)
 		cfg.EmbedProvider = "gemini"
 		if cfg.Gemini.APIKey == "" {
+			// Allow keyless startup when local model is set — LLM features
+			// will fall back to Ollama, but embeddings still need a provider.
+			if cfg.Ollama.Model != "" {
+				return nil, domain.Validation("GEMINI_API_KEY is required for embeddings (or set EMBED_PROVIDER=ollama for fully local mode)")
+			}
 			return nil, domain.Validation("GEMINI_API_KEY is required")
 		}
 	}
@@ -177,8 +195,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("surreal.startup_retries", 5)
 
 	v.SetDefault("embed.provider", "gemini")
-	v.SetDefault("local.model", "")
-	v.SetDefault("local.ollama_url", "http://localhost:11434")
+	v.SetDefault("ollama.url", "http://localhost:11434")
+	v.SetDefault("ollama.model", "")
+	v.SetDefault("ollama.embed_model", "nomic-embed-text")
+	v.SetDefault("ollama.embed_dim", 768)
 
 	v.SetDefault("voyage.model", "voyage-code-3")
 	v.SetDefault("voyage.embed_dimension", 1024)
@@ -215,9 +235,11 @@ func bindEnvs(v *viper.Viper) {
 		"surreal.namespace": "SURREAL_NAMESPACE",
 		"surreal.database":  "SURREAL_DATABASE",
 
-		"embed.provider":    "EMBED_PROVIDER",
-		"local.model":       "LOCAL_MODEL",
-		"local.ollama_url":  "OLLAMA_URL",
+		"embed.provider":     "EMBED_PROVIDER",
+		"ollama.url":         "OLLAMA_URL",
+		"ollama.model":       "OLLAMA_MODEL",
+		"ollama.embed_model": "OLLAMA_EMBED_MODEL",
+		"ollama.embed_dim":   "OLLAMA_EMBED_DIM",
 
 		"voyage.api_key":         "VOYAGE_API_KEY",
 		"voyage.model":           "VOYAGE_MODEL",

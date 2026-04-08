@@ -34,6 +34,19 @@ const (
 	// EdgeWrites records that a function writes a field or global variable.
 	// Metadata key: "field" (qualified field name).
 	EdgeWrites EdgeKind = "writes"
+
+	// EdgeRoute records that a file registers an HTTP route pointing to a handler function.
+	// Metadata keys: "http_method", "http_path", "middleware" (comma-separated), "group_prefix".
+	EdgeRoute EdgeKind = "route"
+
+	// EdgeControlFlow connects basic blocks within a function body showing execution order.
+	// Metadata keys: "branch_type" (sequential, if_true, if_false, loop_entry, loop_back, return),
+	// "condition" (the condition expression text for branching edges).
+	EdgeControlFlow EdgeKind = "control_flow"
+
+	// EdgeDataDep connects a variable definition to all points where that definition is used.
+	// Metadata keys: "var_name", "def_line", "use_line", "def_type" (assignment, parameter, return_value, for_range).
+	EdgeDataDep EdgeKind = "data_dep"
 )
 
 // MutationKind classifies how data is transformed at a code point.
