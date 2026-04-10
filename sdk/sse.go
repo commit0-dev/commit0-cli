@@ -1,14 +1,14 @@
 package sdk
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
-
-	"resty.dev/v3"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 )
@@ -21,11 +21,28 @@ type AgentChatRequest struct {
 }
 
 // AgentChat starts a streaming agent chat session via SSE.
-// Returns a channel of ChatEvents that the caller consumes.
+// Uses raw net/http for SSE instead of resty EventSource to handle
+// POST requests with large streaming responses reliably.
 func (c *Client) AgentChat(ctx context.Context, req AgentChatRequest) (<-chan types.ChatEvent, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.rc.BaseURL()+"/api/v1/agent/chat", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("agent chat: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("agent chat: status %d", resp.StatusCode)
 	}
 
 	ch := make(chan types.ChatEvent, 32)
@@ -53,49 +70,43 @@ func (c *Client) AgentChat(ctx context.Context, req AgentChatRequest) (<-chan ty
 		}
 	}
 
-	es := resty.NewEventSource().
-		SetURL(c.rc.BaseURL()+"/api/v1/agent/chat").
-		SetMethod("POST").
-		SetBody(bytes.NewReader(body)).
-		SetHeader("Content-Type", "application/json").
-		SetRetryCount(0).
-		OnMessage(func(e any) {
-			event, ok := e.(*resty.Event)
-			if !ok {
-				return
+	go func() {
+		defer resp.Body.Close()
+		defer closeCh()
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 4*1024*1024), 4*1024*1024) // 4 MB buffer
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// SSE format: "data: {json}"
+			if !strings.HasPrefix(line, "data: ") {
+				continue
 			}
+			data := strings.TrimPrefix(line, "data: ")
 
 			var chatEvent types.ChatEvent
-			if err := json.Unmarshal([]byte(event.Data), &chatEvent); err != nil {
-				c.log.Debug("skip unparseable SSE event", "data", event.Data, "err", err)
-				return
+			if err := json.Unmarshal([]byte(data), &chatEvent); err != nil {
+				c.log.Debug("skip unparseable SSE event", "data", data[:min(len(data), 100)], "err", err)
+				continue
 			}
 
 			trySend(chatEvent)
 
 			if chatEvent.Done {
-				closeCh()
+				return
 			}
-		}, nil).
-		OnError(func(err error) {
-			trySend(types.ChatEvent{Type: "error", Content: err.Error(), Done: true})
-			closeCh()
-		}).
-		OnRequestFailure(func(err error, _ *http.Response) {
-			trySend(types.ChatEvent{Type: "error", Content: fmt.Sprintf("request failed: %v", err), Done: true})
-			closeCh()
-		})
+		}
 
-	go func() {
-		defer closeCh()
-		if err := es.Get(); err != nil {
-			trySend(types.ChatEvent{Type: "error", Content: err.Error(), Done: true})
+		if err := scanner.Err(); err != nil {
+			trySend(types.ChatEvent{Type: "error", Content: fmt.Sprintf("stream error: %v", err), Done: true})
 		}
 	}()
 
 	go func() {
 		<-ctx.Done()
-		es.Close()
+		resp.Body.Close()
 	}()
 
 	return ch, nil
