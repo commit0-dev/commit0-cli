@@ -53,6 +53,7 @@ This project uses its own code intelligence for self-development. When the commi
 - **Search** — `commit0-cli query "question" --repo commit0-dev/commit0 --no-agent` for conceptual questions. PREFER over Grep for "how does X work?", "where is Y implemented?". Falls back to Grep if server is not running.
 - **Impact** — `commit0-cli blast <FunctionName> --repo commit0-dev/commit0` BEFORE modifying any function. Check blast radius. If > 20 affected nodes, proceed with extra caution.
 - **Trace** — `commit0-cli trace <symbol> --repo commit0-dev/commit0 --direction forward` to follow call chains. Use `--direction reverse` to find callers. Better than reading file-by-file.
+- **Analyze** — `commit0-cli analyze --repo commit0-dev/commit0 --focus all` to self-analyze for architecture violations, dead code, consistency gaps, and hotspots. Run before starting work and after finishing to catch regressions.
 - **Re-index** — `commit0-cli index .` after multi-file changes so search/trace/blast reflect current code. Incremental, fast.
 - **Check server** — `commit0-cli repo list 2>/dev/null` to verify server is running before using tools.
 
