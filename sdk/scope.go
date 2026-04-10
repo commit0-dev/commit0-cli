@@ -14,8 +14,7 @@ type AddScopeRequest struct {
 
 // AddScope adds a repo to the sync scope.
 func (c *Client) AddScope(ctx context.Context, repoSlug string) error {
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetBody(AddScopeRequest{RepoSlug: repoSlug}).
 		Post("/api/v1/sync/scope")
 	if err != nil {
@@ -30,8 +29,7 @@ func (c *Client) AddScope(ctx context.Context, repoSlug string) error {
 // ListScope returns all repos in the sync scope.
 func (c *Client) ListScope(ctx context.Context) ([]types.SyncScope, error) {
 	var result []types.SyncScope
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetResult(&result).
 		Get("/api/v1/sync/scope")
 	if err != nil {
@@ -45,8 +43,7 @@ func (c *Client) ListScope(ctx context.Context) ([]types.SyncScope, error) {
 
 // RemoveScope removes a repo from the sync scope.
 func (c *Client) RemoveScope(ctx context.Context, repoSlug string) error {
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		Delete("/api/v1/sync/scope/" + repoSlug)
 	if err != nil {
 		return fmt.Errorf("remove scope: %w", err)

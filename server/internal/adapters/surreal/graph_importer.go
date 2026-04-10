@@ -43,7 +43,7 @@ func (a *SurrealAdapter) ImportBundle(ctx context.Context, bundle *types.GraphBu
 		log.Info("created repo from bundle")
 	}
 
-	// Import nodes — convert SyncNode → CodeNode (with empty heavy fields).
+	// Import nodes — merge SyncNode into existing CodeNode, preserving local heavy fields.
 	for _, sn := range bundle.Nodes {
 		existing, _ := a.GetNode(ctx, sn.ID)
 		if existing != nil && existing.ContentHash == sn.ContentHash {
@@ -56,6 +56,14 @@ func (a *SurrealAdapter) ImportBundle(ctx context.Context, bundle *types.GraphBu
 		}
 
 		node := syncNodeToCodeNode(sn)
+		// Preserve local heavy fields (Body, Summary, Concepts, Embedding)
+		// so we don't destroy data that was locally indexed or LLM-generated.
+		if existing != nil {
+			node.Body = existing.Body
+			node.Summary = existing.Summary
+			node.Concepts = existing.Concepts
+			node.Embedding = existing.Embedding
+		}
 		if err := a.UpsertNode(ctx, &node); err != nil {
 			log.Warn("import node failed", "id", sn.ID, "err", err)
 			continue

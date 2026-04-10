@@ -2,10 +2,8 @@ package quic
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 
@@ -23,13 +21,14 @@ var _ domain.PeerTransport = (*Transport)(nil)
 type Transport struct {
 	passphrase string
 	codec      domain.BundleCodec
+	tlsCfg     *tls.Config // generated once, reused
 	listener   *quic.Listener
 	log        *slog.Logger
 	encMode    cbor.EncMode
 	decMode    cbor.DecMode
 }
 
-// NewTransport creates a QUIC transport.
+// NewTransport creates a QUIC transport with a stable TLS certificate.
 func NewTransport(passphrase string, codec domain.BundleCodec) (*Transport, error) {
 	em, err := cbor.CanonicalEncOptions().EncMode()
 	if err != nil {
@@ -39,30 +38,27 @@ func NewTransport(passphrase string, codec domain.BundleCodec) (*Transport, erro
 	if err != nil {
 		return nil, fmt.Errorf("cbor dec mode: %w", err)
 	}
-	return &Transport{
-		passphrase: passphrase,
-		codec:      codec,
-		log:        slog.Default().With("adapter", "quic"),
-		encMode:    em,
-		decMode:    dm,
-	}, nil
-}
 
-func (t *Transport) tlsConfig() *tls.Config {
-	// PSK identity derived from passphrase (used at app level, not TLS level).
-	_ = sha256.Sum256([]byte("commit0-psk:" + t.passphrase))
-
+	// Generate TLS cert ONCE and reuse for all connections.
 	cert, err := generateSelfSignedCert()
 	if err != nil {
-		t.log.Error("generate self-signed cert", "err", err)
-		return &tls.Config{NextProtos: []string{"commit0-sync-v1"}, MinVersion: tls.VersionTLS13}
+		return nil, fmt.Errorf("generate cert: %w", err)
 	}
-	return &tls.Config{
+	tlsCfg := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
 		NextProtos:         []string{"commit0-sync-v1"},
 		InsecureSkipVerify: true,
 		MinVersion:         tls.VersionTLS13,
 	}
+
+	return &Transport{
+		passphrase: passphrase,
+		codec:      codec,
+		tlsCfg:     tlsCfg,
+		log:        slog.Default().With("adapter", "quic"),
+		encMode:    em,
+		decMode:    dm,
+	}, nil
 }
 
 // Serve starts listening for incoming peer connections.
@@ -77,7 +73,7 @@ func (t *Transport) Serve(ctx context.Context, addr string, handler domain.PeerH
 	}
 
 	tr := &quic.Transport{Conn: conn}
-	ln, err := tr.Listen(t.tlsConfig(), &quic.Config{})
+	ln, err := tr.Listen(t.tlsCfg, &quic.Config{})
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("quic listen: %w", err)
@@ -117,93 +113,74 @@ func (t *Transport) handleConn(ctx context.Context, conn *quic.Conn, handler dom
 func (t *Transport) handleStream(ctx context.Context, stream *quic.Stream, handler domain.PeerHandler) {
 	defer stream.Close()
 
-	cmdBuf := make([]byte, 1)
-	if _, err := io.ReadFull(stream, cmdBuf); err != nil {
-		return
-	}
-
-	payload, err := io.ReadAll(stream)
+	// Read request: [1 cmd][4 len][payload]
+	cmd, payload, err := readFrame(stream)
 	if err != nil {
-		t.writeResp(stream, StatusError, nil)
+		t.log.Debug("read request frame", "err", err)
 		return
 	}
 
-	switch cmdBuf[0] {
+	switch cmd {
 	case CmdManifest:
 		var repoSlug string
 		if err := t.decMode.Unmarshal(payload, &repoSlug); err != nil {
-			t.writeResp(stream, StatusError, nil)
+			writeFrame(stream, StatusError, nil)
 			return
 		}
 		manifest, err := handler.HandleManifestRequest(ctx, repoSlug)
 		if err != nil {
-			t.writeResp(stream, StatusNotFound, nil)
+			writeFrame(stream, StatusNotFound, nil)
 			return
 		}
 		data, _ := t.encMode.Marshal(manifest)
-		t.writeResp(stream, StatusOK, data)
+		writeFrame(stream, StatusOK, data)
 
 	case CmdBundle:
 		var repoSlug string
 		if err := t.decMode.Unmarshal(payload, &repoSlug); err != nil {
-			t.writeResp(stream, StatusError, nil)
+			writeFrame(stream, StatusError, nil)
 			return
 		}
 		data, err := handler.HandleBundleRequest(ctx, repoSlug)
 		if err != nil {
-			t.writeResp(stream, StatusNotFound, nil)
+			writeFrame(stream, StatusNotFound, nil)
 			return
 		}
-		t.writeResp(stream, StatusOK, data)
+		writeFrame(stream, StatusOK, data)
 
 	case CmdDelta:
 		var req DeltaRequest
 		if err := t.decMode.Unmarshal(payload, &req); err != nil {
-			t.writeResp(stream, StatusError, nil)
+			writeFrame(stream, StatusError, nil)
 			return
 		}
 		data, err := handler.HandleDeltaRequest(ctx, req.RepoSlug, req.BaseCommit)
 		if err != nil {
-			t.writeResp(stream, StatusNotFound, nil)
+			writeFrame(stream, StatusNotFound, nil)
 			return
 		}
-		t.writeResp(stream, StatusOK, data)
+		writeFrame(stream, StatusOK, data)
 
 	case CmdPush:
 		result, err := handler.HandlePushBundle(ctx, payload)
 		if err != nil {
-			t.writeResp(stream, StatusError, nil)
+			writeFrame(stream, StatusError, nil)
 			return
 		}
 		data, _ := t.encMode.Marshal(result)
-		t.writeResp(stream, StatusOK, data)
+		writeFrame(stream, StatusOK, data)
 
 	default:
-		t.writeResp(stream, StatusError, nil)
-	}
-}
-
-func (t *Transport) writeResp(stream *quic.Stream, status byte, data []byte) {
-	stream.Write([]byte{status})
-	if data != nil {
-		stream.Write(data)
+		writeFrame(stream, StatusError, nil)
 	}
 }
 
 // --- Client methods ---
 
-func (t *Transport) dial(ctx context.Context, peer *types.PeerInfo) (*quic.Conn, error) {
-	conn, err := quic.DialAddr(ctx, peer.Endpoint, t.tlsConfig(), &quic.Config{})
+func (t *Transport) request(ctx context.Context, peer *types.PeerInfo, cmd byte, payload []byte) ([]byte, error) {
+	conn, err := quic.DialAddr(ctx, peer.Endpoint, t.tlsCfg, &quic.Config{})
 	if err != nil {
 		return nil, types.NotFound(fmt.Sprintf("peer %s unreachable: %v", peer.Name, err))
-	}
-	return conn, nil
-}
-
-func (t *Transport) request(ctx context.Context, peer *types.PeerInfo, cmd byte, payload []byte) ([]byte, error) {
-	conn, err := t.dial(ctx, peer)
-	if err != nil {
-		return nil, err
 	}
 	defer conn.CloseWithError(0, "done")
 
@@ -211,22 +188,20 @@ func (t *Transport) request(ctx context.Context, peer *types.PeerInfo, cmd byte,
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
+	defer stream.Close()
 
-	stream.Write([]byte{cmd})
-	stream.Write(payload)
-	stream.CancelWrite(0)
-
-	statusBuf := make([]byte, 1)
-	if _, err := io.ReadFull(stream, statusBuf); err != nil {
-		return nil, fmt.Errorf("read status: %w", err)
+	// Write request: [1 cmd][4 len][payload]
+	if err := writeFrame(stream, cmd, payload); err != nil {
+		return nil, fmt.Errorf("write request: %w", err)
 	}
 
-	respData, err := io.ReadAll(stream)
+	// Read response: [1 status][4 len][response]
+	status, respData, err := readFrame(stream)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	switch statusBuf[0] {
+	switch status {
 	case StatusOK:
 		return respData, nil
 	case StatusNotFound:
@@ -234,7 +209,7 @@ func (t *Transport) request(ctx context.Context, peer *types.PeerInfo, cmd byte,
 	case StatusAuthFailed:
 		return nil, types.AuthFailed("peer rejected credentials")
 	default:
-		return nil, fmt.Errorf("peer error: status %d", statusBuf[0])
+		return nil, fmt.Errorf("peer error: status %d", status)
 	}
 }
 

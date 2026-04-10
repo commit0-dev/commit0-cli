@@ -15,8 +15,7 @@ type SyncExportRequest struct {
 // SyncExport builds and returns a graph bundle for a repo.
 func (c *Client) SyncExport(ctx context.Context, req SyncExportRequest) (*types.GraphBundle, error) {
 	var result types.GraphBundle
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetBody(req).
 		SetResult(&result).
 		Post("/api/v1/sync/export")
@@ -32,8 +31,7 @@ func (c *Client) SyncExport(ctx context.Context, req SyncExportRequest) (*types.
 // SyncImport uploads a CBOR-encoded bundle for import.
 func (c *Client) SyncImport(ctx context.Context, bundleData []byte) (*types.SyncResult, error) {
 	var result types.SyncResult
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetBody(bundleData).
 		SetHeader("Content-Type", "application/cbor").
 		SetResult(&result).
@@ -56,8 +54,7 @@ type SyncPullRequest struct {
 // SyncPull triggers a pull from a remote peer.
 func (c *Client) SyncPull(ctx context.Context, req SyncPullRequest) (*types.SyncResult, error) {
 	var result types.SyncResult
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetBody(req).
 		SetResult(&result).
 		Post("/api/v1/sync/pull")
@@ -73,8 +70,7 @@ func (c *Client) SyncPull(ctx context.Context, req SyncPullRequest) (*types.Sync
 // SyncPush triggers a push to a remote peer.
 func (c *Client) SyncPush(ctx context.Context, req SyncPullRequest) (*types.SyncResult, error) {
 	var result types.SyncResult
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetBody(req).
 		SetResult(&result).
 		Post("/api/v1/sync/push")
@@ -90,8 +86,7 @@ func (c *Client) SyncPush(ctx context.Context, req SyncPullRequest) (*types.Sync
 // SyncManifest returns the sync manifest for a repo.
 func (c *Client) SyncManifest(ctx context.Context, repoSlug string) (*types.SyncManifest, error) {
 	var result types.SyncManifest
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetResult(&result).
 		Get("/api/v1/sync/manifest/" + repoSlug)
 	if err != nil {

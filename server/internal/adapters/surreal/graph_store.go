@@ -971,12 +971,20 @@ func (a *SurrealAdapter) ListAllEdges(ctx context.Context, repoSlug string) ([]t
 		RemovedCommit    string            `json:"removed_commit"`
 	}
 
+	// Edge tables with a direct `repo` field: calls, data_flow, reads, writes.
+	// Other tables: filter via the source node's repo_slug (in.repo_slug).
+	tablesWithRepo := map[string]bool{"calls": true, "data_flow": true, "reads": true, "writes": true}
 	edgeTables := []string{"calls", "imports", "defines", "inherits", "uses", "data_flow", "reads", "writes"}
 	params := map[string]any{"repo": repoSlug}
 
 	var edges []types.CodeEdge
 	for _, table := range edgeTables {
-		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo OR in.repo_slug = $repo;", table)
+		var q string
+		if tablesWithRepo[table] {
+			q = fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo;", table)
+		} else {
+			q = fmt.Sprintf("SELECT * FROM %s WHERE in.repo_slug = $repo;", table)
+		}
 		results, err := surrealdb.Query[[]edgeRow](ctx, a.db, q, params)
 		if err != nil {
 			return nil, fmt.Errorf("list all edges %s [%s]: %w", repoSlug, table, err)

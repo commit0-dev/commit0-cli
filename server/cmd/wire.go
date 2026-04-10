@@ -264,6 +264,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 			log.Info("sync enabled without auth (no SYNC_PASSPHRASE set)")
 		}
 		syncSvc = app.NewSyncService(d.db, d.db, codec, auth)
+		syncSvc.SetIndexService(indexSvc)
 
 		// QUIC transport for P2P data plane.
 		if qt, qErr := quicadapter.NewTransport(cfg.Sync.Passphrase, codec); qErr != nil {

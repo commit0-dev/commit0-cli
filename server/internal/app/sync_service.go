@@ -19,7 +19,13 @@ type SyncService struct {
 	transport domain.PeerTransport // nil = no QUIC (file-only mode)
 	peers     domain.PeerStore     // nil = no peer management
 	scope     domain.ScopeStore    // nil = no scope enforcement
+	indexSvc  *IndexService        // nil = no re-embed after import
 	log       *slog.Logger
+}
+
+// SetIndexService attaches the index service for re-embedding after import.
+func (s *SyncService) SetIndexService(indexSvc *IndexService) {
+	s.indexSvc = indexSvc
 }
 
 // Compile-time check: SyncService implements PeerHandler.
@@ -143,22 +149,55 @@ func (s *SyncService) ImportBundle(ctx context.Context, bundle *types.GraphBundl
 	}
 
 	result.Direction = "import"
+
+	// Trigger async re-embed for imported nodes.
+	if result.NodesImported > 0 && s.indexSvc != nil {
+		go func() {
+			reembedResult, err := s.indexSvc.ReembedNeighborhood(context.Background(), bundle.RepoSlug)
+			if err != nil {
+				s.log.Warn("re-embed after import failed", "repo", bundle.RepoSlug, "err", err)
+			} else {
+				s.log.Info("re-embed after import complete",
+					"repo", bundle.RepoSlug,
+					"updated", reembedResult.NodesUpdated,
+					"skipped", reembedResult.Skipped,
+				)
+			}
+		}()
+		result.ReEmbedQueued = true
+	}
+
 	s.log.Info("bundle imported",
 		"repo", bundle.RepoSlug,
 		"nodes_imported", result.NodesImported,
 		"nodes_skipped", result.NodesSkipped,
 		"edges_imported", result.EdgesImported,
+		"re_embed_queued", result.ReEmbedQueued,
 	)
 
 	return result, nil
 }
 
-// Manifest returns the sync manifest for a repo.
+// Manifest returns the sync manifest for a repo, including the ContentHash.
 func (s *SyncService) Manifest(ctx context.Context, repoSlug string) (*types.SyncManifest, error) {
 	manifest, err := s.exporter.ExportManifest(ctx, repoSlug)
 	if err != nil {
 		return nil, fmt.Errorf("manifest: %w", err)
 	}
+
+	// Compute ContentHash by building the full bundle and hashing it.
+	// This is more expensive than a lightweight manifest but ensures
+	// the hash reflects the actual graph data.
+	bundle, err := s.exporter.ExportBundle(ctx, repoSlug)
+	if err != nil {
+		return manifest, nil // return manifest without hash if export fails
+	}
+	hash, err := s.codec.HashBundle(bundle)
+	if err != nil {
+		return manifest, nil
+	}
+	manifest.ContentHash = hash
+
 	return manifest, nil
 }
 

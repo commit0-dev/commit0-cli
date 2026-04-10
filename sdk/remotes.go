@@ -17,8 +17,7 @@ type AddRemoteRequest struct {
 // AddRemote registers a remote peer.
 func (c *Client) AddRemote(ctx context.Context, req AddRemoteRequest) (*types.PeerInfo, error) {
 	var result types.PeerInfo
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetBody(req).
 		SetResult(&result).
 		Post("/api/v1/sync/remotes")
@@ -34,8 +33,7 @@ func (c *Client) AddRemote(ctx context.Context, req AddRemoteRequest) (*types.Pe
 // ListRemotes returns all registered remote peers.
 func (c *Client) ListRemotes(ctx context.Context) ([]types.PeerInfo, error) {
 	var result []types.PeerInfo
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		SetResult(&result).
 		Get("/api/v1/sync/remotes")
 	if err != nil {
@@ -49,8 +47,7 @@ func (c *Client) ListRemotes(ctx context.Context) ([]types.PeerInfo, error) {
 
 // RemoveRemote deletes a registered remote peer.
 func (c *Client) RemoveRemote(ctx context.Context, name string) error {
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		Delete("/api/v1/sync/remotes/" + name)
 	if err != nil {
 		return fmt.Errorf("remove remote: %w", err)
@@ -63,8 +60,7 @@ func (c *Client) RemoveRemote(ctx context.Context, name string) error {
 
 // Handshake tests connectivity with a remote peer.
 func (c *Client) Handshake(ctx context.Context, name string) error {
-	resp, err := c.rc.R().
-		SetContext(ctx).
+	resp, err := c.syncRequest(ctx).
 		Post("/api/v1/sync/remotes/" + name + "/handshake")
 	if err != nil {
 		return fmt.Errorf("handshake: %w", err)
