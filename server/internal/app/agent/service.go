@@ -256,7 +256,11 @@ func (s *AgentService) Chat(ctx context.Context, req domain.ChatRequest) (<-chan
 			for _, part := range event.Content.Parts {
 				if part.FunctionCall != nil {
 					s.log.Info("agent tool_call", "tool", part.FunctionCall.Name)
-					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+					argsJSON, err := json.Marshal(part.FunctionCall.Args)
+					if err != nil {
+						s.log.Warn("marshal tool_call args", "tool", part.FunctionCall.Name, "err", err)
+						argsJSON = []byte(`{"error":"marshal failed"}`)
+					}
 					ch <- domain.ChatEvent{
 						Type:     "tool_call",
 						ToolName: part.FunctionCall.Name,
@@ -265,7 +269,11 @@ func (s *AgentService) Chat(ctx context.Context, req domain.ChatRequest) (<-chan
 				}
 				if part.FunctionResponse != nil {
 					s.log.Info("agent tool_result", "tool", part.FunctionResponse.Name)
-					resultJSON, _ := json.Marshal(part.FunctionResponse.Response)
+					resultJSON, err := json.Marshal(part.FunctionResponse.Response)
+					if err != nil {
+						s.log.Warn("marshal tool_result", "tool", part.FunctionResponse.Name, "err", err)
+						resultJSON = []byte(`{"error":"marshal failed"}`)
+					}
 					ch <- domain.ChatEvent{
 						Type:     "tool_result",
 						ToolName: part.FunctionResponse.Name,

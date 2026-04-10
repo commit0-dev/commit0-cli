@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,6 +44,7 @@ type Scratchpad struct {
 	// Contradictions detected.
 	Contradictions []Contradiction `json:"contradictions"`
 
+	mu              sync.Mutex `json:"-"` // protects all fields from concurrent access
 	nextEvidenceID  int
 	nextQuestionID  int
 }
@@ -131,6 +133,8 @@ type Contradiction struct {
 
 // AddEvidence adds a new evidence item with server-side score validation.
 func (s *Scratchpad) AddEvidence(e Evidence) Evidence {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.nextEvidenceID++
 	e.ID = fmt.Sprintf("E%d", s.nextEvidenceID)
 	e.Timestamp = time.Now()
@@ -220,6 +224,8 @@ func computePriority(e Evidence) float64 {
 
 // RecordAction logs a tool call for redundancy checking.
 func (s *Scratchpad) RecordAction(tool, args string, resultSize int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ActionLog = append(s.ActionLog, Action{
 		Tool:       tool,
 		Args:       args,
@@ -231,6 +237,8 @@ func (s *Scratchpad) RecordAction(tool, args string, resultSize int) {
 
 // AlreadyTried checks if a similar action was already performed.
 func (s *Scratchpad) AlreadyTried(tool, args string) (bool, []Action) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var similar []Action
 	for _, a := range s.ActionLog {
 		if a.Tool == tool && textSimilarity(a.Args, args) > 0.7 {
@@ -488,6 +496,8 @@ func (s *Scratchpad) ConceptsFromGoal() []string {
 
 // ToJSON serializes the scratchpad for debugging or persistence.
 func (s *Scratchpad) ToJSON() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return json.MarshalIndent(s, "", "  ")
 }
 
