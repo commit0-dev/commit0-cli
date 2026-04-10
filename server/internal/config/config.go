@@ -20,9 +20,16 @@ type Config struct {
 	Voyage        VoyageConfig
 	Ollama        OllamaConfig
 	OpenRouter    OpenRouterConfig
-	Server        ServerConfig
-	Index         IndexConfig
-	Query         QueryConfig
+	Server     ServerConfig
+	Index      IndexConfig
+	Query      QueryConfig
+	Sync       SyncConfig
+}
+
+// SyncConfig holds settings for P2P graph sync.
+type SyncConfig struct {
+	Passphrase string // env: SYNC_PASSPHRASE (shared secret for auth)
+	QUICPort   int    // env: SYNC_QUIC_PORT (default: 9443)
 }
 
 // OpenRouterConfig holds settings for OpenRouter API (multi-model gateway).
@@ -159,6 +166,14 @@ func Load(cfgPath string) (*Config, error) {
 			ReadTimeoutSec:  v.GetInt("server.read_timeout_sec"),
 			WriteTimeoutSec: v.GetInt("server.write_timeout_sec"),
 		},
+		Sync: SyncConfig{
+			Passphrase: v.GetString("sync.passphrase"),
+			QUICPort:   v.GetInt("sync.quic_port"),
+		},
+	}
+
+	if cfg.Sync.QUICPort == 0 {
+		cfg.Sync.QUICPort = 9443
 	}
 
 	// Validate API key for the selected provider.
@@ -270,6 +285,9 @@ func bindEnvs(v *viper.Viper) {
 		"server.cors_origins":      "SERVER_CORS_ORIGINS",
 		"server.read_timeout_sec":  "SERVER_READ_TIMEOUT",
 		"server.write_timeout_sec": "SERVER_WRITE_TIMEOUT",
+
+		"sync.passphrase": "SYNC_PASSPHRASE",
+		"sync.quic_port":  "SYNC_QUIC_PORT",
 	}
 	for key, env := range envMap {
 		v.MustBindEnv(key, env)

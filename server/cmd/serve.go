@@ -53,6 +53,11 @@ var serveCmd = &cobra.Command{
 			&cfg.Server,
 		)
 
+		// Register sync routes if the sync service is available.
+		if svcs.syncSvc != nil {
+			server.SetSyncService(svcs.syncSvc)
+		}
+
 		// Handle OS signals for graceful shutdown.
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

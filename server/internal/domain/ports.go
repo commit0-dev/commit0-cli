@@ -149,6 +149,10 @@ type GraphStore interface {
 	// ListNodeIDs returns the record IDs of all indexable nodes for a repo.
 	// Used by the neighborhood re-embedding pass.
 	ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error)
+	// ListAllNodes returns all nodes for a repo with full data (for graph export).
+	ListAllNodes(ctx context.Context, repoSlug string) ([]types.CodeNode, error)
+	// ListAllEdges returns all edges for a repo (for graph export).
+	ListAllEdges(ctx context.Context, repoSlug string) ([]types.CodeEdge, error)
 	// ListNodesByFile returns all nodes (functions, classes) defined in a file.
 	ListNodesByFile(ctx context.Context, repoSlug, filePath string) ([]types.CodeNode, error)
 	// ListNodesByConcepts returns nodes whose concepts overlap with the given tags.

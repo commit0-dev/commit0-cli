@@ -208,6 +208,14 @@ func (s *stubGraphStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 	return s.nodeIDs, nil
 }
 
+func (s *stubGraphStore) ListAllNodes(_ context.Context, _ string) ([]types.CodeNode, error) {
+	return nil, nil
+}
+
+func (s *stubGraphStore) ListAllEdges(_ context.Context, _ string) ([]types.CodeEdge, error) {
+	return nil, nil
+}
+
 func (s *stubGraphStore) ListNodesByFile(_ context.Context, _, _ string) ([]types.CodeNode, error) {
 	return nil, nil
 }

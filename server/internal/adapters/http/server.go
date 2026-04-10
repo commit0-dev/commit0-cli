@@ -31,6 +31,7 @@ type Server struct {
 	tempSvc      *app.TemporalService
 	rootCauseSvc *app.RootCauseAnalysisService
 	apiSurfSvc   *app.APISurfaceService
+	syncSvc      *app.SyncService
 	cfg          *config.ServerConfig
 	log          *slog.Logger
 	jobs         *indexJobStore

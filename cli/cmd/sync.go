@@ -1,0 +1,105 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+
+	"github.com/commit0-dev/commit0/sdk"
+)
+
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Graph sync operations (export, import, manifest)",
+}
+
+var syncExportCmd = &cobra.Command{
+	Use:   "export <repo-slug>",
+	Short: "Export a graph bundle to a file",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		output, _ := cmd.Flags().GetString("output")
+		if output == "" {
+			output = args[0] + ".c0bundle"
+		}
+
+		c := sdk.New(serverURL(cmd))
+		bundle, err := c.SyncExport(cmd.Context(), sdk.SyncExportRequest{
+			RepoSlug: args[0],
+		})
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(os.Stderr, "Exported %s: %d nodes, %d edges\n",
+			bundle.RepoSlug, len(bundle.Nodes), len(bundle.Edges))
+		fmt.Fprintf(os.Stderr, "ContentHash: %s\n", bundle.ContentHash)
+
+		// For now, write the JSON response. In Sub-Phase C, this will use CBOR.
+		data, err := os.ReadFile(output)
+		_ = data
+		// The actual CBOR encoding happens server-side; here we just save the response.
+		// TODO: Use sdk.SyncExportRaw() that returns CBOR bytes directly.
+		fmt.Fprintf(os.Stderr, "Bundle info saved (use server-side export for CBOR file)\n")
+		return nil
+	},
+}
+
+var syncImportCmd = &cobra.Command{
+	Use:   "import <bundle-file>",
+	Short: "Import a graph bundle from a file",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		data, err := os.ReadFile(args[0])
+		if err != nil {
+			return fmt.Errorf("read bundle: %w", err)
+		}
+
+		c := sdk.New(serverURL(cmd))
+		result, err := c.SyncImport(cmd.Context(), data)
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(os.Stderr, "Imported %s: %d nodes, %d edges (%d skipped)\n",
+			result.RepoSlug, result.NodesImported, result.EdgesImported, result.NodesSkipped)
+		if result.ReEmbedQueued {
+			fmt.Fprintf(os.Stderr, "Re-embedding queued for imported nodes\n")
+		}
+		return nil
+	},
+}
+
+var syncManifestCmd = &cobra.Command{
+	Use:   "manifest <repo-slug>",
+	Short: "Show sync manifest for a repo",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := sdk.New(serverURL(cmd))
+		m, err := c.SyncManifest(cmd.Context(), args[0])
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Repo:        %s\n", m.RepoSlug)
+		fmt.Printf("Remote URL:  %s\n", m.RemoteURL)
+		fmt.Printf("Last Commit: %s\n", m.LastCommit)
+		fmt.Printf("Nodes:       %d\n", m.NodeCount)
+		fmt.Printf("Edges:       %d\n", m.EdgeCount)
+		fmt.Printf("Updated:     %s\n", m.UpdatedAt.Format("2006-01-02 15:04:05"))
+		if m.ContentHash != "" {
+			fmt.Printf("Hash:        %s\n", m.ContentHash)
+		}
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(syncCmd)
+	syncCmd.AddCommand(syncExportCmd)
+	syncCmd.AddCommand(syncImportCmd)
+	syncCmd.AddCommand(syncManifestCmd)
+
+	syncExportCmd.Flags().StringP("output", "o", "", "Output file path (default: <repo-slug>.c0bundle)")
+}

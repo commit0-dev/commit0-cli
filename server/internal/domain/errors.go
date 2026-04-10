@@ -8,24 +8,25 @@ type ErrorCode = types.ErrorCode
 type DomainError = types.DomainError
 
 const (
-	ErrNotFound   = types.ErrNotFound
-	ErrRateLimit  = types.ErrRateLimit
-	ErrTimeout    = types.ErrTimeout
-	ErrConflict   = types.ErrConflict
-	ErrValidation = types.ErrValidation
+	ErrNotFound      = types.ErrNotFound
+	ErrRateLimit     = types.ErrRateLimit
+	ErrTimeout       = types.ErrTimeout
+	ErrConflict      = types.ErrConflict
+	ErrValidation    = types.ErrValidation
+	ErrBundleCorrupt = types.ErrBundleCorrupt
+	ErrSyncConflict  = types.ErrSyncConflict
+	ErrAuthFailed    = types.ErrAuthFailed
+	ErrOutOfScope    = types.ErrOutOfScope
 )
 
-// NotFound creates a not found error.
-var NotFound = types.NotFound
-
-// RateLimit creates a rate limit error.
-var RateLimit = types.RateLimit
-
-// Timeout creates a timeout error.
-var Timeout = types.Timeout
-
-// Conflict creates a conflict error.
-var Conflict = types.Conflict
-
-// Validation creates a validation error.
-var Validation = types.Validation
+var (
+	NotFound      = types.NotFound
+	RateLimit     = types.RateLimit
+	Timeout       = types.Timeout
+	Conflict      = types.Conflict
+	Validation    = types.Validation
+	BundleCorrupt = types.BundleCorrupt
+	SyncConflict  = types.SyncConflict
+	AuthFailed    = types.AuthFailed
+	OutOfScope    = types.OutOfScope
+)

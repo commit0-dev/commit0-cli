@@ -93,6 +93,12 @@ func (s *httpTestGraphStore) TraceDataFlow(_ context.Context, _ string, _ int, _
 func (s *httpTestGraphStore) ListNodeIDs(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
+func (s *httpTestGraphStore) ListAllNodes(_ context.Context, _ string) ([]types.CodeNode, error) {
+	return nil, nil
+}
+func (s *httpTestGraphStore) ListAllEdges(_ context.Context, _ string) ([]types.CodeEdge, error) {
+	return nil, nil
+}
 func (s *httpTestGraphStore) ListNodesByFile(_ context.Context, _, _ string) ([]types.CodeNode, error) {
 	return nil, nil
 }

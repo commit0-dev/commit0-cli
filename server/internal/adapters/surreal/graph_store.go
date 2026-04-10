@@ -928,6 +928,100 @@ func (a *SurrealAdapter) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 	return ids, nil
 }
 
+// ListAllNodes returns all nodes (function, class, file, module) for a repo with full data.
+// Used by GraphExporter for building sync bundles.
+func (a *SurrealAdapter) ListAllNodes(ctx context.Context, repoSlug string) ([]types.CodeNode, error) {
+	tables := []string{"`function`", "class", "file", "module"}
+	params := map[string]any{
+		"repo_ref": models.NewRecordID("repo", repoSlug),
+	}
+
+	var nodes []types.CodeNode
+	for _, table := range tables {
+		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo_ref;", table)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, params)
+		if err != nil {
+			return nil, fmt.Errorf("list all nodes %s [%s]: %w", repoSlug, table, err)
+		}
+		if results == nil || len(*results) == 0 {
+			continue
+		}
+		kind := kindFromTable(strings.Trim(table, "`"))
+		for _, r := range (*results)[0].Result {
+			nodes = append(nodes, rowToCodeNode(r, kind))
+		}
+	}
+	return nodes, nil
+}
+
+// ListAllEdges returns all edges for a repo. Used by GraphExporter for building sync bundles.
+func (a *SurrealAdapter) ListAllEdges(ctx context.Context, repoSlug string) ([]types.CodeEdge, error) {
+	type edgeRow struct {
+		In               *models.RecordID  `json:"in"`
+		Out              *models.RecordID  `json:"out"`
+		CallSite         string            `json:"call_site"`
+		CallType         string            `json:"call_type"`
+		IsDynamic        bool              `json:"is_dynamic"`
+		ParamName        string            `json:"param_name"`
+		ArgExpr          string            `json:"arg_expr"`
+		ArgType          string            `json:"arg_type"`
+		FieldName        string            `json:"field_name"`
+		IntroducedCommit string            `json:"introduced_commit"`
+		IntroducedAt     *string           `json:"introduced_at"`
+		RemovedCommit    string            `json:"removed_commit"`
+	}
+
+	edgeTables := []string{"calls", "imports", "defines", "inherits", "uses", "data_flow", "reads", "writes"}
+	params := map[string]any{"repo": repoSlug}
+
+	var edges []types.CodeEdge
+	for _, table := range edgeTables {
+		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo OR in.repo_slug = $repo;", table)
+		results, err := surrealdb.Query[[]edgeRow](ctx, a.db, q, params)
+		if err != nil {
+			return nil, fmt.Errorf("list all edges %s [%s]: %w", repoSlug, table, err)
+		}
+		if results == nil || len(*results) == 0 {
+			continue
+		}
+		kind := types.EdgeKind(table)
+		for _, r := range (*results)[0].Result {
+			fromID, toID := "", ""
+			if r.In != nil {
+				fromID = fmt.Sprintf("%s:%s", r.In.Table, r.In.ID)
+			}
+			if r.Out != nil {
+				toID = fmt.Sprintf("%s:%s", r.Out.Table, r.Out.ID)
+			}
+			meta := make(map[string]string)
+			if r.ParamName != "" {
+				meta["param_name"] = r.ParamName
+			}
+			if r.ArgExpr != "" {
+				meta["arg_expr"] = r.ArgExpr
+			}
+			if r.ArgType != "" {
+				meta["arg_type"] = r.ArgType
+			}
+			if r.FieldName != "" {
+				meta["field_name"] = r.FieldName
+			}
+			edges = append(edges, types.CodeEdge{
+				Kind:             kind,
+				FromID:           fromID,
+				ToID:             toID,
+				CallSite:         r.CallSite,
+				CallType:         r.CallType,
+				IsDynamic:        r.IsDynamic,
+				Metadata:         meta,
+				IntroducedCommit: r.IntroducedCommit,
+				RemovedCommit:    r.RemovedCommit,
+			})
+		}
+	}
+	return edges, nil
+}
+
 // ListNodesByFile returns all function and class nodes defined in a specific file.
 func (a *SurrealAdapter) ListNodesByFile(ctx context.Context, repoSlug, filePath string) ([]types.CodeNode, error) {
 	params := map[string]any{

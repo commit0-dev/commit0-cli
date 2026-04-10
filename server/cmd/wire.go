@@ -14,6 +14,7 @@ import (
 	gitadapter "github.com/commit0-dev/commit0/server/internal/adapters/git"
 	localadapter "github.com/commit0-dev/commit0/server/internal/adapters/local"
 	"github.com/commit0-dev/commit0/server/internal/adapters/openrouter"
+	syncadapter "github.com/commit0-dev/commit0/server/internal/adapters/sync"
 	"github.com/commit0-dev/commit0/server/internal/adapters/surreal"
 	"github.com/commit0-dev/commit0/server/internal/adapters/treesitter"
 	"github.com/commit0-dev/commit0/server/internal/adapters/voyage"
@@ -185,6 +186,7 @@ type serveServices struct {
 	temporal   *app.TemporalService
 	rootCause  *app.RootCauseAnalysisService
 	apiSurface *app.APISurfaceService
+	syncSvc    *app.SyncService
 	memMgr     *memory.Manager
 	sessionSvc app.SessionStore
 	cleanup    func()
@@ -240,6 +242,22 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 
 	apiSurfaceSvc := app.NewAPISurfaceService(d.db, flowSvc, d.explainer, cfg)
 
+	// Sync service (P2P graph sync — Sub-Phase A: export/import only).
+	var syncSvc *app.SyncService
+	codec, err := syncadapter.NewCBORCodec()
+	if err != nil {
+		log.Warn("sync: CBOR codec init failed", "err", err)
+	} else {
+		var auth domain.SyncAuth
+		if cfg.Sync.Passphrase != "" {
+			auth = syncadapter.NewPassphraseAuth(cfg.Sync.Passphrase)
+			log.Info("sync enabled with passphrase auth")
+		} else {
+			log.Info("sync enabled without auth (no SYNC_PASSPHRASE set)")
+		}
+		syncSvc = app.NewSyncService(d.db, d.db, codec, auth)
+	}
+
 	return &serveServices{
 		index:      indexSvc,
 		query:      querySvc,
@@ -252,6 +270,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		temporal:   tempSvc,
 		rootCause:  rootCauseSvc,
 		apiSurface: apiSurfaceSvc,
+		syncSvc:    syncSvc,
 		memMgr:     memMgr,
 		sessionSvc: sessionSvc,
 		cleanup:    cleanup,

@@ -6,11 +6,15 @@ import "fmt"
 type ErrorCode string
 
 const (
-	ErrNotFound   ErrorCode = "not_found"
-	ErrRateLimit  ErrorCode = "rate_limit"
-	ErrTimeout    ErrorCode = "timeout"
-	ErrConflict   ErrorCode = "conflict"
-	ErrValidation ErrorCode = "validation"
+	ErrNotFound       ErrorCode = "not_found"
+	ErrRateLimit      ErrorCode = "rate_limit"
+	ErrTimeout        ErrorCode = "timeout"
+	ErrConflict       ErrorCode = "conflict"
+	ErrValidation     ErrorCode = "validation"
+	ErrBundleCorrupt  ErrorCode = "bundle_corrupt"
+	ErrSyncConflict   ErrorCode = "sync_conflict"
+	ErrAuthFailed     ErrorCode = "auth_failed"
+	ErrOutOfScope     ErrorCode = "out_of_scope"
 )
 
 // DomainError represents an error within the domain layer.
@@ -53,4 +57,24 @@ func Conflict(msg string) *DomainError {
 // Validation creates a validation error.
 func Validation(msg string) *DomainError {
 	return &DomainError{Code: ErrValidation, Message: msg}
+}
+
+// BundleCorrupt creates a bundle corruption error.
+func BundleCorrupt(msg string) *DomainError {
+	return &DomainError{Code: ErrBundleCorrupt, Message: msg}
+}
+
+// SyncConflict creates a sync conflict error.
+func SyncConflict(msg string) *DomainError {
+	return &DomainError{Code: ErrSyncConflict, Message: msg}
+}
+
+// AuthFailed creates an authentication failure error.
+func AuthFailed(msg string) *DomainError {
+	return &DomainError{Code: ErrAuthFailed, Message: msg}
+}
+
+// OutOfScope creates an out-of-scope error.
+func OutOfScope(msg string) *DomainError {
+	return &DomainError{Code: ErrOutOfScope, Message: msg}
 }
