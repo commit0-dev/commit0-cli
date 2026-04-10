@@ -1,13 +1,11 @@
-BINARY   := commit0
-PKG      := github.com/commit0-dev/commit0
-VERSION  ?= dev
-COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+BINARY_SERVER := commit0
+BINARY_CLI    := commit0-cli
+PKG           := github.com/commit0-dev/commit0
+VERSION       ?= dev
+COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS       := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-# CGO is required for smacker/go-tree-sitter.
-export CGO_ENABLED := 1
-
-.PHONY: all build run clean \
+.PHONY: all build build-server build-cli run clean \
         fmt vet lint \
         test test-cover test-race \
         install-hooks uninstall-hooks hooks-run \
@@ -17,14 +15,22 @@ export CGO_ENABLED := 1
 all: build
 
 # ── Build ──────────────────────────────────────────────────────────────────
-build:
-	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) .
+## build: build both server (CGO) and CLI (pure Go) binaries
+build: build-server build-cli
 
-run: build
-	./$(BINARY)
+## build-server: build the commit0 server binary (requires CGO for tree-sitter)
+build-server:
+	CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY_SERVER) ./server
+
+## build-cli: build the commit0-cli binary (no CGO, cross-compiles trivially)
+build-cli:
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY_CLI) ./cli
+
+run: build-server
+	./bin/$(BINARY_SERVER) serve
 
 clean:
-	rm -f $(BINARY) coverage.out coverage.html
+	rm -f bin/$(BINARY_SERVER) bin/$(BINARY_CLI) coverage.out coverage.html
 	rm -rf dist/
 
 # ── Code quality ───────────────────────────────────────────────────────────
@@ -48,13 +54,13 @@ test:
 test-race:
 	go test -race -count=1 -timeout=5m ./...
 
-## test-cover: run coverage for internal/app and enforce 98 % threshold
+## test-cover: run coverage for server/internal/app and enforce 98 % threshold
 test-cover:
 	@go test -count=1 -timeout=5m \
 		-coverprofile=coverage.out \
 		-covermode=atomic \
-		-coverpkg=./internal/app/... \
-		./internal/app/...
+		-coverpkg=./server/internal/app/... \
+		./server/internal/app/...
 	@COVERAGE=$$(go tool cover -func=coverage.out \
 		| grep -E "^total:" | awk '{print $$3}' | tr -d '%'); \
 	echo "Coverage: $${COVERAGE}%"; \

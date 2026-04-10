@@ -217,6 +217,18 @@ type RootCauseReport struct {
 }
 
 // ---------------------------------------------------------------------------
+// Agent Streaming
+// ---------------------------------------------------------------------------
+
+// ChatEvent is streamed back as the agent reasons and calls tools.
+type ChatEvent struct {
+	Type     string `json:"type"`      // "thinking", "tool_call", "tool_result", "message", "error", "done"
+	Content  string `json:"content"`   // text content or JSON
+	ToolName string `json:"tool_name"` // set for tool_call/tool_result
+	Done     bool   `json:"done"`
+}
+
+// ---------------------------------------------------------------------------
 // Memory Management
 // ---------------------------------------------------------------------------
 

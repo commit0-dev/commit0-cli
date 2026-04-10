@@ -1,0 +1,9 @@
+go 1.26
+
+use (
+	.
+	./pkg/types
+	./sdk
+	./server
+	./cli
+)
