@@ -76,21 +76,6 @@ DataDep metadata: `var_name`, `def_line`, `use_line`, `def_type` (parameter, ass
 - **No dedicated test file** — `analysis_service_test.go` does not exist
 - **No CLI command** — `cmd/security.go` does not exist
 
-### What does NOT exist yet
-
-| Item | Status |
-|------|--------|
-| `cmd/security.go` (scan/deps commands) | Not implemented |
-| `analysis_service_test.go` | Not implemented |
-| OSV/CVE dependency scanning | Not implemented |
-| Manifest parsers (go.mod/package.json → Dependency structs) | Not implemented (gomod.go parses go.mod for tree-sitter nodes, not security) |
-| `VulnerabilityDB` port | Not implemented |
-| Path-sensitive taint analysis using CFG edges | CFG edges exist in graph, but AnalysisService doesn't query them |
-| Precise def-use chain taint using data_dep edges | DataDep edges exist in graph, but AnalysisService doesn't query them |
-| Response type resolution (c.JSON → struct fields) | Binding edges emitted, but APISurfaceService doesn't resolve struct types from graph |
-| `commit0 api expose` (per-endpoint exposure map) | Not implemented |
-| `commit0 api diff` (API surface diff between commits) | Not implemented |
-
 ---
 
 ## Principle

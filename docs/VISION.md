@@ -255,32 +255,7 @@ COMPRESS older turns:
      Found Register→Transform→DB→Notify data flow chain."
 ```
 
-### Implementation
-
-```go
-// internal/app/memory/
-type MemoryManager struct {
-    working    WorkingMemory    // current turn, last N tool results
-    session    SessionMemory    // compressed history of this investigation
-    persistent PersistentMemory // cross-session knowledge in SurrealDB
-    compressor Compressor       // LLM-based context compression
-}
-
-// Compressor uses Gemma 4 to compress older turns
-type Compressor struct {
-    model ModelProvider
-}
-
-func (c *Compressor) CompressTurn(turn Turn) (string, error) {
-    // Prompt: "Summarize this investigation turn in 2 sentences,
-    // preserving file names, line numbers, and key findings."
-}
-
-func (c *Compressor) CompressSession(turns []CompressedTurn) (string, error) {
-    // Prompt: "Create a 3-sentence summary of this investigation so far,
-    // preserving the causal chain and key evidence."
-}
-```
+Implementation: `internal/app/memory/manager.go` — `MemoryManager` with working, session, persistent tiers + `Compressor` adapter for LLM-based context compression.
 
 ### Context Budget System
 
@@ -407,28 +382,9 @@ commit0 investigate --resume session-id  # resume previous investigation
 | **P3** | Security scanner (taint analysis) | **Done** | `AnalysisService` with taint rules (SQL injection, command injection, XSS, path traversal) + severity classification |
 | **P3** | Auto documentation | **Done** | `DocsService` generates README, architecture docs, API docs from graph + LLM |
 
-### AppSec Roadmap (graph enrichment for security analysis)
+### AppSec Roadmap
 
-**Principle:** The code graph stores neutral facts. Security vulnerabilities are properties of **flows** (unsanitized user input reaching a sensitive operation), not properties of individual nodes. No security classifications are persisted on nodes — all security reasoning happens at analysis time.
-
-| Phase | Feature | Status | What It Adds |
-|-------|---------|--------|-------------|
-| **1** | Return-value taint propagation | **Done** | `data_flow` edges with `flow_type: "return_value"` track data through function return values across call boundaries. Catches `result := helper(input); sink(result)` patterns invisible to mutation-only tracking. Go, Python, TypeScript extractors. |
-| **2** | API surface discovery & exposure mapping | **Done** | `EdgeRoute` edges from tree-sitter detect HTTP route registrations (Echo, Flask/FastAPI, Express/NestJS). Request binding detection (`c.Param`, `c.Bind`, `c.JSON`). `APISurfaceService` discovers endpoints, traces taint from API inputs, detects PII in responses, generates OpenAPI 3.0 specs. `commit0 api discover`, `commit0 api spec` CLI commands. |
-| **3** | CPG-inspired edges (control flow + data dependence) | **Done** | `EdgeControlFlow` connects basic blocks within functions (if/else branches, loops, returns). `EdgeDataDep` connects variable definitions to their uses (def-use chains). Enables path-sensitive taint analysis — determines whether a sanitizer in an `if` branch protects the `else` branch. Go, Python, TypeScript extractors. |
-
-**What these enable together:**
-
-The graph now contains 13 edge types: `calls`, `imports`, `defines`, `inherits`, `uses`, `data_flow`, `reads`, `writes`, `route`, `control_flow`, `data_dep` — plus return-value flow metadata on `data_flow` edges. This is a **Code Property Graph** (CPG) built entirely from tree-sitter, staying multi-language with no compiler dependencies.
-
-The security analysis layer (`AnalysisService`, `FieldFlowService`, `APISurfaceService`) reads this enriched graph at query time to answer:
-
-- "Which API endpoints accept user input that reaches a database query without sanitization?"
-- "Does the sanitizer in the `if` branch protect all execution paths to the sink?"
-- "What PII fields does `GET /api/v1/users/:id` expose in its response?"
-- "Which variable definition reaches this `db.Query()` call?"
-
-See `docs/SECURITY_ROADMAP.md` for the full product analysis.
+All 3 phases shipped: return-value taint propagation, API surface discovery, CPG-inspired edges (control flow + data dependence). The graph now has 13 edge types forming a **Code Property Graph** built entirely from tree-sitter. See [SECURITY_ROADMAP.md](SECURITY_ROADMAP.md) for details.
 
 ---
 

@@ -183,45 +183,7 @@ Modify `lang/golang.go`, `typescript.go`, `python.go`, `javascript.go` to captur
 
 ## 4. SurrealDB Schema Additions
 
-```sql
--- Temporal fields on nodes
-DEFINE FIELD OVERWRITE introduced_commit    ON `function` TYPE option<string>;
-DEFINE FIELD OVERWRITE introduced_at        ON `function` TYPE option<datetime>;
-DEFINE FIELD OVERWRITE last_modified_commit ON `function` TYPE option<string>;
-DEFINE FIELD OVERWRITE last_modified_at     ON `function` TYPE option<datetime>;
--- (same for class, file)
-
--- Temporal fields on edges
-DEFINE FIELD OVERWRITE introduced_commit ON calls TYPE option<string>;
-DEFINE FIELD OVERWRITE introduced_commit ON data_flow TYPE option<string>;
-
--- Enhanced data_flow for field-level tracking
-DEFINE FIELD OVERWRITE field_path     ON data_flow TYPE option<string>;
-DEFINE FIELD OVERWRITE mutation_type  ON data_flow TYPE option<string>;
-DEFINE FIELD OVERWRITE mutation_expr  ON data_flow TYPE option<string>;
-DEFINE FIELD OVERWRITE mutation_line  ON data_flow TYPE option<int>;
-
--- Memory table
-DEFINE TABLE OVERWRITE memory SCHEMAFULL;
-DEFINE FIELD OVERWRITE tier       ON memory TYPE string;
-DEFINE FIELD OVERWRITE session_id ON memory TYPE option<string>;
-DEFINE FIELD OVERWRITE repo_slug  ON memory TYPE string;
-DEFINE FIELD OVERWRITE content    ON memory TYPE string;
-DEFINE FIELD OVERWRITE concepts   ON memory TYPE option<array<string>>;
-DEFINE FIELD OVERWRITE embedding  ON memory TYPE option<array<float>>;
-DEFINE INDEX OVERWRITE mem_vec_idx ON memory FIELDS embedding
-    HNSW DIMENSION {{EMBED_DIM}} DIST COSINE;
-
--- Commit history cache
-DEFINE TABLE OVERWRITE commit_history SCHEMAFULL;
-DEFINE FIELD OVERWRITE hash      ON commit_history TYPE string;
-DEFINE FIELD OVERWRITE repo_slug ON commit_history TYPE string;
-DEFINE FIELD OVERWRITE message   ON commit_history TYPE string;
-DEFINE FIELD OVERWRITE author    ON commit_history TYPE string;
-DEFINE FIELD OVERWRITE timestamp ON commit_history TYPE datetime;
-DEFINE FIELD OVERWRITE files     ON commit_history TYPE array<string>;
-DEFINE INDEX OVERWRITE ch_hash_idx ON commit_history FIELDS repo, hash UNIQUE;
-```
+Temporal fields on nodes (`introduced_commit`, `last_modified_commit`, timestamps) and edges. Enhanced `data_flow` edges with `field_path`, `mutation_type`, `mutation_expr`, `mutation_line`. Memory table with HNSW vector index. Commit history cache table. See [DATABASE.md](DATABASE.md) for complete schema.
 
 ---
 
