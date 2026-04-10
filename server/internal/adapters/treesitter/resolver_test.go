@@ -231,6 +231,30 @@ func TestResolver_SuffixMatchSkipsAmbiguous(t *testing.T) {
 	t.Error("call edge not found")
 }
 
+func TestResolver_SamePackagePrefixResolves(t *testing.T) {
+	nodes := []types.CodeNode{
+		{ID: "function:app⋅IndexService⋅Reembed", Kind: types.NodeFunction, Qualified: "app.IndexService.Reembed", FilePath: "index.go"},
+		{ID: "function:app⋅NewCtxBuilder", Kind: types.NodeFunction, Qualified: "app.NewCtxBuilder", FilePath: "context.go"},
+		{ID: "file:index⋅go", Kind: types.NodeFile, FilePath: "index.go", Qualified: "index.go"},
+	}
+	edges := []types.CodeEdge{
+		{Kind: types.EdgeCalls, FromID: "function:app⋅IndexService⋅Reembed", ToID: "NewCtxBuilder"},
+	}
+
+	r := &Resolver{}
+	_, resolved := r.Resolve(nodes, edges)
+
+	for _, e := range resolved {
+		if e.Kind == types.EdgeCalls && e.FromID == "function:app⋅IndexService⋅Reembed" {
+			if e.ToID != "function:app⋅NewCtxBuilder" {
+				t.Errorf("same-package call not resolved: got ToID=%s, want function:app⋅NewCtxBuilder", e.ToID)
+			}
+			return
+		}
+	}
+	t.Error("call edge not found")
+}
+
 func TestResolver_ModuleNodesSkipped(t *testing.T) {
 	nodes := []types.CodeNode{
 		{ID: "file:f⋅go", Kind: types.NodeFile, FilePath: "f.go", Qualified: "f.go"},

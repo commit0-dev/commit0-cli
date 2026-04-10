@@ -67,6 +67,14 @@ func (r *Resolver) Resolve(nodes []types.CodeNode, edges []types.CodeEdge) ([]ty
 		}
 	}
 
+	// Build a fromID → qualified name map for same-package resolution.
+	idToQualified := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		if n.ID != "" && n.Qualified != "" {
+			idToQualified[n.ID] = n.Qualified
+		}
+	}
+
 	for i := range edges {
 		e := &edges[i]
 		if e.Kind != types.EdgeCalls {
@@ -74,11 +82,30 @@ func (r *Resolver) Resolve(nodes []types.CodeNode, edges []types.CodeEdge) ([]ty
 		}
 		// ToID was stored as the raw call target (unqualified or qualified name)
 		// by the extractors. Try to resolve it.
+
+		// Strategy 1: exact match against qualified names.
 		if id, ok := qualifiedToID[e.ToID]; ok {
 			e.ToID = id
 			continue
 		}
-		// Suffix match: "s.ImportBundle" → extract ".ImportBundle" → match against qualified names.
+
+		// Strategy 2: same-package prefix — bare function calls like
+		// "NewContextBuilderWithStore" → "app.NewContextBuilderWithStore".
+		// Extract the caller's package prefix from FromID's qualified name.
+		if !strings.Contains(e.ToID, ".") {
+			if fromQual, ok := idToQualified[e.FromID]; ok {
+				if dot := strings.Index(fromQual, "."); dot >= 0 {
+					pkg := fromQual[:dot] // "app" from "app.SyncService.Pull"
+					candidate := pkg + "." + e.ToID // "app.NewContextBuilderWithStore"
+					if id, ok := qualifiedToID[candidate]; ok {
+						e.ToID = id
+						continue
+					}
+				}
+			}
+		}
+
+		// Strategy 3: suffix match — "s.ImportBundle" → ".ImportBundle" → match.
 		if dot := strings.LastIndex(e.ToID, "."); dot >= 0 {
 			suffix := e.ToID[dot:]
 			if !suffixAmbiguous[suffix] {
