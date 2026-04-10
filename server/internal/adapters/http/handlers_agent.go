@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -42,11 +43,18 @@ func (s *Server) handleAgentChat(c *gin.Context) {
 		return
 	}
 
-	// Switch to SSE mode.
+	// Switch to SSE mode — disable write deadline so long-running agent
+	// sessions (analyze, deep investigations) don't get killed by the
+	// server's default WriteTimeout.
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
+
+	// Disable write deadline for SSE streaming.
+	if ctrl := http.NewResponseController(c.Writer); ctrl != nil {
+		ctrl.SetWriteDeadline(time.Time{}) // zero = no deadline
+	}
 
 	for event := range events {
 		data, _ := json.Marshal(event)
