@@ -12,13 +12,23 @@ import (
 // Config holds all application configuration.
 type Config struct {
 	EmbedProvider string // "gemini" (default), "voyage", or "ollama"
+	LLMProvider   string // "gemini" (default), "openrouter", or "ollama"
 	Surreal       SurrealConfig
 	Gemini        GeminiConfig
 	Voyage        VoyageConfig
 	Ollama        OllamaConfig
+	OpenRouter    OpenRouterConfig
 	Server        ServerConfig
 	Index         IndexConfig
 	Query         QueryConfig
+}
+
+// OpenRouterConfig holds settings for OpenRouter API (multi-model gateway).
+type OpenRouterConfig struct {
+	APIKey    string // env: OPENROUTER_API_KEY
+	BaseURL   string // env: OPENROUTER_BASE_URL (default: https://openrouter.ai/api/v1)
+	Model     string // env: OPENROUTER_MODEL (default: google/gemini-2.5-flash-preview)
+	MaxTokens int    // env: OPENROUTER_MAX_TOKENS (default: 8192)
 }
 
 // OllamaConfig holds local Ollama settings for LLM and embeddings.
@@ -120,6 +130,13 @@ func Load(cfgPath string) (*Config, error) {
 			Database:  v.GetString("surreal.database"),
 		},
 		EmbedProvider: v.GetString("embed.provider"),
+		LLMProvider:   v.GetString("llm.provider"),
+		OpenRouter: OpenRouterConfig{
+			APIKey:    v.GetString("openrouter.api_key"),
+			BaseURL:   v.GetString("openrouter.base_url"),
+			Model:     v.GetString("openrouter.model"),
+			MaxTokens: v.GetInt("openrouter.max_tokens"),
+		},
 		Ollama: OllamaConfig{
 			URL:        v.GetString("ollama.url"),
 			Model:      v.GetString("ollama.model"),
@@ -195,6 +212,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("surreal.startup_retries", 5)
 
 	v.SetDefault("embed.provider", "gemini")
+	v.SetDefault("llm.provider", "gemini")
+
+	v.SetDefault("openrouter.base_url", "https://openrouter.ai/api/v1")
+	v.SetDefault("openrouter.model", "google/gemini-2.5-flash-preview")
+	v.SetDefault("openrouter.max_tokens", 8192)
+
 	v.SetDefault("ollama.url", "http://localhost:11434")
 	v.SetDefault("ollama.model", "")
 	v.SetDefault("ollama.embed_model", "nomic-embed-text")
@@ -236,6 +259,12 @@ func bindEnvs(v *viper.Viper) {
 		"surreal.database":  "SURREAL_DATABASE",
 
 		"embed.provider":     "EMBED_PROVIDER",
+		"llm.provider":       "LLM_PROVIDER",
+
+		"openrouter.api_key":    "OPENROUTER_API_KEY",
+		"openrouter.base_url":   "OPENROUTER_BASE_URL",
+		"openrouter.model":      "OPENROUTER_MODEL",
+		"openrouter.max_tokens": "OPENROUTER_MAX_TOKENS",
 		"ollama.url":         "OLLAMA_URL",
 		"ollama.model":       "OLLAMA_MODEL",
 		"ollama.embed_model": "OLLAMA_EMBED_MODEL",

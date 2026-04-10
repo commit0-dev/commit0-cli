@@ -26,12 +26,24 @@ type Message struct {
 	Content   string
 }
 
-// SessionService manages conversation sessions.
+// SessionStore is the interface for session persistence.
+// Implemented by both in-memory SessionService and SurrealDB SessionAdapter.
+type SessionStore interface {
+	CreateSession(ctx context.Context, repoSlug string) (*Session, error)
+	AppendMessage(ctx context.Context, sessionID, role, content string) error
+	GetSession(ctx context.Context, sessionID string) (*Session, error)
+	ListSessions(ctx context.Context, repoSlug string) ([]*Session, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SessionService is the in-memory implementation of SessionStore.
 type SessionService struct {
 	sessions map[string]*Session
 	counter  int64
 	mu       sync.RWMutex
 }
+
+var _ SessionStore = (*SessionService)(nil)
 
 // NewSessionService creates a new session service.
 func NewSessionService() *SessionService {
@@ -63,10 +75,10 @@ func (ss *SessionService) CreateSession(ctx context.Context, repoSlug string) (*
 }
 
 // AppendMessage adds a message to a session.
-func (ss *SessionService) AppendMessage(ctx context.Context, sessionID, role, content string) (*Session, error) {
+func (ss *SessionService) AppendMessage(ctx context.Context, sessionID, role, content string) error {
 	// Validate role
-	if role != "user" && role != "assistant" {
-		return nil, domain.Validation(fmt.Sprintf("invalid role: %s (must be 'user' or 'assistant')", role))
+	if role != "user" && role != "assistant" && role != "system" {
+		return domain.Validation(fmt.Sprintf("invalid role: %s", role))
 	}
 
 	ss.mu.Lock()
@@ -74,20 +86,17 @@ func (ss *SessionService) AppendMessage(ctx context.Context, sessionID, role, co
 
 	session, exists := ss.sessions[sessionID]
 	if !exists {
-		return nil, domain.NotFound(fmt.Sprintf("session %s not found", sessionID))
+		return domain.NotFound(fmt.Sprintf("session %s not found", sessionID))
 	}
 
-	// Append message
 	session.Messages = append(session.Messages, Message{
 		Role:      role,
 		Content:   content,
 		Timestamp: timeNow(),
 	})
-
-	// Update timestamp
 	session.UpdatedAt = timeNow()
 
-	return session, nil
+	return nil
 }
 
 // GetSession retrieves a session by ID.
@@ -111,18 +120,16 @@ func (ss *SessionService) GetSession(ctx context.Context, sessionID string) (*Se
 }
 
 // ListSessions lists sessions, optionally filtered by repo.
-func (ss *SessionService) ListSessions(ctx context.Context, repoSlug string) ([]Session, error) {
+func (ss *SessionService) ListSessions(ctx context.Context, repoSlug string) ([]*Session, error) {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
 
-	var result []Session
+	var result []*Session
 	for _, session := range ss.sessions {
-		// Filter by repo if specified
 		if repoSlug != "" && session.RepoSlug != repoSlug {
 			continue
 		}
-		// Copy session
-		result = append(result, Session{
+		result = append(result, &Session{
 			ID:        session.ID,
 			RepoSlug:  session.RepoSlug,
 			Messages:  append([]Message{}, session.Messages...),
@@ -131,7 +138,6 @@ func (ss *SessionService) ListSessions(ctx context.Context, repoSlug string) ([]
 		})
 	}
 
-	// Sort by CreatedAt descending
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CreatedAt.After(result[j].CreatedAt)
 	})

@@ -38,11 +38,16 @@ func TestSessionServiceAppendMessage(t *testing.T) {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 
-	session, err = svc.AppendMessage(ctx, session.ID, "user", "Hello")
+	err = svc.AppendMessage(ctx, session.ID, "user", "Hello")
 	if err != nil {
 		t.Fatalf("AppendMessage failed: %v", err)
 	}
 
+	// Verify via GetSession since AppendMessage no longer returns the session.
+	session, err = svc.GetSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
 	if len(session.Messages) != 1 {
 		t.Errorf("Expected 1 message, got %d", len(session.Messages))
 	}
@@ -62,7 +67,7 @@ func TestSessionServiceAppendMessageInvalidRole(t *testing.T) {
 
 	session, _ := svc.CreateSession(ctx, "my-repo")
 
-	_, err := svc.AppendMessage(ctx, session.ID, "invalid", "text")
+	err := svc.AppendMessage(ctx, session.ID, "invalid", "text")
 	if err == nil {
 		t.Errorf("AppendMessage should fail with invalid role")
 	}
@@ -81,7 +86,7 @@ func TestSessionServiceAppendMessageUnknownSession(t *testing.T) {
 	svc := NewSessionService()
 	ctx := context.Background()
 
-	_, err := svc.AppendMessage(ctx, "unknown-id", "user", "text")
+	err := svc.AppendMessage(ctx, "unknown-id", "user", "text")
 	if err == nil {
 		t.Errorf("AppendMessage should fail for unknown session")
 	}

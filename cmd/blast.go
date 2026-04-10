@@ -5,8 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/commit0-dev/commit0/internal/app"
-	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/adapters/client"
 )
 
 var blastCmd = &cobra.Command{
@@ -14,21 +13,11 @@ var blastCmd = &cobra.Command{
 	Short: "Analyze blast radius of a code change",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
-
 		repoSlug, _ := cmd.Flags().GetString("repo")
 		maxDepth, _ := cmd.Flags().GetInt("max-depth")
 
-		svc, cleanup, err := wireBlastService(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		result, err := svc.Blast(cmd.Context(), app.BlastRequest{
+		c := client.New(serverURL(cmd))
+		result, err := c.Blast(cmd.Context(), client.BlastRequest{
 			Symbol:   args[0],
 			RepoSlug: repoSlug,
 			MaxDepth: maxDepth,

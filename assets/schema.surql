@@ -387,6 +387,26 @@ DEFINE INDEX IF NOT EXISTS ch_hash_idx ON commit_history FIELDS repo_slug, hash 
 DEFINE INDEX IF NOT EXISTS ch_ts_idx   ON commit_history FIELDS repo_slug, timestamp;
 
 -- ─────────────────────────────────────────
+-- Chat Sessions (TUI conversation persistence)
+-- ─────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE chat_session SCHEMAFULL;
+DEFINE FIELD OVERWRITE repo_slug  ON chat_session TYPE string;
+DEFINE FIELD OVERWRITE created_at ON chat_session TYPE datetime VALUE time::now();
+DEFINE FIELD OVERWRITE updated_at ON chat_session TYPE datetime VALUE time::now();
+
+DEFINE INDEX IF NOT EXISTS chat_sess_repo_idx ON chat_session FIELDS repo_slug;
+
+DEFINE TABLE OVERWRITE chat_message SCHEMAFULL;
+DEFINE FIELD OVERWRITE session_id ON chat_message TYPE string;
+DEFINE FIELD OVERWRITE role       ON chat_message TYPE string
+    ASSERT $value IN ["user", "assistant", "system"];
+DEFINE FIELD OVERWRITE content    ON chat_message TYPE string;
+DEFINE FIELD OVERWRITE created_at ON chat_message TYPE datetime VALUE time::now();
+
+DEFINE INDEX IF NOT EXISTS chat_msg_sess_idx ON chat_message FIELDS session_id;
+
+-- ─────────────────────────────────────────
 -- Schema Version (for migration tracking)
 -- ─────────────────────────────────────────
 

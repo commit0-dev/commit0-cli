@@ -4,10 +4,67 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/gin-gonic/gin"
 
 	"github.com/commit0-dev/commit0/internal/app"
 )
+
+// ---- API Surface ─────────────────────────────────────────────────────────
+
+type apiDiscoverRequest struct {
+	RepoSlug string `json:"repo_slug"`
+}
+
+// handleAPIDiscover handles POST /api/v1/api/discover.
+func (s *Server) handleAPIDiscover(c *gin.Context) {
+	if s.apiSurfSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "API surface service not available"})
+		return
+	}
+	var req apiDiscoverRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
+	}
+
+	surface, err := s.apiSurfSvc.Discover(c.Request.Context(), req.RepoSlug)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, surface)
+}
+
+type apiSpecRequest struct {
+	RepoSlug string `json:"repo_slug"`
+}
+
+// handleAPISpec handles POST /api/v1/api/spec.
+func (s *Server) handleAPISpec(c *gin.Context) {
+	if s.apiSurfSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "API surface service not available"})
+		return
+	}
+	var req apiSpecRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
+	}
+
+	surface, err := s.apiSurfSvc.Discover(c.Request.Context(), req.RepoSlug)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	spec, err := s.apiSurfSvc.GenerateOpenAPI(c.Request.Context(), surface)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.Data(http.StatusOK, "application/json", spec)
+}
 
 // ---- Field Flow ─────────────────────────────────────────────────────────
 
@@ -21,19 +78,22 @@ type flowRequest struct {
 }
 
 // handleFieldFlow handles POST /api/v1/flow.
-func (s *Server) handleFieldFlow(c echo.Context) error {
+func (s *Server) handleFieldFlow(c *gin.Context) {
 	if s.flowSvc == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "field flow service not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "field flow service not available"})
+		return
 	}
 	var req flowRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
 	}
 	if req.Symbol == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "symbol is required")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "symbol is required"})
+		return
 	}
 
-	result, err := s.flowSvc.TraceFieldFlow(c.Request().Context(), app.FieldFlowRequest{
+	result, err := s.flowSvc.TraceFieldFlow(c.Request.Context(), app.FieldFlowRequest{
 		Symbol:        req.Symbol,
 		FieldPath:     req.FieldPath,
 		RepoSlug:      req.RepoSlug,
@@ -42,9 +102,10 @@ func (s *Server) handleFieldFlow(c echo.Context) error {
 		ShowMutations: req.ShowMutations,
 	})
 	if err != nil {
-		return httpError(err)
+		writeError(c, err)
+		return
 	}
-	return c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, result)
 }
 
 // ---- Temporal History ───────────────────────────────────────────────────
@@ -57,25 +118,28 @@ type historyRequest struct {
 }
 
 // handleHistory handles POST /api/v1/history.
-func (s *Server) handleHistory(c echo.Context) error {
+func (s *Server) handleHistory(c *gin.Context) {
 	if s.tempSvc == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "temporal service not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "temporal service not available"})
+		return
 	}
 	var req historyRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
 	}
 
-	result, err := s.tempSvc.QueryHistory(c.Request().Context(), app.TemporalQueryRequest{
+	result, err := s.tempSvc.QueryHistory(c.Request.Context(), app.TemporalQueryRequest{
 		RepoSlug:      req.RepoSlug,
 		NodeQualified: req.Symbol,
 		FromCommit:    req.FromCommit,
 		ToCommit:      req.ToCommit,
 	})
 	if err != nil {
-		return httpError(err)
+		writeError(c, err)
+		return
 	}
-	return c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, result)
 }
 
 // ---- Find Root Cause (SSE streaming) ────────────────────────────────────
@@ -88,30 +152,33 @@ type findRootRequest struct {
 }
 
 // handleFindRoot handles POST /api/v1/find-root with SSE streaming progress.
-func (s *Server) handleFindRoot(c echo.Context) error {
+func (s *Server) handleFindRoot(c *gin.Context) {
 	if s.rootCauseSvc == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "root cause service not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "root cause service not available"})
+		return
 	}
 	var req findRootRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
 	}
 	if req.Description == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "description is required")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "description is required"})
+		return
 	}
 	if req.RepoPath == "" {
 		req.RepoPath = "."
 	}
 
-	// SSE for long-running analysis
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("X-Accel-Buffering", "no")
-	c.Response().WriteHeader(http.StatusOK)
+	// SSE for long-running analysis.
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
 
 	writeSSE(c, "status", map[string]string{"step": "starting", "message": "Starting root cause analysis..."})
 
-	result, err := s.rootCauseSvc.FindRootCause(c.Request().Context(), app.RootCauseRequest{
+	result, err := s.rootCauseSvc.FindRootCause(c.Request.Context(), app.RootCauseRequest{
 		Description: req.Description,
 		RepoSlug:    req.RepoSlug,
 		RepoPath:    req.RepoPath,
@@ -119,11 +186,10 @@ func (s *Server) handleFindRoot(c echo.Context) error {
 	})
 	if err != nil {
 		writeSSE(c, "error", map[string]string{"message": err.Error()})
-		return nil
+		return
 	}
 
 	data, _ := json.Marshal(result)
 	writeSSE(c, "result", json.RawMessage(data))
 	writeSSE(c, "done", map[string]string{"status": "complete"})
-	return nil
 }

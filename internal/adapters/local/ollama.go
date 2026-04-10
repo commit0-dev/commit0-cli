@@ -1,14 +1,14 @@
 package local
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
+	"time"
+
+	"resty.dev/v3"
 
 	"github.com/commit0-dev/commit0/internal/domain"
 )
@@ -16,10 +16,9 @@ import (
 // OllamaExplainer implements domain.LLMExplainer using a local Ollama instance.
 // It calls the Ollama chat API at http://localhost:11434/api/chat.
 type OllamaExplainer struct {
-	baseURL string
-	model   string
-	client  *http.Client
-	log     *slog.Logger
+	rc    *resty.Client
+	model string
+	log   *slog.Logger
 }
 
 // Compile-time check.
@@ -33,11 +32,15 @@ func NewOllamaExplainer(baseURL, model string, log *slog.Logger) *OllamaExplaine
 	if model == "" {
 		model = "gemma3:4b"
 	}
+
+	rc := resty.New().
+		SetBaseURL(strings.TrimRight(baseURL, "/")).
+		SetTimeout(60 * time.Second)
+
 	return &OllamaExplainer{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   model,
-		client:  &http.Client{},
-		log:     log.With("adapter", "ollama", "model", model),
+		rc:    rc,
+		model: model,
+		log:   log.With("adapter", "ollama", "model", model),
 	}
 }
 
@@ -70,35 +73,23 @@ func (o *OllamaExplainer) Explain(ctx context.Context, req domain.ExplainRequest
 	go func() {
 		defer close(ch)
 
-		body, _ := json.Marshal(ollamaChatRequest{
-			Model:    o.model,
-			Messages: []ollamaMessage{{Role: "user", Content: prompt}},
-			Stream:   false, // non-streaming for simplicity
-		})
-
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+"/api/chat", bytes.NewReader(body))
-		if err != nil {
-			ch <- domain.ExplainChunk{Error: err, Done: true}
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-
-		resp, err := o.client.Do(httpReq)
+		var chatResp ollamaChatResponse
+		resp, err := o.rc.R().
+			SetContext(ctx).
+			SetBody(ollamaChatRequest{
+				Model:    o.model,
+				Messages: []ollamaMessage{{Role: "user", Content: prompt}},
+				Stream:   false,
+			}).
+			SetResult(&chatResp).
+			Post("/api/chat")
 		if err != nil {
 			ch <- domain.ExplainChunk{Error: fmt.Errorf("ollama: %w", err), Done: true}
 			return
 		}
-		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			ch <- domain.ExplainChunk{Error: fmt.Errorf("ollama: %d %s", resp.StatusCode, string(bodyBytes)), Done: true}
-			return
-		}
-
-		var chatResp ollamaChatResponse
-		if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-			ch <- domain.ExplainChunk{Error: fmt.Errorf("ollama decode: %w", err), Done: true}
+		if resp.IsError() {
+			ch <- domain.ExplainChunk{Error: fmt.Errorf("ollama: %d %s", resp.StatusCode(), resp.String()), Done: true}
 			return
 		}
 
@@ -118,33 +109,23 @@ func (o *OllamaExplainer) ExplainStructured(ctx context.Context, req domain.Expl
 	prompt := buildOllamaPrompt(req)
 	prompt += "\n\nRespond ONLY with valid JSON. No markdown, no explanation outside the JSON."
 
-	body, _ := json.Marshal(ollamaChatRequest{
-		Model:    o.model,
-		Messages: []ollamaMessage{{Role: "user", Content: prompt}},
-		Stream:   false,
-		Format:   json.RawMessage(`"json"`),
-	})
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+"/api/chat", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := o.client.Do(httpReq)
+	var chatResp ollamaChatResponse
+	resp, err := o.rc.R().
+		SetContext(ctx).
+		SetBody(ollamaChatRequest{
+			Model:    o.model,
+			Messages: []ollamaMessage{{Role: "user", Content: prompt}},
+			Stream:   false,
+			Format:   json.RawMessage(`"json"`),
+		}).
+		SetResult(&chatResp).
+		Post("/api/chat")
 	if err != nil {
 		return nil, fmt.Errorf("ollama: %w", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ollama: %d %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	var chatResp ollamaChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return nil, fmt.Errorf("ollama decode: %w", err)
+	if resp.IsError() {
+		return nil, fmt.Errorf("ollama: %d %s", resp.StatusCode(), resp.String())
 	}
 
 	content := strings.TrimSpace(chatResp.Message.Content)
@@ -158,17 +139,12 @@ func (o *OllamaExplainer) ExplainStructured(ctx context.Context, req domain.Expl
 
 // Ping checks if Ollama is running and the model is available.
 func (o *OllamaExplainer) Ping(ctx context.Context) error {
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", o.baseURL+"/api/tags", nil)
+	resp, err := o.rc.R().SetContext(ctx).Get("/api/tags")
 	if err != nil {
-		return err
+		return fmt.Errorf("ollama not reachable: %w", err)
 	}
-	resp, err := o.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("ollama not reachable at %s: %w", o.baseURL, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama returned %d", resp.StatusCode)
+	if resp.IsError() {
+		return fmt.Errorf("ollama returned %d", resp.StatusCode())
 	}
 	return nil
 }

@@ -64,7 +64,7 @@ swappable and every domain operation unit-testable without infrastructure.
 │                          DRIVING ADAPTERS (input)                           │
 │                                                                             │
 │   ┌────────────────┐  ┌────────────────┐  ┌─────────────────────────────┐  │
-│   │  CLI (Cobra)   │  │  HTTP (Echo)   │  │  SurrealDB DEFINE API       │  │
+│   │  CLI (Cobra)   │  │  HTTP (Gin)   │  │  SurrealDB DEFINE API       │  │
 │   │  cmd/*.go      │  │  server/*.go   │  │  (DB-native endpoints)      │  │
 │   └───────┬────────┘  └───────┬────────┘  └────────────┬────────────────┘  │
 │           │                   │                        │                    │
@@ -148,7 +148,7 @@ changes, and rate limits. Isolating the domain means:
 - **Swappability**: Replace Gemini with OpenAI embeddings by implementing the
   Embedder interface — zero changes to business logic.
 - **SurrealDB DEFINE API coexistence**: The same domain logic serves both the
-  Echo HTTP server and SurrealDB's native API endpoints via different driving
+  Gin HTTP server and SurrealDB's native API endpoints via different driving
   adapters.
 
 ---
@@ -1343,10 +1343,10 @@ an identically-named function in an unrelated module.
 
 ---
 
-## 7. HTTP API Layer (Echo)
+## 7. HTTP API Layer (Gin)
 
-The Echo HTTP server is a driving adapter that translates HTTP requests into
-application service calls and streams responses back.
+The Gin HTTP server is the central driving adapter. All clients (CLI, web, VSCode
+extension) communicate with the server via Streamable HTTP (POST + SSE).
 
 ### 7.1 Server Bootstrap
 
@@ -1354,169 +1354,102 @@ application service calls and streams responses back.
 // internal/adapters/http/server.go
 
 type Server struct {
-    echo       *echo.Echo
-    querySvc   *app.QueryService
-    traceSvc   *app.TraceService
-    blastSvc   *app.BlastService
-    indexSvc   *app.IndexService
-    repoSvc    *app.RepoService
-    cfg        *config.ServerConfig
+    router       *gin.Engine
+    srv          *http.Server
+    querySvc     *app.QueryService
+    traceSvc     *app.TraceService
+    blastSvc     *app.BlastService
+    indexSvc     *app.IndexService
+    repoSvc      *app.RepoService
+    agentRunner  domain.AgentRunner
+    flowSvc      *app.FieldFlowService
+    rootCauseSvc *app.RootCauseAnalysisService
+    apiSurfSvc   *app.APISurfaceService
+    cfg          *config.ServerConfig
 }
 
-func NewServer(deps ServerDeps) *Server {
-    e := echo.New()
-    e.HideBanner = true
+func NewServer(/* all services */) *Server {
+    gin.SetMode(gin.ReleaseMode)
+    r := gin.New()
 
     // Middleware
-    e.Use(middleware.RequestID())
-    e.Use(middleware.Recover())
-    e.Use(slogMiddleware(deps.Logger))
-    e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-        AllowOrigins: deps.Cfg.CORSOrigins,
+    r.Use(gin.Recovery())
+    r.Use(requestid.New())
+    r.Use(SlogMiddleware(log))
+    r.Use(cors.New(cors.Config{
+        AllowOrigins: cfg.CORSOrigins,
+        AllowMethods: []string{"GET", "POST", "DELETE"},
     }))
 
-    s := &Server{echo: e, /* ... */}
+    s := &Server{router: r, /* ... */}
     s.registerRoutes()
     return s
 }
-
-func (s *Server) registerRoutes() {
-    v1 := s.echo.Group("/api/v1")
-
-    // Repo management
-    v1.GET("/repos", s.handleListRepos)
-
-    // Indexing
-    v1.POST("/index", s.handleStartIndex)
-    v1.GET("/index/:job_id", s.handleIndexStatus)
-
-    // Query
-    v1.POST("/query", s.handleQuery)
-
-    // Trace (SSE streaming)
-    v1.POST("/trace", s.handleTrace)
-
-    // Blast radius
-    v1.POST("/blast-radius", s.handleBlastRadius)
-
-    // Health
-    s.echo.GET("/health", s.handleHealth)
-
-    // Web UI (Phase 3 — embedded via go:embed)
-    // s.echo.Static("/", "web/dist")
-}
 ```
 
-### 7.2 SSE Streaming for Trace & Query Explanations
+### 7.2 SSE Streaming
 
-Long-running operations (trace, blast, query with explanation) stream results
-via Server-Sent Events (SSE). This allows the CLI, web UI, and IDE extensions
-to show progressive output.
+Long-running operations stream results via Server-Sent Events (SSE).
+Gin handlers set SSE headers and use `writeSSE()` + `c.Writer.Flush()`.
 
 ```go
 // internal/adapters/http/handlers.go
 
-func (s *Server) handleTrace(c echo.Context) error {
-    var req TraceHTTPRequest
-    if err := c.Bind(&req); err != nil {
-        return echo.NewHTTPError(400, "invalid request")
+func (s *Server) handleTrace(c *gin.Context) {
+    var req traceRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+        return
     }
 
-    // Set SSE headers
-    c.Response().Header().Set("Content-Type", "text/event-stream")
-    c.Response().Header().Set("Cache-Control", "no-cache")
-    c.Response().Header().Set("Connection", "keep-alive")
-    c.Response().WriteHeader(200)
+    result, err := s.traceSvc.Trace(c.Request.Context(), app.TraceRequest{...})
+    if err != nil { writeError(c, err); return }
 
-    ctx := c.Request().Context()
-    flusher, ok := c.Response().Writer.(http.Flusher)
-    if !ok {
-        return echo.NewHTTPError(500, "streaming not supported")
-    }
+    // SSE mode
+    c.Header("Content-Type", "text/event-stream")
+    c.Header("Cache-Control", "no-cache")
+    c.Status(http.StatusOK)
 
-    // Phase 1: Stream graph traversal results as they're discovered
-    result, err := s.traceSvc.Trace(ctx, domain.TraceRequest{
-        RepoSlug: req.Repo,
-        Symbol:   req.Symbol,
-        Depth:    req.Depth,
-        Reverse:  req.Reverse,
-    })
-    if err != nil {
-        writeSSE(c.Response(), "error", err.Error())
-        flusher.Flush()
-        return nil
-    }
-
-    // Send call tree nodes
     for _, hop := range result.Tree {
-        writeSSE(c.Response(), "hop", hop)
-        flusher.Flush()
+        writeSSE(c, "hop", hop)
     }
-
-    // Phase 2: Stream LLM explanation
-    explainCh, err := s.traceSvc.ExplainStream(ctx, result)
-    if err == nil {
-        for chunk := range explainCh {
-            if chunk.Error != nil {
-                writeSSE(c.Response(), "error", chunk.Error.Error())
-                break
-            }
-            writeSSE(c.Response(), "explain", chunk.Text)
-            flusher.Flush()
-        }
-    }
-
-    writeSSE(c.Response(), "done", "")
-    flusher.Flush()
-    return nil
+    writeSSE(c, "done", map[string]any{"timing": result.Timing})
 }
 
-func writeSSE(w io.Writer, event string, data interface{}) {
+func writeSSE(c *gin.Context, event string, data interface{}) {
     jsonData, _ := json.Marshal(data)
-    fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, jsonData)
+    fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, jsonData)
+    c.Writer.Flush()
 }
 ```
 
 ### 7.3 Indexing Job Management
 
-Indexing is a long-running operation. The HTTP API starts it asynchronously and
-returns a job ID for polling.
+Indexing is asynchronous. `POST /api/v1/index` returns a job ID, polled via
+`GET /api/v1/index/:job_id`. CLI uses exponential backoff polling.
 
 ```go
 // internal/adapters/http/handlers_index.go
 
-type indexJobStore struct {
-    mu   sync.RWMutex
-    jobs map[string]*IndexJob
+func (s *Server) handleStartIndex(c *gin.Context) {
+    var req startIndexRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+        return
+    }
+    // ... create job, run in background goroutine ...
+    c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
 }
 
-type IndexJob struct {
-    ID        string
-    Status    string    // "indexing" | "completed" | "failed"
-    Progress  float64   // 0.0 - 1.0
-    Stats     IndexStats
-    Error     string
-    StartedAt time.Time
+func (s *Server) handleIndexStatus(c *gin.Context) {
+    jobID := c.Param("job_id")
+    job, ok := s.jobs.get(jobID)
+    if !ok {
+        c.JSON(http.StatusNotFound, gin.H{"message": "job not found"})
+        return
+    }
+    c.JSON(http.StatusOK, job)
 }
-
-func (s *Server) handleStartIndex(c echo.Context) error {
-    var req IndexHTTPRequest
-    if err := c.Bind(&req); err != nil {
-        return echo.NewHTTPError(400, "invalid request")
-    }
-
-    job := &IndexJob{
-        ID:        ulid.Make().String(),
-        Status:    "indexing",
-        StartedAt: time.Now(),
-    }
-    s.jobs.Store(job.ID, job)
-
-    // Run indexing in background goroutine
-    go func() {
-        result, err := s.indexSvc.Index(context.Background(), domain.IndexRequest{
-            RepoPath:  req.RepoPath,
-            Languages: req.Languages,
             Exclude:   req.Exclude,
         })
         if err != nil {
@@ -1951,7 +1884,7 @@ commit0/
 │   │   │       ├── typescript.go
 │   │   │       └── javascript.go
 │   │   │
-│   │   ├── http/                      # Echo HTTP server (driving adapter)
+│   │   ├── http/                      # Gin HTTP server (driving adapter)
 │   │   │   ├── server.go
 │   │   │   ├── middleware.go
 │   │   │   └── handlers.go

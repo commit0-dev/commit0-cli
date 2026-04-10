@@ -9,8 +9,7 @@ import (
 	"github.com/olekukonko/tablewriter/tw"
 	"github.com/spf13/cobra"
 
-	"github.com/commit0-dev/commit0/internal/app"
-	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/adapters/client"
 	"github.com/commit0-dev/commit0/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
 )
@@ -20,28 +19,18 @@ var queryCmd = &cobra.Command{
 	Short: "Semantic code search — uses agent when available",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
-
 		repoSlug, _ := cmd.Flags().GetString("repo")
 		noAgent, _ := cmd.Flags().GetBool("no-agent")
 
-		// Wire all services from a single shared deps instance.
-		svcs, err := wireServeServices(cmd.Context(), cfg)
-		if err != nil {
-			return fmt.Errorf("wire services: %w", err)
-		}
-		defer svcs.cleanup()
+		c := client.New(serverURL(cmd))
 
 		// Agent mode: multi-tool investigation with streaming output.
-		if !noAgent && svcs.agent != nil {
-			return runAgentQuery(cmd, svcs.agent, args[0], repoSlug)
+		if !noAgent {
+			return runAgentQuery(cmd, c, args[0], repoSlug)
 		}
 
 		// Fallback: direct query service.
-		return runDirectQuery(cmd, svcs.query, args[0], repoSlug)
+		return runDirectQuery(cmd, c, args[0], repoSlug)
 	},
 }
 
@@ -55,35 +44,30 @@ func init() {
 
 const maxAgentRetries = 2
 
-// runAgentQuery runs the agent loop. If the agent doesn't call write_report,
-// it gets a follow-up message asking it to present findings — same session,
-// so context is preserved. Max 2 retries before giving up.
-func runAgentQuery(cmd *cobra.Command, agentRunner domain.AgentRunner, question, repoSlug string) error {
+// runAgentQuery runs the agent loop via SSE streaming.
+func runAgentQuery(cmd *cobra.Command, c *client.Client, question, repoSlug string) error {
 	fmt.Fprintf(os.Stderr, gray("Agent investigating: %q\n\n"), question)
 
 	message := question
 	for attempt := 0; attempt <= maxAgentRetries; attempt++ {
-		reported, err := runAgentTurn(cmd, agentRunner, message, repoSlug)
+		reported, err := runAgentTurn(cmd, c, message, repoSlug)
 		if err != nil {
 			return err
 		}
 		if reported {
 			return nil
 		}
-		// Agent didn't call write_report — nudge it to retry.
 		fmt.Fprintln(os.Stderr, gray("  ◆ Formatting report..."))
 		message = "You have completed your analysis but forgot to present it. Call write_report now with your findings structured into sections."
 	}
 
-	// Exhausted retries — agent never called write_report.
 	fmt.Fprintln(os.Stderr, yellow("  Agent did not produce a structured report."))
 	return nil
 }
 
-// runAgentTurn executes a single agent turn (Chat call) and streams events.
-// Returns true if write_report was called (report rendered).
-func runAgentTurn(cmd *cobra.Command, agentRunner domain.AgentRunner, message, repoSlug string) (bool, error) {
-	events, err := agentRunner.Chat(cmd.Context(), domain.ChatRequest{
+// runAgentTurn executes a single agent turn via SSE and streams events.
+func runAgentTurn(cmd *cobra.Command, c *client.Client, message, repoSlug string) (bool, error) {
+	events, err := c.AgentChat(cmd.Context(), client.AgentChatRequest{
 		Message:  message,
 		RepoSlug: repoSlug,
 	})
@@ -140,7 +124,7 @@ func runAgentTurn(cmd *cobra.Command, agentRunner domain.AgentRunner, message, r
 }
 
 // runDirectQuery does a simple search + explain via the QueryService.
-func runDirectQuery(cmd *cobra.Command, svc *app.QueryService, question, repoSlug string) error {
+func runDirectQuery(cmd *cobra.Command, c *client.Client, question, repoSlug string) error {
 	topK, _ := cmd.Flags().GetInt("top-k")
 	kindFlag, _ := cmd.Flags().GetString("kind")
 
@@ -150,12 +134,12 @@ func runDirectQuery(cmd *cobra.Command, svc *app.QueryService, question, repoSlu
 			nodeKinds = append(nodeKinds, types.NodeKind(strings.TrimSpace(k)))
 		}
 	}
+	_ = nodeKinds // NodeKinds not sent via HTTP API currently — future enhancement
 
-	result, err := svc.Query(cmd.Context(), app.QueryRequest{
-		Question:  question,
-		RepoSlug:  repoSlug,
-		TopK:      topK,
-		NodeKinds: nodeKinds,
+	result, err := c.Query(cmd.Context(), client.QueryRequest{
+		Question: question,
+		RepoSlug: repoSlug,
+		TopK:     topK,
 	})
 	if err != nil {
 		return fmt.Errorf("query: %w", err)
@@ -207,3 +191,6 @@ func runDirectQuery(cmd *cobra.Command, svc *app.QueryService, question, repoSlu
 	}
 	return nil
 }
+
+// Ensure domain import is used (for future NodeKinds filter).
+var _ = domain.ErrNotFound

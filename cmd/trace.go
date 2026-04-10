@@ -6,8 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/commit0-dev/commit0/internal/app"
-	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/adapters/client"
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
@@ -16,22 +15,12 @@ var traceCmd = &cobra.Command{
 	Short: "Trace code flow from a symbol",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
-
 		repoSlug, _ := cmd.Flags().GetString("repo")
 		direction, _ := cmd.Flags().GetString("direction")
 		depth, _ := cmd.Flags().GetInt("depth")
 
-		svc, cleanup, err := wireTraceService(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		result, err := svc.Trace(cmd.Context(), app.TraceRequest{
+		c := client.New(serverURL(cmd))
+		result, err := c.Trace(cmd.Context(), client.TraceRequest{
 			Symbol:    args[0],
 			RepoSlug:  repoSlug,
 			Direction: direction,

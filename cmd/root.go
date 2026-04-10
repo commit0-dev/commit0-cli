@@ -30,9 +30,21 @@ func Execute() {
 	}
 }
 
+// serverURL returns the commit0 server URL from --server-url flag, env var, or default.
+func serverURL(cmd *cobra.Command) string {
+	if u, _ := cmd.Flags().GetString("server-url"); u != "" {
+		return u
+	}
+	if u := os.Getenv("COMMIT0_SERVER_URL"); u != "" {
+		return u
+	}
+	return "http://localhost:8080"
+}
+
 func init() {
 	rootCmd.PersistentFlags().String("config", "", "Path to a JSON config file (optional, overridden by env vars)")
 	rootCmd.PersistentFlags().String("log-level", "WARN", "Log level: DEBUG, INFO, WARN, ERROR")
+	rootCmd.PersistentFlags().String("server-url", "", "commit0 server URL (env: COMMIT0_SERVER_URL, default: http://localhost:8080)")
 
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
 		// Flag takes precedence; fall back to LOG_LEVEL env var.

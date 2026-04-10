@@ -48,7 +48,7 @@ full interface signatures and implementation details.
 │                                                                          │
 │  DRIVING ADAPTERS (input)                                                │
 │  ┌──────────────┐   ┌──────────────┐   ┌────────────────────────────┐   │
-│  │  CLI (Cobra) │   │ HTTP (Echo)  │   │ SurrealDB DEFINE API (3.0) │   │
+│  │  CLI (Cobra) │   │ HTTP (Gin)  │   │ SurrealDB DEFINE API (3.0) │   │
 │  │  cmd/*.go    │   │ server/*.go  │   │ DB-native endpoints        │   │
 │  └──────┬───────┘   └──────┬───────┘   └────────────┬───────────────┘   │
 │         └──────────────────┼────────────────────────┘                    │
@@ -117,7 +117,7 @@ zero changes to IndexService, QueryService, or any business logic.
 |-------|-----------|-----------|
 | Language | **Go 1.22+** | Single static binary, fast compilation, strong concurrency |
 | CLI | **Cobra + Viper** | Industry-standard Go CLI framework |
-| HTTP server | **Echo v4** | Minimal, fast, idiomatic Go |
+| HTTP server | **Gin** | Minimal, fast, idiomatic Go |
 | AST Parsing | **go-tree-sitter** (`smacker/go-tree-sitter`) | Multi-language, incremental, CGO-linked |
 | Graph + Vector DB | **SurrealDB 3.0** | Native graph traversal + HNSW vector ANN + FTS in one query; DEFINE API, computed fields, client-side transactions |
 | Embeddings | **Gemini Embedding 2** | Only model embedding text+code+images in a single vector space |
@@ -262,7 +262,7 @@ commit0/
 │   │   │       ├── typescript.go  # function_decl, method_def, class_decl, call_expr
 │   │   │       └── javascript.go  # same as TS
 │   │   │
-│   │   ├── http/                  # Echo HTTP server — driving adapter
+│   │   ├── http/                  # Gin HTTP server — driving adapter
 │   │   │   ├── server.go          # App factory, route registration, middleware
 │   │   │   ├── middleware.go      # CORS, request ID, logging, recovery
 │   │   │   └── handlers.go        # Request → Service → SSE/JSON response
@@ -294,7 +294,7 @@ commit0/
 | `commit0 query` | QueryService | Embedder → VectorIndex + TextIndex → LLMExplainer |
 | `commit0 trace` | TraceService | GraphStore (traverse) → LLMExplainer |
 | `commit0 blast` | BlastService | GraphStore (reverse traverse) → LLMExplainer |
-| `commit0 serve` | HTTP Server | All services exposed via Echo REST + SSE |
+| `commit0 serve` | HTTP Server | All services exposed via Gin REST + SSE |
 | `commit0 db` | DBManager | SurrealDB lifecycle (start/stop/status) |
 
 ---
@@ -790,7 +790,8 @@ COMMIT0_CORS=*
 require (
     github.com/spf13/cobra                  v1.8.x
     github.com/spf13/viper                  v1.19.x
-    github.com/labstack/echo/v4             v4.12.x
+    github.com/gin-gonic/gin                v1.12.x
+    resty.dev/v3                            v3.0.x
     github.com/surrealdb/surrealdb.go/v2    v2.x.x    // Go SDK 1.0 (SurrealDB 3.0 compatible)
     google.golang.org/genai                 v0.x.x    // Gemini SDK (embed + LLM)
     github.com/smacker/go-tree-sitter       v0.0.x
@@ -859,15 +860,15 @@ lipo -create commit0-darwin-amd64 commit0-darwin-arm64 -output commit0-darwin
 - [x] `commit0 blast` — reverse transitive traversal with module grouping
 - [x] TypeScript + JavaScript language extractors
 - [x] Graph-context re-embedding (neighborhood augmentation, Phase 1.5)
-- [x] `commit0 serve` — Echo HTTP server with SSE streaming + REST handlers
-- [x] SurrealDB DEFINE API endpoints (DB-native HTTP, parallel to Echo server)
+- [x] `commit0 serve` — Gin HTTP server with SSE streaming + REST handlers
+- [x] SurrealDB DEFINE API endpoints (DB-native HTTP, parallel to Gin server)
 - [x] Integration tests with testcontainers (SurrealDB)
 
 ### Phase 3 — Conversational Interface ✅ Complete
 - [x] `SessionService` — multi-turn conversation context stored in SurrealDB
 - [x] Streaming SSE responses for long explanations (trace, blast, query)
 - [x] Incremental re-indexing via SurrealDB changefeeds + git diff
-- [ ] Web UI (embedded in binary via `go:embed`, served by Echo)
+- [ ] Web UI (embedded in binary via `go:embed`, served by Gin)
 - [ ] SurrealDB DEFINE BUCKET for embedding input cache
 
 ### Phase 4 — Scale + Ecosystem (In Progress)

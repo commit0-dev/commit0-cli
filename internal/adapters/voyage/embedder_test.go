@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
-	"log/slog"
+	"resty.dev/v3"
 
 	"github.com/commit0-dev/commit0/internal/config"
 	"github.com/commit0-dev/commit0/internal/domain"
@@ -97,8 +99,9 @@ func TestNewVoyageEmbedderCustomValues(t *testing.T) {
 	if emb.batch != 64 {
 		t.Errorf("batch = %d; want 64", emb.batch)
 	}
-	if emb.baseURL != "https://custom.api.com/v1" {
-		t.Errorf("baseURL = %q; want trailing slash stripped", emb.baseURL)
+	// baseURL is stored in the Resty client, not the struct — verify via the client.
+	if got := emb.rc.BaseURL(); got != "https://custom.api.com/v1" {
+		t.Errorf("baseURL = %q; want trailing slash stripped", got)
 	}
 }
 
@@ -108,13 +111,11 @@ func TestNewVoyageEmbedderCustomValues(t *testing.T) {
 
 func stubEmbedder(batchSize int) *VoyageEmbedder {
 	return &VoyageEmbedder{
-		apiKey:  "test-key",
-		baseURL: "http://localhost",
-		client:  &http.Client{},
-		model:   "voyage-code-3",
-		dim:     1024,
-		batch:   batchSize,
-		log:     slog.Default(),
+		rc:    resty.New().SetBaseURL("http://localhost").SetAuthToken("test-key"),
+		model: "voyage-code-3",
+		dim:   1024,
+		batch: batchSize,
+		log:   slog.Default(),
 	}
 }
 
@@ -339,13 +340,11 @@ func TestEmbedBatchEndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	emb := &VoyageEmbedder{
-		apiKey:  "test-key",
-		baseURL: srv.URL,
-		client:  srv.Client(),
-		model:   "voyage-code-3",
-		dim:     1024,
-		batch:   128,
-		log:     slog.Default(),
+		rc:    resty.NewWithClient(srv.Client()).SetBaseURL(srv.URL).SetAuthToken("test-key"),
+		model: "voyage-code-3",
+		dim:   1024,
+		batch: 128,
+		log:   slog.Default(),
 	}
 
 	inputs := []domain.EmbedInput{
@@ -376,13 +375,11 @@ func TestEmbedQueryEndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	emb := &VoyageEmbedder{
-		apiKey:  "test-key",
-		baseURL: srv.URL,
-		client:  srv.Client(),
-		model:   "voyage-code-3",
-		dim:     1024,
-		batch:   128,
-		log:     slog.Default(),
+		rc:    resty.NewWithClient(srv.Client()).SetBaseURL(srv.URL).SetAuthToken("test-key"),
+		model: "voyage-code-3",
+		dim:   1024,
+		batch: 128,
+		log:   slog.Default(),
 	}
 
 	vec, err := emb.EmbedQuery(context.Background(), "where is JWT validation?")
@@ -401,13 +398,11 @@ func TestEmbedBatchServerError(t *testing.T) {
 	defer srv.Close()
 
 	emb := &VoyageEmbedder{
-		apiKey:  "test-key",
-		baseURL: srv.URL,
-		client:  srv.Client(),
-		model:   "voyage-code-3",
-		dim:     1024,
-		batch:   128,
-		log:     slog.Default(),
+		rc:    resty.NewWithClient(srv.Client()).SetBaseURL(srv.URL).SetAuthToken("test-key"),
+		model: "voyage-code-3",
+		dim:   1024,
+		batch: 128,
+		log:   slog.Default(),
 	}
 
 	inputs := []domain.EmbedInput{{ID: "a", Text: "text"}}
@@ -437,14 +432,19 @@ func TestEmbedBatchRateLimitRetry(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	rc := resty.NewWithClient(srv.Client()).
+		SetBaseURL(srv.URL).
+		SetAuthToken("test-key").
+		SetRetryCount(3).
+		SetRetryWaitTime(10 * time.Millisecond).
+		SetRetryMaxWaitTime(50 * time.Millisecond).
+		SetAllowNonIdempotentRetry(true)
 	emb := &VoyageEmbedder{
-		apiKey:  "test-key",
-		baseURL: srv.URL,
-		client:  srv.Client(),
-		model:   "voyage-code-3",
-		dim:     1024,
-		batch:   128,
-		log:     slog.Default(),
+		rc:    rc,
+		model: "voyage-code-3",
+		dim:   1024,
+		batch: 128,
+		log:   slog.Default(),
 	}
 
 	inputs := []domain.EmbedInput{{ID: "a", Text: "text"}}

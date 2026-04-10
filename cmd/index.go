@@ -6,8 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/commit0-dev/commit0/internal/app"
-	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/adapters/client"
 )
 
 var indexCmd = &cobra.Command{
@@ -25,16 +24,12 @@ Examples:
   commit0 index                                              # current directory`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
-
 		arg := "."
 		if len(args) > 0 {
 			arg = args[0]
 		}
 
+		// Resolve GitHub URLs or local paths — this runs locally (git clone).
 		repoPath, repoSlug, err := resolveRepoSource(cmd.Context(), arg)
 		if err != nil {
 			return err
@@ -51,28 +46,23 @@ Examples:
 			}
 		}
 
-		svc, cleanup, err := wireIndexService(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
+		force, _ := cmd.Flags().GetBool("force")
 		fmt.Printf("Indexing %s as %q...\n", repoPath, repoSlug)
 
-		force, _ := cmd.Flags().GetBool("force")
-
-		result, err := svc.Index(cmd.Context(), app.IndexRequest{
+		c := client.New(serverURL(cmd))
+		progress, err := c.StartIndex(cmd.Context(), client.StartIndexRequest{
 			RepoPath:  repoPath,
 			RepoSlug:  repoSlug,
 			Languages: languages,
 			Force:     force,
+		}, func(p client.IndexProgress) {
+			fmt.Printf("\r  %d files, %d nodes...", p.FilesIndexed, p.NodesCreated)
 		})
 		if err != nil {
 			return fmt.Errorf("index: %w", err)
 		}
 
-		fmt.Printf("Indexed %d files, %d nodes in %dms\n",
-			result.FilesIndexed, result.NodesCreated, result.Timing.TotalMS)
+		fmt.Printf("\rIndexed %d files, %d nodes\n", progress.FilesIndexed, progress.NodesCreated)
 		return nil
 	},
 }

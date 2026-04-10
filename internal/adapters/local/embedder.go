@@ -1,24 +1,21 @@
 package local
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
+	"time"
+
+	"resty.dev/v3"
 
 	"github.com/commit0-dev/commit0/internal/domain"
-	"github.com/commit0-dev/commit0/internal/infra/retry"
 )
 
 const (
-	defaultEmbedModel    = "nomic-embed-text"
-	defaultEmbedDim      = 768
-	defaultEmbedBatch    = 50
-	maxEmbedRetryAttempts = 3
+	defaultEmbedModel = "nomic-embed-text"
+	defaultEmbedDim   = 768
+	defaultEmbedBatch = 50
 )
 
 // modelPrefixes maps known Ollama embedding models to their document/query
@@ -58,13 +55,12 @@ func queryPrefixForModel(model string) string {
 
 // OllamaEmbedder implements domain.Embedder using Ollama's POST /api/embed endpoint.
 type OllamaEmbedder struct {
-	baseURL   string
+	rc        *resty.Client
 	model     string
 	dim       int
 	docPrefix string
 	qryPrefix string
 	batch     int
-	client    *http.Client
 	log       *slog.Logger
 }
 
@@ -83,14 +79,21 @@ func NewOllamaEmbedder(baseURL, model string, dim int, log *slog.Logger) *Ollama
 		dim = defaultEmbedDim
 	}
 
+	rc := resty.New().
+		SetBaseURL(strings.TrimRight(baseURL, "/")).
+		SetTimeout(30 * time.Second).
+		SetRetryCount(3).
+		SetRetryWaitTime(100 * time.Millisecond).
+		SetRetryMaxWaitTime(2 * time.Second).
+		SetAllowNonIdempotentRetry(true)
+
 	return &OllamaEmbedder{
-		baseURL:   strings.TrimRight(baseURL, "/"),
+		rc:        rc,
 		model:     model,
 		dim:       dim,
 		docPrefix: DocPrefixForModel(model),
 		qryPrefix: queryPrefixForModel(model),
 		batch:     defaultEmbedBatch,
-		client:    &http.Client{},
 		log:       log.With("adapter", "ollama-embed", "model", model),
 	}
 }
@@ -172,48 +175,24 @@ func (e *OllamaEmbedder) EmbedQuery(ctx context.Context, query string) ([]float3
 	return embeddings[0], nil
 }
 
-// callAPI makes a POST request to Ollama's /api/embed endpoint with retry.
+// callAPI makes a POST request to Ollama's /api/embed endpoint.
+// Resty handles retry with exponential backoff for transient failures.
 func (e *OllamaEmbedder) callAPI(ctx context.Context, texts []string) ([][]float32, error) {
-	reqBody := ollamaEmbedRequest{
-		Model: e.model,
-		Input: texts,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
 	var respBody ollamaEmbedResponse
-	err = retry.WithRetry(ctx, maxEmbedRetryAttempts, func() error {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/api/embed", bytes.NewReader(bodyBytes))
-		if reqErr != nil {
-			return fmt.Errorf("create request: %w", reqErr)
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, doErr := e.client.Do(req)
-		if doErr != nil {
-			return classifyEmbedError(doErr)
-		}
-		defer resp.Body.Close()
-
-		respBytes, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return fmt.Errorf("read response: %w", readErr)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("ollama embed API: HTTP %d: %s", resp.StatusCode, string(respBytes))
-		}
-
-		if jsonErr := json.Unmarshal(respBytes, &respBody); jsonErr != nil {
-			return fmt.Errorf("unmarshal response: %w", jsonErr)
-		}
-		return nil
-	})
+	resp, err := e.rc.R().
+		SetContext(ctx).
+		SetBody(ollamaEmbedRequest{
+			Model: e.model,
+			Input: texts,
+		}).
+		SetResult(&respBody).
+		Post("/api/embed")
 	if err != nil {
-		return nil, err
+		return nil, classifyEmbedError(err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("ollama embed API: HTTP %d: %s", resp.StatusCode(), resp.String())
 	}
 
 	return respBody.Embeddings, nil

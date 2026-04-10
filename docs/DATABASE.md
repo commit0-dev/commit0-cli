@@ -508,7 +508,7 @@ DELETE repo:my_repo;    -- cascades through REFERENCE ON DELETE CASCADE
 
 SurrealDB 3.0's `DEFINE API` moves HTTP endpoint logic into the database itself.
 commit0 uses this to expose its core query operations as DB-native endpoints,
-reducing the Echo HTTP server to a thin proxy (or eliminating it for simple
+reducing the Gin HTTP server to a thin proxy (or eliminating it for simple
 deployments).
 
 ### 8.1 Middleware

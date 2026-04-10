@@ -7,8 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/commit0-dev/commit0/internal/app"
-	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/adapters/client"
 )
 
 var repoCmd = &cobra.Command{
@@ -19,19 +18,10 @@ var repoCmd = &cobra.Command{
 var repoListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all indexed repositories",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		c := client.New(serverURL(cmd))
 
-		svc, cleanup, err := wireRepoService(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		repos, err := svc.ListRepos(cmd.Context())
+		repos, err := c.ListRepos(cmd.Context())
 		if err != nil {
 			return fmt.Errorf("list repos: %w", err)
 		}
@@ -65,18 +55,9 @@ var repoGetCmd = &cobra.Command{
 	Short: "Show details for a repository",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
+		c := client.New(serverURL(cmd))
 
-		svc, cleanup, err := wireRepoService(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		repo, err := svc.GetRepo(cmd.Context(), args[0])
+		repo, err := c.GetRepo(cmd.Context(), args[0])
 		if err != nil {
 			return fmt.Errorf("get repo: %w", err)
 		}
@@ -105,18 +86,9 @@ var repoDeleteCmd = &cobra.Command{
 	Short: "Delete a repository and all its indexed nodes",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
+		c := client.New(serverURL(cmd))
 
-		svc, cleanup, err := wireRepoService(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		repo, err := svc.DeleteRepo(cmd.Context(), args[0])
+		repo, err := c.DeleteRepo(cmd.Context(), args[0])
 		if err != nil {
 			return fmt.Errorf("delete repo: %w", err)
 		}
@@ -131,10 +103,7 @@ var repoCreateCmd = &cobra.Command{
 	Short: "Register a repository (without indexing)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
+		c := client.New(serverURL(cmd))
 
 		path, _ := cmd.Flags().GetString("path")
 		remote, _ := cmd.Flags().GetString("remote")
@@ -147,13 +116,7 @@ var repoCreateCmd = &cobra.Command{
 			}
 		}
 
-		svc, cleanup, err := wireRepoService(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		repo, err := svc.CreateRepo(cmd.Context(), app.CreateRepoRequest{
+		repo, err := c.CreateRepo(cmd.Context(), client.CreateRepoRequest{
 			Slug:      args[0],
 			Path:      path,
 			RemoteURL: remote,

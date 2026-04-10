@@ -49,6 +49,7 @@ var serveCmd = &cobra.Command{
 			svcs.flow,
 			svcs.temporal,
 			svcs.rootCause,
+			svcs.apiSurface,
 			&cfg.Server,
 		)
 

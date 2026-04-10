@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/gin-gonic/gin"
 
 	"github.com/commit0-dev/commit0/internal/app"
 )
@@ -49,7 +49,6 @@ func (s *indexJobStore) get(id string) (*IndexJob, bool) {
 	if !ok {
 		return nil, false
 	}
-	// Return a copy so callers can read fields without holding the lock.
 	copy := *job
 	return &copy, true
 }
@@ -79,25 +78,29 @@ type startIndexRequest struct {
 	RepoSlug  string   `json:"repo_slug"`
 	Languages []string `json:"languages"`
 	Exclude   []string `json:"exclude"`
+	Force     bool     `json:"force"`
 }
 
 // handleStartIndex handles POST /api/v1/index.
-// It starts the index operation asynchronously and returns the job ID.
-func (s *Server) handleStartIndex(c echo.Context) error {
+func (s *Server) handleStartIndex(c *gin.Context) {
 	var req startIndexRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
 	}
 	if req.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "repo_path is required")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "repo_path is required"})
+		return
 	}
 	if req.RepoSlug == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "repo_slug is required")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "repo_slug is required"})
+		return
 	}
 
 	jobID, err := newJobID()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate job ID")
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to generate job ID"})
+		return
 	}
 
 	job := &IndexJob{
@@ -108,9 +111,6 @@ func (s *Server) handleStartIndex(c echo.Context) error {
 	}
 	s.jobs.set(job)
 
-	// Run indexing in background; use a detached context so canceling the
-	// HTTP request does not abort the index job.
-	// Report incremental progress to the job store for polling.
 	go func() {
 		onProgress := func(filesIndexed, nodesCreated int) {
 			s.jobs.update(jobID, func(j *IndexJob) {
@@ -123,6 +123,7 @@ func (s *Server) handleStartIndex(c echo.Context) error {
 			RepoPath:  req.RepoPath,
 			RepoSlug:  req.RepoSlug,
 			Languages: req.Languages,
+			Force:     req.Force,
 		}, onProgress)
 
 		s.jobs.update(jobID, func(j *IndexJob) {
@@ -140,15 +141,16 @@ func (s *Server) handleStartIndex(c echo.Context) error {
 		})
 	}()
 
-	return c.JSON(http.StatusAccepted, map[string]string{"job_id": jobID})
+	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
 }
 
 // handleIndexStatus handles GET /api/v1/index/:job_id.
-func (s *Server) handleIndexStatus(c echo.Context) error {
+func (s *Server) handleIndexStatus(c *gin.Context) {
 	jobID := c.Param("job_id")
 	job, ok := s.jobs.get(jobID)
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "job not found")
+		c.JSON(http.StatusNotFound, gin.H{"message": "job not found"})
+		return
 	}
-	return c.JSON(http.StatusOK, job)
+	c.JSON(http.StatusOK, job)
 }

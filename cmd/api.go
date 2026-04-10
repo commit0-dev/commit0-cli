@@ -9,8 +9,7 @@ import (
 	"github.com/olekukonko/tablewriter/tw"
 	"github.com/spf13/cobra"
 
-	"github.com/commit0-dev/commit0/internal/app"
-	"github.com/commit0-dev/commit0/internal/config"
+	"github.com/commit0-dev/commit0/internal/adapters/client"
 )
 
 var apiCmd = &cobra.Command{
@@ -22,21 +21,12 @@ var apiDiscoverCmd = &cobra.Command{
 	Use:   "discover",
 	Short: "Discover all HTTP API endpoints from the code graph",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
-
 		repoSlug, _ := cmd.Flags().GetString("repo")
 
-		svcs, err := wireServeServices(cmd.Context(), cfg)
-		if err != nil {
-			return fmt.Errorf("wire services: %w", err)
-		}
-		defer svcs.cleanup()
-
-		apiSvc := app.NewAPISurfaceService(svcs.db, svcs.flow, nil, cfg)
-		surface, err := apiSvc.Discover(cmd.Context(), repoSlug)
+		c := client.New(serverURL(cmd))
+		surface, err := c.APIDiscover(cmd.Context(), client.APIDiscoverRequest{
+			RepoSlug: repoSlug,
+		})
 		if err != nil {
 			return fmt.Errorf("discover: %w", err)
 		}
@@ -75,7 +65,6 @@ var apiDiscoverCmd = &cobra.Command{
 		}
 		tbl.Render() //nolint:errcheck
 
-		// Summary.
 		noAuth := 0
 		for _, ep := range surface.Endpoints {
 			if len(ep.AuthChain) == 0 {
@@ -95,26 +84,10 @@ var apiSpecCmd = &cobra.Command{
 	Use:   "spec",
 	Short: "Generate OpenAPI 3.0 specification from the code graph",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		cfg, err := config.Load(configPath(cmd))
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
-
 		repoSlug, _ := cmd.Flags().GetString("repo")
 
-		svcs, err := wireServeServices(cmd.Context(), cfg)
-		if err != nil {
-			return fmt.Errorf("wire services: %w", err)
-		}
-		defer svcs.cleanup()
-
-		apiSvc := app.NewAPISurfaceService(svcs.db, svcs.flow, nil, cfg)
-		surface, err := apiSvc.Discover(cmd.Context(), repoSlug)
-		if err != nil {
-			return fmt.Errorf("discover: %w", err)
-		}
-
-		spec, err := apiSvc.GenerateOpenAPI(cmd.Context(), surface)
+		c := client.New(serverURL(cmd))
+		spec, err := c.APISpec(cmd.Context(), repoSlug)
 		if err != nil {
 			return fmt.Errorf("generate openapi: %w", err)
 		}

@@ -1,18 +1,18 @@
 package voyage
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
+
+	"resty.dev/v3"
 
 	"github.com/commit0-dev/commit0/internal/config"
 	"github.com/commit0-dev/commit0/internal/domain"
-	"github.com/commit0-dev/commit0/internal/infra/retry"
 )
 
 const (
@@ -21,18 +21,15 @@ const (
 	defaultBatchSize = 128
 	maxBatchSize     = 128
 	defaultBaseURL   = "https://api.voyageai.com/v1"
-	maxRetryAttempts = 3
 )
 
 // VoyageEmbedder implements domain.Embedder using the Voyage AI REST API.
 type VoyageEmbedder struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
-	log     *slog.Logger
-	model   string
-	dim     int
-	batch   int
+	rc    *resty.Client
+	log   *slog.Logger
+	model string
+	dim   int
+	batch int
 }
 
 // Compile-time interface check.
@@ -62,14 +59,21 @@ func NewVoyageEmbedder(cfg *config.VoyageConfig, log *slog.Logger) (*VoyageEmbed
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
+	rc := resty.New().
+		SetBaseURL(baseURL).
+		SetAuthToken(cfg.APIKey).
+		SetTimeout(30 * time.Second).
+		SetRetryCount(3).
+		SetRetryWaitTime(100 * time.Millisecond).
+		SetRetryMaxWaitTime(2 * time.Second).
+		SetAllowNonIdempotentRetry(true)
+
 	return &VoyageEmbedder{
-		apiKey:  cfg.APIKey,
-		baseURL: baseURL,
-		client:  &http.Client{},
-		log:     log,
-		model:   model,
-		dim:     dim,
-		batch:   batch,
+		rc:    rc,
+		log:   log,
+		model: model,
+		dim:   dim,
+		batch: batch,
 	}, nil
 }
 
@@ -166,51 +170,26 @@ func (e *VoyageEmbedder) EmbedQuery(ctx context.Context, query string) ([]float3
 	return embeddings[0], nil
 }
 
-// callAPI makes a POST request to the Voyage AI embeddings endpoint with retry.
+// callAPI makes a POST request to the Voyage AI embeddings endpoint.
+// Resty handles retry with exponential backoff for 429/500+ responses.
 func (e *VoyageEmbedder) callAPI(ctx context.Context, texts []string, inputType string) ([][]float32, error) {
-	reqBody := embeddingRequest{
-		Model:           e.model,
-		Input:           texts,
-		InputType:       inputType,
-		OutputDimension: &e.dim,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
 	var respBody embeddingResponse
-	err = retry.WithRetry(ctx, maxRetryAttempts, func() error {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/embeddings", bytes.NewReader(bodyBytes))
-		if reqErr != nil {
-			return fmt.Errorf("create request: %w", reqErr)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-
-		resp, doErr := e.client.Do(req)
-		if doErr != nil {
-			return classifyError(doErr)
-		}
-		defer resp.Body.Close()
-
-		respBytes, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return fmt.Errorf("read response: %w", readErr)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return classifyHTTPError(resp.StatusCode, respBytes)
-		}
-
-		if jsonErr := json.Unmarshal(respBytes, &respBody); jsonErr != nil {
-			return fmt.Errorf("unmarshal response: %w", jsonErr)
-		}
-		return nil
-	})
+	resp, err := e.rc.R().
+		SetContext(ctx).
+		SetBody(embeddingRequest{
+			Model:           e.model,
+			Input:           texts,
+			InputType:       inputType,
+			OutputDimension: &e.dim,
+		}).
+		SetResult(&respBody).
+		Post("/embeddings")
 	if err != nil {
-		return nil, err
+		return nil, classifyError(err)
+	}
+
+	if resp.IsError() {
+		return nil, classifyHTTPError(resp.StatusCode(), resp.Bytes())
 	}
 
 	// Sort by index to guarantee order matches input.

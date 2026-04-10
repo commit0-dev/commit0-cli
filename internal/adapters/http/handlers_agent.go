@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/labstack/echo/v4"
+	"github.com/gin-gonic/gin"
 
 	"github.com/commit0-dev/commit0/internal/domain"
 )
 
 // handleAgentChat handles POST /api/v1/agent/chat with SSE streaming.
 // The agent reasons, calls tools, and streams events back in real-time.
-func (s *Server) handleAgentChat(c echo.Context) error {
+func (s *Server) handleAgentChat(c *gin.Context) {
 	if s.agentRunner == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent service not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "agent service not available"})
+		return
 	}
 
 	var req struct {
@@ -22,33 +23,34 @@ func (s *Server) handleAgentChat(c echo.Context) error {
 		Message   string `json:"message"`
 		RepoSlug  string `json:"repo_slug"`
 	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
 	}
 	if req.Message == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+		c.JSON(http.StatusBadRequest, gin.H{"message": "message is required"})
+		return
 	}
 
-	events, err := s.agentRunner.Chat(c.Request().Context(), domain.ChatRequest{
+	events, err := s.agentRunner.Chat(c.Request.Context(), domain.ChatRequest{
 		SessionID: req.SessionID,
 		RepoSlug:  req.RepoSlug,
 		Message:   req.Message,
 	})
 	if err != nil {
-		return httpError(err)
+		writeError(c, err)
+		return
 	}
 
-	// Switch to SSE mode
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("X-Accel-Buffering", "no")
-	c.Response().WriteHeader(http.StatusOK)
+	// Switch to SSE mode.
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
 
 	for event := range events {
 		data, _ := json.Marshal(event)
-		fmt.Fprintf(c.Response(), "event: %s\ndata: %s\n\n", event.Type, data)
-		c.Response().Flush()
+		fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Type, data)
+		c.Writer.Flush()
 	}
-
-	return nil
 }

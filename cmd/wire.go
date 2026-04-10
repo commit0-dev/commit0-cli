@@ -8,7 +8,10 @@ import (
 
 	"google.golang.org/genai"
 
+	adkmodel "google.golang.org/adk/model"
+
 	"github.com/commit0-dev/commit0/internal/adapters/gemini"
+	"github.com/commit0-dev/commit0/internal/adapters/openrouter"
 	gitadapter "github.com/commit0-dev/commit0/internal/adapters/git"
 	localadapter "github.com/commit0-dev/commit0/internal/adapters/local"
 	"github.com/commit0-dev/commit0/internal/adapters/surreal"
@@ -17,6 +20,7 @@ import (
 	"github.com/commit0-dev/commit0/internal/adapters/voyage"
 	"github.com/commit0-dev/commit0/internal/adapters/walker"
 	"github.com/commit0-dev/commit0/internal/app"
+	"github.com/commit0-dev/commit0/internal/app/memory"
 	"github.com/commit0-dev/commit0/internal/config"
 	"github.com/commit0-dev/commit0/internal/domain"
 )
@@ -168,71 +172,22 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	}, cleanup, nil
 }
 
-func wireIndexService(ctx context.Context, cfg *config.Config) (*app.IndexService, func(), error) {
-	d, cleanup, err := wireDeps(ctx, cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	svc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg)
-	if cfg.EmbedProvider == "ollama" {
-		svc.SetDocPrefix(localadapter.DocPrefixForModel(cfg.Ollama.EmbedModel))
-	}
-	// Wire temporal service for CLI indexing
-	gitW := gitadapter.NewWalker(slog.Default())
-	tempSvc := app.NewTemporalService(d.db, nil, gitW, d.parser)
-	svc.SetTemporalService(tempSvc)
-	return svc, cleanup, nil
-}
-
-func wireQueryService(ctx context.Context, cfg *config.Config) (*app.QueryService, func(), error) {
-	d, cleanup, err := wireDeps(ctx, cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	svc := app.NewQueryService(d.embedder, d.db.AsVectorIndex(), d.db.AsTextIndex(), d.db, d.explainer, cfg)
-	return svc, cleanup, nil
-}
-
-func wireTraceService(ctx context.Context, cfg *config.Config) (*app.TraceService, func(), error) {
-	d, cleanup, err := wireDeps(ctx, cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	svc := app.NewTraceService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg)
-	return svc, cleanup, nil
-}
-
-func wireBlastService(ctx context.Context, cfg *config.Config) (*app.BlastService, func(), error) {
-	d, cleanup, err := wireDeps(ctx, cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	svc := app.NewBlastService(d.db, d.explainer, cfg)
-	return svc, cleanup, nil
-}
-
-func wireRepoService(ctx context.Context, cfg *config.Config) (*app.RepoService, func(), error) {
-	d, cleanup, err := wireDeps(ctx, cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	svc := app.NewRepoService(d.db)
-	return svc, cleanup, nil
-}
-
 // serveServices holds all services wired from a single shared deps instance.
 type serveServices struct {
-	index     *app.IndexService
-	query     *app.QueryService
-	trace     *app.TraceService
-	blast     *app.BlastService
-	repo      *app.RepoService
-	db        domain.GraphStore
-	agent     domain.AgentRunner
-	flow      *app.FieldFlowService
-	temporal  *app.TemporalService
-	rootCause *app.RootCauseAnalysisService
-	cleanup   func()
+	index      *app.IndexService
+	query      *app.QueryService
+	trace      *app.TraceService
+	blast      *app.BlastService
+	repo       *app.RepoService
+	db         domain.GraphStore
+	agent      domain.AgentRunner
+	flow       *app.FieldFlowService
+	temporal   *app.TemporalService
+	rootCause  *app.RootCauseAnalysisService
+	apiSurface *app.APISurfaceService
+	memMgr     *memory.Manager
+	sessionSvc app.SessionStore
+	cleanup    func()
 }
 
 // wireServeServices builds all services from one shared deps instance so the
@@ -253,11 +208,23 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	tempSvc := app.NewTemporalService(d.db, nil, gitW, d.parser)
 	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, tempSvc, d.db, gitW, d.explainer, cfg)
 
+	// Memory management (3-tier: working → session → persistent).
+	memMgr := memory.NewManager(d.db.AsMemoryStore(), d.embedder, nil, memory.DefaultBudgets())
+	sessionSvc := d.db.AsSessionStore() // SurrealDB-backed session persistence
+
 	// Agent service (optional — constructor decides availability based on config).
+	// Create LLM model based on provider.
+	var llmModel adkmodel.LLM // nil = use Gemini fallback in AgentService
+	if cfg.LLMProvider == "openrouter" && cfg.OpenRouter.APIKey != "" {
+		orClient := openrouter.NewClient(cfg.OpenRouter.APIKey, cfg.OpenRouter.BaseURL)
+		llmModel = openrouter.NewModel(orClient, cfg.OpenRouter.Model, cfg.OpenRouter.MaxTokens)
+		log.Info("using OpenRouter LLM", "model", cfg.OpenRouter.Model)
+	}
+
 	var agentRunner domain.AgentRunner
 	agentSvc, err := agentpkg.NewAgentService(
 		querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc,
-		d.db, gitW, d.explainer, cfg,
+		d.db, gitW, d.explainer, cfg, memMgr, llmModel,
 	)
 	if err != nil {
 		log.Warn("agent service unavailable", "err", err)
@@ -271,17 +238,22 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	}
 	indexSvc.SetTemporalService(tempSvc)
 
+	apiSurfaceSvc := app.NewAPISurfaceService(d.db, flowSvc, d.explainer, cfg)
+
 	return &serveServices{
-		index:     indexSvc,
-		query:     querySvc,
-		trace:     traceSvc,
-		blast:     blastSvc,
-		repo:      app.NewRepoService(d.db),
-		db:        d.db,
-		agent:     agentRunner,
-		flow:      flowSvc,
-		temporal:  tempSvc,
-		rootCause: rootCauseSvc,
-		cleanup:   cleanup,
+		index:      indexSvc,
+		query:      querySvc,
+		trace:      traceSvc,
+		blast:      blastSvc,
+		repo:       app.NewRepoService(d.db),
+		db:         d.db,
+		agent:      agentRunner,
+		flow:       flowSvc,
+		temporal:   tempSvc,
+		rootCause:  rootCauseSvc,
+		apiSurface: apiSurfaceSvc,
+		memMgr:     memMgr,
+		sessionSvc: sessionSvc,
+		cleanup:    cleanup,
 	}, nil
 }
