@@ -41,8 +41,9 @@ DEFINE FIELD OVERWRITE language     ON file TYPE string;
 DEFINE FIELD OVERWRITE content_hash ON file TYPE string;
 DEFINE FIELD OVERWRITE line_count   ON file TYPE int VALUE 0;
 DEFINE FIELD OVERWRITE size_bytes   ON file TYPE int VALUE 0;
-DEFINE FIELD OVERWRITE embedding    ON file TYPE option<array<float>>;
-DEFINE FIELD OVERWRITE summary      ON file TYPE option<string>;
+DEFINE FIELD OVERWRITE embedding       ON file TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE embed_provider  ON file TYPE option<string>;
+DEFINE FIELD OVERWRITE summary         ON file TYPE option<string>;
 DEFINE FIELD OVERWRITE concepts     ON file TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at   ON file TYPE datetime VALUE time::now();
 
@@ -69,8 +70,9 @@ DEFINE FIELD OVERWRITE docstring    ON `function` TYPE option<string>;
 DEFINE FIELD OVERWRITE body         ON `function` TYPE string;
 DEFINE FIELD OVERWRITE language     ON `function` TYPE string;
 DEFINE FIELD OVERWRITE content_hash ON `function` TYPE string;
-DEFINE FIELD OVERWRITE embedding    ON `function` TYPE option<array<float>>;
-DEFINE FIELD OVERWRITE summary      ON `function` TYPE option<string>;
+DEFINE FIELD OVERWRITE embedding       ON `function` TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE embed_provider  ON `function` TYPE option<string>;
+DEFINE FIELD OVERWRITE summary         ON `function` TYPE option<string>;
 DEFINE FIELD OVERWRITE concepts     ON `function` TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at   ON `function` TYPE datetime VALUE time::now();
 DEFINE FIELD OVERWRITE visibility   ON `function` TYPE string VALUE "public"
@@ -104,8 +106,9 @@ DEFINE FIELD OVERWRITE language     ON class TYPE string;
 DEFINE FIELD OVERWRITE kind         ON class TYPE string VALUE "class"
     ASSERT $value IN ["class", "struct", "interface", "enum", "trait", "protocol"];
 DEFINE FIELD OVERWRITE content_hash ON class TYPE string;
-DEFINE FIELD OVERWRITE embedding    ON class TYPE option<array<float>>;
-DEFINE FIELD OVERWRITE summary      ON class TYPE option<string>;
+DEFINE FIELD OVERWRITE embedding       ON class TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE embed_provider  ON class TYPE option<string>;
+DEFINE FIELD OVERWRITE summary         ON class TYPE option<string>;
 DEFINE FIELD OVERWRITE concepts     ON class TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at   ON class TYPE datetime VALUE time::now();
 
@@ -126,8 +129,9 @@ DEFINE FIELD OVERWRITE repo_slug  ON module TYPE string;
 DEFINE FIELD OVERWRITE repo       ON module TYPE record<repo> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD OVERWRITE language   ON module TYPE string;
 DEFINE FIELD OVERWRITE docstring  ON module TYPE option<string>;
-DEFINE FIELD OVERWRITE embedding  ON module TYPE option<array<float>>;
-DEFINE FIELD OVERWRITE summary    ON module TYPE option<string>;
+DEFINE FIELD OVERWRITE embedding       ON module TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE embed_provider  ON module TYPE option<string>;
+DEFINE FIELD OVERWRITE summary         ON module TYPE option<string>;
 DEFINE FIELD OVERWRITE concepts   ON module TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at ON module TYPE datetime VALUE time::now();
 

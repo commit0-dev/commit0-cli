@@ -13,6 +13,8 @@ import (
 type Config struct {
 	EmbedProvider string // "gemini" (default), "voyage", or "ollama"
 	LLMProvider   string // "gemini" (default), "openrouter", or "ollama"
+	EmbedDim      int    // Normalized HNSW dimension for all providers (default 1024, env: EMBED_DIM)
+	BatchSize     int    // Embedding batch size for all providers (default 100, env: BATCH_SIZE)
 	Surreal       SurrealConfig
 	Gemini        GeminiConfig
 	Voyage        VoyageConfig
@@ -36,7 +38,6 @@ type OllamaConfig struct {
 	URL        string // Ollama API URL (default: http://localhost:11434)
 	Model      string // LLM model name (e.g. "gemma3:4b"). If set, uses local LLM.
 	EmbedModel string // Embedding model (default: "nomic-embed-text")
-	EmbedDim   int    // Embedding dimension (default: 768)
 }
 
 // ServerConfig holds HTTP server settings.
@@ -49,32 +50,28 @@ type ServerConfig struct {
 
 // SurrealConfig holds SurrealDB connection settings.
 type SurrealConfig struct {
-	URL              string
-	User             string
-	Pass             string
-	Namespace        string
-	Database         string
-	ConnectTimeoutS  int // Max seconds to wait for initial connection (default 30)
-	RPCTimeoutS      int // Max seconds per RPC call (default 300)
-	StartupRetries   int // Number of retries for connection + schema on startup (default 5)
+	URL             string
+	User            string
+	Pass            string
+	Namespace       string
+	Database        string
+	ConnectTimeoutS int // Max seconds to wait for initial connection (default 30)
+	RPCTimeoutS     int // Max seconds per RPC call (default 300)
+	StartupRetries  int // Number of retries for connection + schema on startup (default 5)
 }
 
 // GeminiConfig holds Gemini API settings.
 type GeminiConfig struct {
-	APIKey         string
-	EmbedModel     string
-	ExplainModel   string
-	EmbedDimension int
-	MaxBatchSize   int
+	APIKey       string
+	EmbedModel   string
+	ExplainModel string
 }
 
 // VoyageConfig holds Voyage AI API settings.
 type VoyageConfig struct {
-	APIKey         string
-	Model          string
-	BaseURL        string
-	EmbedDimension int
-	MaxBatchSize   int
+	APIKey  string
+	Model   string
+	BaseURL string
 }
 
 // IndexConfig holds indexing configuration.
@@ -83,7 +80,6 @@ type IndexConfig struct {
 	MaxWorkersEmbed int
 	MaxWorkersStore int
 	MaxFileKB       int
-	BatchSize       int
 }
 
 // QueryConfig holds query configuration.
@@ -94,26 +90,18 @@ type QueryConfig struct {
 }
 
 // Load reads configuration via Viper (env vars, optional config file).
-// If cfgPath is non-empty, that file is loaded (YAML, JSON, TOML supported).
-// A .env file is auto-discovered by walking up from the working directory;
-// real environment variables always take precedence over .env values.
 func Load(cfgPath string) (*Config, error) {
 	LoadDotEnv()
 
 	v := viper.New()
 
-	// --- Key bindings and defaults ---
 	setDefaults(v)
 
-	// Env vars: automatic binding with the same key names.
-	// Viper normalises keys to lowercase; env vars are uppercased via SetEnvKeyReplacer.
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// Explicit env bindings (Viper key → env var name).
 	bindEnvs(v)
 
-	// --- Optional config file ---
 	if cfgPath != "" {
 		v.SetConfigFile(cfgPath)
 		if err := v.ReadInConfig(); err != nil {
@@ -131,6 +119,8 @@ func Load(cfgPath string) (*Config, error) {
 		},
 		EmbedProvider: v.GetString("embed.provider"),
 		LLMProvider:   v.GetString("llm.provider"),
+		EmbedDim:      v.GetInt("embed.dim"),
+		BatchSize:     v.GetInt("embed.batch_size"),
 		OpenRouter: OpenRouterConfig{
 			APIKey:    v.GetString("openrouter.api_key"),
 			BaseURL:   v.GetString("openrouter.base_url"),
@@ -141,28 +131,22 @@ func Load(cfgPath string) (*Config, error) {
 			URL:        v.GetString("ollama.url"),
 			Model:      v.GetString("ollama.model"),
 			EmbedModel: v.GetString("ollama.embed_model"),
-			EmbedDim:   v.GetInt("ollama.embed_dim"),
 		},
 		Gemini: GeminiConfig{
-			APIKey:         v.GetString("gemini.api_key"),
-			EmbedModel:     v.GetString("gemini.embed_model"),
-			ExplainModel:   v.GetString("gemini.explain_model"),
-			EmbedDimension: v.GetInt("gemini.embed_dimension"),
-			MaxBatchSize:   v.GetInt("gemini.max_batch_size"),
+			APIKey:       v.GetString("gemini.api_key"),
+			EmbedModel:   v.GetString("gemini.embed_model"),
+			ExplainModel: v.GetString("gemini.explain_model"),
 		},
 		Voyage: VoyageConfig{
-			APIKey:         v.GetString("voyage.api_key"),
-			Model:          v.GetString("voyage.model"),
-			EmbedDimension: v.GetInt("voyage.embed_dimension"),
-			MaxBatchSize:   v.GetInt("voyage.max_batch_size"),
-			BaseURL:        v.GetString("voyage.base_url"),
+			APIKey:  v.GetString("voyage.api_key"),
+			Model:   v.GetString("voyage.model"),
+			BaseURL: v.GetString("voyage.base_url"),
 		},
 		Index: IndexConfig{
 			MaxWorkersParse: v.GetInt("index.max_workers_parse"),
 			MaxWorkersEmbed: v.GetInt("index.max_workers_embed"),
 			MaxWorkersStore: v.GetInt("index.max_workers_store"),
 			MaxFileKB:       v.GetInt("index.max_file_kb"),
-			BatchSize:       v.GetInt("index.batch_size"),
 		},
 		Query: QueryConfig{
 			DefaultTopK:  v.GetInt("query.default_top_k"),
@@ -186,11 +170,8 @@ func Load(cfgPath string) (*Config, error) {
 			return nil, domain.Validation("VOYAGE_API_KEY is required when EMBED_PROVIDER=voyage")
 		}
 	default:
-		// "gemini" or empty (default)
 		cfg.EmbedProvider = "gemini"
 		if cfg.Gemini.APIKey == "" {
-			// Allow keyless startup when local model is set — LLM features
-			// will fall back to Ollama, but embeddings still need a provider.
 			if cfg.Ollama.Model != "" {
 				return nil, domain.Validation("GEMINI_API_KEY is required for embeddings (or set EMBED_PROVIDER=ollama for fully local mode)")
 			}
@@ -212,6 +193,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("surreal.startup_retries", 5)
 
 	v.SetDefault("embed.provider", "gemini")
+	v.SetDefault("embed.dim", 1024)
+	v.SetDefault("embed.batch_size", 100)
 	v.SetDefault("llm.provider", "gemini")
 
 	v.SetDefault("openrouter.base_url", "https://openrouter.ai/api/v1")
@@ -221,23 +204,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ollama.url", "http://localhost:11434")
 	v.SetDefault("ollama.model", "")
 	v.SetDefault("ollama.embed_model", "nomic-embed-text")
-	v.SetDefault("ollama.embed_dim", 768)
 
 	v.SetDefault("voyage.model", "voyage-code-3")
-	v.SetDefault("voyage.embed_dimension", 1024)
-	v.SetDefault("voyage.max_batch_size", 128)
 	v.SetDefault("voyage.base_url", "https://api.voyageai.com/v1")
 
 	v.SetDefault("gemini.embed_model", "gemini-embedding-2-preview")
 	v.SetDefault("gemini.explain_model", "gemini-2.5-flash")
-	v.SetDefault("gemini.embed_dimension", 3072)
-	v.SetDefault("gemini.max_batch_size", 100)
 
-	v.SetDefault("index.max_workers_parse", 0) // 0 = GOMAXPROCS
+	v.SetDefault("index.max_workers_parse", 0)
 	v.SetDefault("index.max_workers_embed", 4)
 	v.SetDefault("index.max_workers_store", 4)
 	v.SetDefault("index.max_file_kb", 10000)
-	v.SetDefault("index.batch_size", 100)
 
 	v.SetDefault("query.default_top_k", 10)
 	v.SetDefault("query.min_score", 0.5)
@@ -258,35 +235,32 @@ func bindEnvs(v *viper.Viper) {
 		"surreal.namespace": "SURREAL_NAMESPACE",
 		"surreal.database":  "SURREAL_DATABASE",
 
-		"embed.provider":     "EMBED_PROVIDER",
-		"llm.provider":       "LLM_PROVIDER",
+		"embed.provider":   "EMBED_PROVIDER",
+		"embed.dim":        "EMBED_DIM",
+		"embed.batch_size": "BATCH_SIZE",
+		"llm.provider":     "LLM_PROVIDER",
 
 		"openrouter.api_key":    "OPENROUTER_API_KEY",
 		"openrouter.base_url":   "OPENROUTER_BASE_URL",
 		"openrouter.model":      "OPENROUTER_MODEL",
 		"openrouter.max_tokens": "OPENROUTER_MAX_TOKENS",
+
 		"ollama.url":         "OLLAMA_URL",
 		"ollama.model":       "OLLAMA_MODEL",
 		"ollama.embed_model": "OLLAMA_EMBED_MODEL",
-		"ollama.embed_dim":   "OLLAMA_EMBED_DIM",
 
-		"voyage.api_key":         "VOYAGE_API_KEY",
-		"voyage.model":           "VOYAGE_MODEL",
-		"voyage.embed_dimension": "VOYAGE_EMBED_DIM",
-		"voyage.max_batch_size":  "VOYAGE_BATCH_SIZE",
-		"voyage.base_url":        "VOYAGE_BASE_URL",
+		"voyage.api_key": "VOYAGE_API_KEY",
+		"voyage.model":   "VOYAGE_MODEL",
+		"voyage.base_url": "VOYAGE_BASE_URL",
 
-		"gemini.api_key":         "GEMINI_API_KEY",
-		"gemini.embed_model":     "GEMINI_EMBED_MODEL",
-		"gemini.explain_model":   "GEMINI_EXPLAIN_MODEL",
-		"gemini.embed_dimension": "GEMINI_EMBED_DIM",
-		"gemini.max_batch_size":  "GEMINI_BATCH_SIZE",
+		"gemini.api_key":       "GEMINI_API_KEY",
+		"gemini.embed_model":   "GEMINI_EMBED_MODEL",
+		"gemini.explain_model": "GEMINI_EXPLAIN_MODEL",
 
 		"index.max_workers_parse": "INDEX_WORKERS_PARSE",
 		"index.max_workers_embed": "INDEX_WORKERS_EMBED",
 		"index.max_workers_store": "INDEX_WORKERS_STORE",
 		"index.max_file_kb":       "INDEX_MAX_FILE_KB",
-		"index.batch_size":        "INDEX_BATCH_SIZE",
 
 		"query.default_top_k":  "QUERY_DEFAULT_TOP_K",
 		"query.min_score":      "QUERY_MIN_SCORE",

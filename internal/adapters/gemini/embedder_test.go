@@ -61,8 +61,7 @@ func TestNewGeminiClientNilAPIKey(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewGeminiEmbedderNilClient(t *testing.T) {
-	cfg := &config.GeminiConfig{}
-	_, err := NewGeminiEmbedder(nil, cfg, slog.Default())
+	_, err := NewGeminiEmbedder(nil, "", 0, 0, slog.Default())
 	if err == nil {
 		t.Fatal("expected error for nil client, got nil")
 	}
@@ -359,8 +358,7 @@ func TestEmbedQueryCancelledContext(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewGeminiEmbedderDefaultModel(t *testing.T) {
-	cfg := &config.GeminiConfig{EmbedModel: ""}
-	emb, err := NewGeminiEmbedder(zeroClient(), cfg, slog.Default())
+	emb, err := NewGeminiEmbedder(zeroClient(), "", 0, 0, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -370,19 +368,17 @@ func TestNewGeminiEmbedderDefaultModel(t *testing.T) {
 }
 
 func TestNewGeminiEmbedderDefaultDim(t *testing.T) {
-	cfg := &config.GeminiConfig{EmbedDimension: 0}
-	emb, err := NewGeminiEmbedder(zeroClient(), cfg, slog.Default())
+	emb, err := NewGeminiEmbedder(zeroClient(), "", 0, 0, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if emb.dim != 3072 {
-		t.Errorf("expected default dim 3072, got %d", emb.dim)
+	if emb.dim != 1024 {
+		t.Errorf("expected default dim 1024, got %d", emb.dim)
 	}
 }
 
 func TestNewGeminiEmbedderDefaultBatch(t *testing.T) {
-	cfg := &config.GeminiConfig{MaxBatchSize: 0}
-	emb, err := NewGeminiEmbedder(zeroClient(), cfg, slog.Default())
+	emb, err := NewGeminiEmbedder(zeroClient(), "", 1024, 0, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -392,8 +388,7 @@ func TestNewGeminiEmbedderDefaultBatch(t *testing.T) {
 }
 
 func TestNewGeminiEmbedderOversizedBatchClamped(t *testing.T) {
-	cfg := &config.GeminiConfig{MaxBatchSize: 200}
-	emb, err := NewGeminiEmbedder(zeroClient(), cfg, slog.Default())
+	emb, err := NewGeminiEmbedder(zeroClient(), "", 1024, 200, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -403,12 +398,7 @@ func TestNewGeminiEmbedderOversizedBatchClamped(t *testing.T) {
 }
 
 func TestNewGeminiEmbedderCustomValues(t *testing.T) {
-	cfg := &config.GeminiConfig{
-		EmbedModel:     "custom-model",
-		EmbedDimension: 512,
-		MaxBatchSize:   50,
-	}
-	emb, err := NewGeminiEmbedder(zeroClient(), cfg, slog.Default())
+	emb, err := NewGeminiEmbedder(zeroClient(), "custom-model", 512, 50, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

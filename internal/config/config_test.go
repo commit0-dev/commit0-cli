@@ -23,8 +23,8 @@ func TestLoadDefaults(t *testing.T) {
 		t.Errorf("Gemini.EmbedModel = %s, want gemini-embedding-2-preview", cfg.Gemini.EmbedModel)
 	}
 
-	if cfg.Gemini.EmbedDimension != 3072 {
-		t.Errorf("Gemini.EmbedDimension = %d, want 3072", cfg.Gemini.EmbedDimension)
+	if cfg.EmbedDim != 1024 {
+		t.Errorf("Gemini.EmbedDimension = %d, want 1024", cfg.EmbedDim)
 	}
 
 	if cfg.Index.MaxWorkersEmbed != 4 {
@@ -35,7 +35,7 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "my-key")
 	t.Setenv("SURREAL_URL", "wss://custom:8001")
-	t.Setenv("GEMINI_EMBED_DIM", "1536")
+	t.Setenv("EMBED_DIM", "1536")
 	t.Setenv("INDEX_WORKERS_EMBED", "8")
 	t.Setenv("QUERY_MIN_SCORE", "0.7")
 
@@ -48,8 +48,8 @@ func TestLoadEnvOverrides(t *testing.T) {
 		t.Errorf("Surreal.URL = %s, want wss://custom:8001", cfg.Surreal.URL)
 	}
 
-	if cfg.Gemini.EmbedDimension != 1536 {
-		t.Errorf("Gemini.EmbedDimension = %d, want 1536", cfg.Gemini.EmbedDimension)
+	if cfg.EmbedDim != 1536 {
+		t.Errorf("Gemini.EmbedDimension = %d, want 1536", cfg.EmbedDim)
 	}
 
 	if cfg.Index.MaxWorkersEmbed != 8 {
@@ -85,7 +85,7 @@ func TestLoadMissingAPIKey(t *testing.T) {
 
 func TestLoadInvalidInt(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "test-key")
-	t.Setenv("GEMINI_EMBED_DIM", "not-a-number")
+	t.Setenv("EMBED_DIM", "not-a-number")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -93,8 +93,8 @@ func TestLoadInvalidInt(t *testing.T) {
 	}
 
 	// Viper returns 0 for unparseable numeric env vars (no silent fallback to default).
-	if cfg.Gemini.EmbedDimension != 0 {
-		t.Errorf("Gemini.EmbedDimension = %d, want 0 for invalid value", cfg.Gemini.EmbedDimension)
+	if cfg.EmbedDim != 0 {
+		t.Errorf("Gemini.EmbedDimension = %d, want 0 for invalid value", cfg.EmbedDim)
 	}
 }
 

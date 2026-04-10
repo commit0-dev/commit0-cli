@@ -1,13 +1,43 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/commit0-dev/commit0/internal/app"
 )
+
+// ---- Re-embedding ──────────────────────────────────────────────────────
+
+type reembedRequest struct {
+	RepoSlug string `json:"repo_slug"`
+}
+
+// handleReEmbed handles POST /api/v1/reembed — starts background re-embedding.
+func (s *Server) handleReEmbed(c *gin.Context) {
+	var req reembedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
+	}
+	if req.RepoSlug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "repo_slug is required"})
+		return
+	}
+
+	go func() {
+		_, err := s.indexSvc.ReEmbed(context.Background(), req.RepoSlug, nil)
+		if err != nil {
+			slog.Error("background re-embed failed", "repo", req.RepoSlug, "err", err)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{"status": "re-embedding started", "repo_slug": req.RepoSlug})
+}
 
 // ---- API Surface ─────────────────────────────────────────────────────────
 

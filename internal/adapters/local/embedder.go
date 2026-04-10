@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -195,7 +196,41 @@ func (e *OllamaEmbedder) callAPI(ctx context.Context, texts []string) ([][]float
 		return nil, fmt.Errorf("ollama embed API: HTTP %d: %s", resp.StatusCode(), resp.String())
 	}
 
+	// Normalize to target dimension if model output differs.
+	// Zero-pad + L2 normalize for models that don't support dimension control.
+	for i, vec := range respBody.Embeddings {
+		respBody.Embeddings[i] = normalizeVector(vec, e.dim)
+	}
+
 	return respBody.Embeddings, nil
+}
+
+// normalizeVector pads or truncates a vector to targetDim, then L2-normalizes.
+// For Matryoshka models, truncation preserves quality. For non-MRL models,
+// zero-padding preserves direction in the original subspace.
+func normalizeVector(vec []float32, targetDim int) []float32 {
+	if len(vec) == targetDim {
+		return vec
+	}
+	if len(vec) > targetDim {
+		vec = vec[:targetDim]
+	} else {
+		padded := make([]float32, targetDim)
+		copy(padded, vec)
+		vec = padded
+	}
+	// L2 normalize
+	var norm float32
+	for _, v := range vec {
+		norm += v * v
+	}
+	if norm > 0 {
+		norm = float32(math.Sqrt(float64(norm)))
+		for i := range vec {
+			vec[i] /= norm
+		}
+	}
+	return vec
 }
 
 // classifyEmbedError maps transport-level errors to domain error types.

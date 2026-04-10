@@ -11,7 +11,6 @@ import (
 
 	"resty.dev/v3"
 
-	"github.com/commit0-dev/commit0/internal/config"
 	"github.com/commit0-dev/commit0/internal/domain"
 )
 
@@ -35,25 +34,20 @@ type VoyageEmbedder struct {
 // Compile-time interface check.
 var _ domain.Embedder = (*VoyageEmbedder)(nil)
 
-// NewVoyageEmbedder constructs a VoyageEmbedder from config.
-func NewVoyageEmbedder(cfg *config.VoyageConfig, log *slog.Logger) (*VoyageEmbedder, error) {
-	if cfg.APIKey == "" {
+// NewVoyageEmbedder constructs a VoyageEmbedder with the given parameters.
+func NewVoyageEmbedder(apiKey, model, baseURL string, dim, batch int, log *slog.Logger) (*VoyageEmbedder, error) {
+	if apiKey == "" {
 		return nil, domain.Validation("VoyageEmbedder: API key must not be empty")
 	}
-
-	model := cfg.Model
 	if model == "" {
 		model = defaultModel
 	}
-	dim := cfg.EmbedDimension
 	if dim <= 0 {
 		dim = defaultDim
 	}
-	batch := cfg.MaxBatchSize
 	if batch <= 0 || batch > maxBatchSize {
 		batch = defaultBatchSize
 	}
-	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
@@ -61,7 +55,7 @@ func NewVoyageEmbedder(cfg *config.VoyageConfig, log *slog.Logger) (*VoyageEmbed
 
 	rc := resty.New().
 		SetBaseURL(baseURL).
-		SetAuthToken(cfg.APIKey).
+		SetAuthToken(apiKey).
 		SetTimeout(30 * time.Second).
 		SetRetryCount(3).
 		SetRetryWaitTime(100 * time.Millisecond).

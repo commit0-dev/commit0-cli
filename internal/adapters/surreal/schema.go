@@ -30,11 +30,10 @@ func (a *SurrealAdapter) ApplySchema(ctx context.Context) error {
 		embedDim = 3072 // safe default for Gemini Embedding 2
 	}
 
-	// Clear stale embeddings when the vector dimension changes.
-	// The HNSW OVERWRITE rebuild rejects rows whose vectors don't match
-	// the new dimension, so we must nullify them first.
-	if err := a.clearStaleEmbeddings(ctx, embedDim); err != nil {
-		a.log.Warn("could not clear stale embeddings", "err", err)
+	// Non-destructive migration: NULL embeddings when dimension changes
+	// instead of dropping tables. Graph structure is preserved.
+	if err := a.migrateEmbeddings(ctx, embedDim); err != nil {
+		a.log.Warn("could not migrate embeddings", "err", err)
 	}
 
 	ddl := strings.ReplaceAll(assets.SchemaSurQL, "{{EMBED_DIM}}", strconv.Itoa(embedDim))
@@ -112,10 +111,12 @@ func isSchemaAlreadyExistsErr(msg string) bool {
 		strings.Contains(msg, "Transaction write conflict")
 }
 
-// clearStaleEmbeddings nullifies embedding fields on all node tables when
-// the stored vectors have a different dimension than what the schema expects.
-// This prevents DEFINE INDEX OVERWRITE HNSW from failing during rebuild.
-func (a *SurrealAdapter) clearStaleEmbeddings(ctx context.Context, targetDim int) error {
+// migrateEmbeddings handles dimension changes non-destructively.
+// Instead of dropping all tables (which destroys the entire code graph),
+// it NULLs out embedding fields and lets HNSW indexes rebuild at the new
+// dimension via DEFINE INDEX OVERWRITE in the schema DDL.
+// All nodes, edges, FTS indexes, and graph structure are preserved.
+func (a *SurrealAdapter) migrateEmbeddings(ctx context.Context, targetDim int) error {
 	// Quick probe: read one embedding from the function table and check its length.
 	const probe = "SELECT embedding FROM `function` WHERE embedding IS NOT NONE LIMIT 1;"
 	type row struct {
@@ -127,41 +128,35 @@ func (a *SurrealAdapter) clearStaleEmbeddings(ctx context.Context, targetDim int
 		return nil //nolint:nilerr // query fails if table doesn't exist yet — safe to skip
 	}
 	if results == nil || len(*results) == 0 {
-		a.log.Debug("embedding probe: no query results")
 		return nil
 	}
 	rows := (*results)[0].Result
 	if len(rows) == 0 || len(rows[0].Embedding) == 0 {
-		a.log.Debug("embedding probe: no embeddings found")
 		return nil // no embeddings stored yet
 	}
 	if len(rows[0].Embedding) == targetDim {
-		a.log.Debug("embedding probe: dimensions match", "dim", targetDim)
-		return nil // dimensions match — no migration needed
+		a.log.Debug("embedding dimensions match", "dim", targetDim)
+		return nil
 	}
 
-	a.log.Info("clearing stale embeddings",
+	a.log.Info("migrating embeddings (non-destructive)",
 		"old_dim", len(rows[0].Embedding),
 		"new_dim", targetDim,
 	)
 
-	// Drop the tables entirely so the schema DDL recreates them with clean
-	// HNSW indexes at the new dimension. This is a full reset — all code
-	// nodes, edges, and embeddings are lost and must be re-indexed.
-	// This only runs when the embedding dimension changes (provider switch).
-	tables := []string{
-		// Edges first (reference foreign keys).
-		"calls", "imports", "defines", "inherits", "uses", "data_flow", "reads", "writes",
-		// Then node tables.
-		"`function`", "class", "file", "module",
-	}
-	for _, t := range tables {
-		q := "REMOVE TABLE IF EXISTS " + t + ";"
+	// NULL out embedding fields on all node tables.
+	// Graph structure (nodes, edges, FTS) is fully preserved.
+	nodeTables := []string{"`function`", "class", "file", "module"}
+	for _, t := range nodeTables {
+		q := fmt.Sprintf("UPDATE %s SET embedding = NONE, embed_provider = NONE WHERE embedding IS NOT NONE;", t)
 		if _, err := surrealdb.Query[any](ctx, a.db, q, nil); err != nil {
-			a.log.Warn("could not remove table", "table", t, "err", err)
+			a.log.Warn("could not clear embeddings", "table", t, "err", err)
 		}
 	}
 
+	// HNSW indexes will be rebuilt with new dimension by DEFINE INDEX OVERWRITE
+	// in the schema DDL (executed after this function returns).
+	a.log.Info("embeddings cleared — graph preserved, re-embedding required")
 	return nil
 }
 

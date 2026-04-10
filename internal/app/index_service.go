@@ -217,7 +217,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 
 	go func() {
 		defer close(embedCh)
-		batcher := NewEmbedBatcher(is.embedder, is.cfg.Index.BatchSize)
+		batcher := NewEmbedBatcher(is.embedder, is.cfg.BatchSize)
 		for parsed := range parsedCh {
 			embedGroup.Go(func() error {
 				// Summarize nodes before embedding (enriches Summary + Concepts)
@@ -330,7 +330,7 @@ func (is *IndexService) ReembedNeighborhood(ctx context.Context, repoSlug string
 		return nil, fmt.Errorf("list node ids: %w", err)
 	}
 
-	batchSize := is.cfg.Index.BatchSize
+	batchSize := is.cfg.BatchSize
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -433,4 +433,101 @@ func (r *indexRun) addError() {
 type embeddedFile struct {
 	Nodes []types.CodeNode
 	Edges []types.CodeEdge
+}
+
+// ReEmbedResult holds the result of a re-embedding operation.
+type ReEmbedResult struct {
+	NodesEmbedded int
+	NodesTotal    int
+	Provider      string
+}
+
+// ReEmbed re-embeds all nodes for a repo using the current embedding provider.
+// This is faster than full re-indexing because it skips filesystem walk,
+// tree-sitter parsing, and LLM summarization — only calls the embedding API.
+func (is *IndexService) ReEmbed(ctx context.Context, repoSlug string, onProgress func(done, total int)) (*ReEmbedResult, error) {
+	is.log.Info("starting re-embed", "repo", repoSlug)
+
+	nodeIDs, err := is.store.ListNodeIDs(ctx, repoSlug)
+	if err != nil {
+		return nil, fmt.Errorf("list nodes: %w", err)
+	}
+
+	total := len(nodeIDs)
+	if total == 0 {
+		return &ReEmbedResult{Provider: is.cfg.EmbedProvider}, nil
+	}
+
+	batchSize := 100
+	done := 0
+
+	for i := 0; i < len(nodeIDs); i += batchSize {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		end := i + batchSize
+		if end > len(nodeIDs) {
+			end = len(nodeIDs)
+		}
+		batch := nodeIDs[i:end]
+
+		// Fetch nodes and build embedding inputs.
+		var inputs []domain.EmbedInput
+		var nodes []*types.CodeNode
+		for _, id := range batch {
+			node, err := is.store.GetNode(ctx, id)
+			if err != nil {
+				is.log.Debug("skip node", "id", id, "err", err)
+				continue
+			}
+			if node.Embedding != nil {
+				done++
+				continue // already embedded with current provider
+			}
+			text := is.builder.ForNode(node)
+			inputs = append(inputs, domain.EmbedInput{
+				ID:   node.ID,
+				Text: text,
+			})
+			nodes = append(nodes, node)
+		}
+
+		if len(inputs) == 0 {
+			continue
+		}
+
+		// Embed batch.
+		results, err := is.embedder.EmbedBatch(ctx, inputs)
+		if err != nil {
+			is.log.Warn("embed batch failed", "err", err)
+			continue
+		}
+
+		// Update nodes with new embeddings.
+		resultMap := make(map[string][]float32, len(results))
+		for _, r := range results {
+			resultMap[r.ID] = r.Vector
+		}
+		for _, node := range nodes {
+			if vec, ok := resultMap[node.ID]; ok {
+				node.Embedding = vec
+				if err := is.store.UpsertNode(ctx, node); err != nil {
+					is.log.Warn("upsert failed", "id", node.ID, "err", err)
+				}
+				done++
+			}
+		}
+
+		if onProgress != nil {
+			onProgress(done, total)
+		}
+	}
+
+	is.log.Info("re-embed complete", "repo", repoSlug, "embedded", done, "total", total)
+	return &ReEmbedResult{
+		NodesEmbedded: done,
+		NodesTotal:    total,
+		Provider:      is.cfg.EmbedProvider,
+	}, nil
 }

@@ -12,7 +12,6 @@ import (
 
 	"resty.dev/v3"
 
-	"github.com/commit0-dev/commit0/internal/config"
 	"github.com/commit0-dev/commit0/internal/domain"
 )
 
@@ -21,7 +20,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestNewVoyageEmbedderEmptyAPIKey(t *testing.T) {
-	_, err := NewVoyageEmbedder(&config.VoyageConfig{APIKey: ""}, slog.Default())
+	_, err := NewVoyageEmbedder("", "", "", 0, 0, slog.Default())
 	if err == nil {
 		t.Fatal("expected error for empty API key, got nil")
 	}
@@ -35,8 +34,7 @@ func TestNewVoyageEmbedderEmptyAPIKey(t *testing.T) {
 }
 
 func TestNewVoyageEmbedderDefaultModel(t *testing.T) {
-	cfg := &config.VoyageConfig{APIKey: "test-key", Model: ""}
-	emb, err := NewVoyageEmbedder(cfg, slog.Default())
+	emb, err := NewVoyageEmbedder("test-key", "", "", 0, 0, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,8 +44,7 @@ func TestNewVoyageEmbedderDefaultModel(t *testing.T) {
 }
 
 func TestNewVoyageEmbedderDefaultDim(t *testing.T) {
-	cfg := &config.VoyageConfig{APIKey: "test-key", EmbedDimension: 0}
-	emb, err := NewVoyageEmbedder(cfg, slog.Default())
+	emb, err := NewVoyageEmbedder("test-key", "", "", 0, 0, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,8 +54,7 @@ func TestNewVoyageEmbedderDefaultDim(t *testing.T) {
 }
 
 func TestNewVoyageEmbedderDefaultBatch(t *testing.T) {
-	cfg := &config.VoyageConfig{APIKey: "test-key", MaxBatchSize: 0}
-	emb, err := NewVoyageEmbedder(cfg, slog.Default())
+	emb, err := NewVoyageEmbedder("test-key", "", "", 1024, 0, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,8 +64,7 @@ func TestNewVoyageEmbedderDefaultBatch(t *testing.T) {
 }
 
 func TestNewVoyageEmbedderOversizedBatchClamped(t *testing.T) {
-	cfg := &config.VoyageConfig{APIKey: "test-key", MaxBatchSize: 500}
-	emb, err := NewVoyageEmbedder(cfg, slog.Default())
+	emb, err := NewVoyageEmbedder("test-key", "", "", 1024, 500, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,14 +74,7 @@ func TestNewVoyageEmbedderOversizedBatchClamped(t *testing.T) {
 }
 
 func TestNewVoyageEmbedderCustomValues(t *testing.T) {
-	cfg := &config.VoyageConfig{
-		APIKey:         "test-key",
-		Model:          "voyage-code-2",
-		EmbedDimension: 512,
-		MaxBatchSize:   64,
-		BaseURL:        "https://custom.api.com/v1/",
-	}
-	emb, err := NewVoyageEmbedder(cfg, slog.Default())
+	emb, err := NewVoyageEmbedder("test-key", "voyage-code-2", "https://custom.api.com/v1/", 512, 64, slog.Default())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -119,6 +119,9 @@ func (s *Server) registerRoutes() {
 	v1.POST("/api/discover", s.handleAPIDiscover)
 	v1.POST("/api/spec", s.handleAPISpec)
 
+	// Re-embedding (after provider switch)
+	v1.POST("/reembed", s.handleReEmbed)
+
 	// Nodes (for VSCode extension: CodeLens, graph, hover)
 	v1.GET("/nodes/lookup", s.handleNodeLookup)
 	v1.GET("/nodes/by-file", s.handleNodesByFile)

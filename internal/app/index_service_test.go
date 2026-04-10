@@ -40,8 +40,8 @@ func TestIndexServiceIndexHappyPath(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 1,
 			MaxWorkersStore: 1,
-			BatchSize:       1,
 		},
+		BatchSize: 1,
 	}
 
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
@@ -164,8 +164,8 @@ func TestIndexServiceIndexEmbedFailure(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 1,
 			MaxWorkersStore: 1,
-			BatchSize:       10,
 		},
+		BatchSize: 10,
 	}
 
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
@@ -212,8 +212,8 @@ func TestIndexServiceIndexStoreFailure(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 1,
 			MaxWorkersStore: 1,
-			BatchSize:       10,
 		},
+		BatchSize: 10,
 	}
 
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
@@ -296,8 +296,8 @@ func TestIndexServiceCustomChannelBuffers(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 1,
 			MaxWorkersStore: 1,
-			BatchSize:       10,
 		},
+		BatchSize: 10,
 	}
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
 	svc.parsedChBuf = 8 // positive → parsedCap = 8
@@ -366,8 +366,8 @@ func TestIndexServiceStoreContextCancelled(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 4,
 			MaxWorkersStore: 4,
-			BatchSize:       10,
 		},
+		BatchSize: 10,
 	}
 
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
@@ -405,8 +405,8 @@ func TestIndexServiceParseContextCancelled(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 1,
 			MaxWorkersStore: 1,
-			BatchSize:       10,
 		},
+		BatchSize: 10,
 	}
 
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
@@ -456,8 +456,8 @@ func TestIndexServiceStoreStageFatalError(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 2,
 			MaxWorkersStore: 1, // serialize store goroutines: 1st cancels, 2nd sees Err()
-			BatchSize:       1, // flush every node so both files produce store calls
 		},
+		BatchSize: 1, // flush every node so both files produce store calls
 	}
 
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
@@ -499,8 +499,8 @@ func TestIndexServiceEmbedContextCancelled(t *testing.T) {
 		Index: config.IndexConfig{
 			MaxWorkersEmbed: 1,
 			MaxWorkersStore: 1,
-			BatchSize:       10,
 		},
+		BatchSize: 10,
 	}
 
 	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
@@ -522,7 +522,7 @@ func TestReembedNeighborhoodHappyPath(t *testing.T) {
 		batchRes: []domain.EmbedResult{{ID: node.ID, Vector: []float32{0.1, 0.2}}},
 	}
 
-	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
@@ -538,7 +538,7 @@ func TestReembedNeighborhoodListIDsError(t *testing.T) {
 	store := newStubGraphStore()
 	store.err = domain.NotFound("forced list error")
 
-	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, nil, store, nil, cfg)
 
 	_, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
@@ -557,7 +557,7 @@ func TestReembedNeighborhoodGetNodeError(t *testing.T) {
 		batchRes: []domain.EmbedResult{},
 	}
 
-	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
@@ -580,7 +580,7 @@ func TestReembedNeighborhoodEmbedError(t *testing.T) {
 		batchErr: domain.RateLimit("embed failed"),
 	}
 
-	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
@@ -600,7 +600,7 @@ func TestReembedNeighborhoodUpsertError(t *testing.T) {
 		batchRes: []domain.EmbedResult{{ID: node.ID, Vector: []float32{0.1}}},
 	}
 
-	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 10}}
+	cfg := &config.Config{Index: config.IndexConfig{}}
 
 	goodStore := newStubGraphStore()
 	goodStore.nodeIDs = []string{node.ID}
@@ -630,7 +630,7 @@ func TestReembedNeighborhoodDefaultBatchSize(t *testing.T) {
 		batchRes: []domain.EmbedResult{{ID: node.ID, Vector: []float32{0.1}}},
 	}
 
-	cfg := &config.Config{Index: config.IndexConfig{BatchSize: 0}} // triggers default=100
+	cfg := &config.Config{BatchSize: 0} // triggers default=100
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
 	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")

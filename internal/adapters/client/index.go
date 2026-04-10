@@ -28,6 +28,21 @@ type IndexProgress struct {
 	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 }
 
+// ReEmbed triggers background re-embedding for a repo (after provider switch).
+func (c *Client) ReEmbed(ctx context.Context, repoSlug string) error {
+	resp, err := c.rc.R().
+		SetContext(ctx).
+		SetBody(map[string]string{"repo_slug": repoSlug}).
+		Post("/api/v1/reembed")
+	if err != nil {
+		return fmt.Errorf("reembed: %w", err)
+	}
+	if resp.IsError() {
+		return mapHTTPError(resp.StatusCode(), resp.Bytes())
+	}
+	return nil
+}
+
 // StartIndex starts an async index and polls until completion.
 // onProgress is called on each poll with the current job state.
 func (c *Client) StartIndex(ctx context.Context, req StartIndexRequest, onProgress func(IndexProgress)) (*IndexProgress, error) {

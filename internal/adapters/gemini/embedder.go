@@ -52,21 +52,17 @@ type GeminiEmbedder struct {
 // Compile-time interface check.
 var _ domain.Embedder = (*GeminiEmbedder)(nil)
 
-// NewGeminiEmbedder constructs a GeminiEmbedder. Pass a client obtained from
-// NewGeminiClient so it can be shared with GeminiExplainer.
-func NewGeminiEmbedder(client *genai.Client, cfg *config.GeminiConfig, log *slog.Logger) (*GeminiEmbedder, error) {
+// NewGeminiEmbedder constructs a GeminiEmbedder with the given parameters.
+func NewGeminiEmbedder(client *genai.Client, model string, dim, batch int, log *slog.Logger) (*GeminiEmbedder, error) {
 	if client == nil {
 		return nil, domain.Validation("GeminiEmbedder: client must not be nil")
 	}
-	model := cfg.EmbedModel
 	if model == "" {
 		model = "gemini-embedding-2-preview"
 	}
-	dim := cfg.EmbedDimension
 	if dim <= 0 {
-		dim = 3072
+		dim = 1024
 	}
-	batch := cfg.MaxBatchSize
 	if batch <= 0 || batch > 100 {
 		batch = 100
 	}

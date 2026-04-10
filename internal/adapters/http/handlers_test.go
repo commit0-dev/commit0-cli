@@ -193,8 +193,9 @@ func (s *httpTestWalker) Walk(_ context.Context, _ string, _ domain.WalkOpts) (<
 
 func newTestServer(store *httpTestGraphStore, embedder *httpTestEmbedder, explainer *httpTestExplainer) *Server {
 	cfg := &config.Config{
-		Query: config.QueryConfig{DefaultTopK: 10, RRFKConstant: 60},
-		Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1, BatchSize: 10},
+		Query:     config.QueryConfig{DefaultTopK: 10, RRFKConstant: 60},
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
 	}
 	vi := &httpTestVectorIndex{}
 	ti := &httpTestTextIndex{}

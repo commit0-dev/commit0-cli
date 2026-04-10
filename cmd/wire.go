@@ -40,14 +40,10 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	log := slog.Default()
 
 	// 1. SurrealDB — connect with retry for resilience against cold starts.
-	var embedDim int
-	switch cfg.EmbedProvider {
-	case "ollama":
-		embedDim = cfg.Ollama.EmbedDim
-	case "voyage":
-		embedDim = cfg.Voyage.EmbedDimension
-	default:
-		embedDim = cfg.Gemini.EmbedDimension
+	// Use normalized index dimension for HNSW — all providers output at this dim.
+	embedDim := cfg.EmbedDim
+	if embedDim <= 0 {
+		embedDim = 1024
 	}
 
 	maxRetries := cfg.Surreal.StartupRetries
@@ -108,15 +104,19 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 		}
 	}
 
-	// 3. Embedder — provider selected by config.
+	// 3. Embedder — all providers output at the normalized index dimension.
+	batchSize := cfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
 	var emb domain.Embedder
 	switch cfg.EmbedProvider {
 	case "ollama":
-		emb = localadapter.NewOllamaEmbedder(cfg.Ollama.URL, cfg.Ollama.EmbedModel, cfg.Ollama.EmbedDim, log)
+		emb = localadapter.NewOllamaEmbedder(cfg.Ollama.URL, cfg.Ollama.EmbedModel, embedDim, log)
 		log.Info("using local embeddings via Ollama",
-			"model", cfg.Ollama.EmbedModel, "dim", cfg.Ollama.EmbedDim, "url", cfg.Ollama.URL)
+			"model", cfg.Ollama.EmbedModel, "dim", embedDim, "url", cfg.Ollama.URL)
 	case "voyage":
-		emb, err = voyage.NewVoyageEmbedder(&cfg.Voyage, log)
+		emb, err = voyage.NewVoyageEmbedder(cfg.Voyage.APIKey, cfg.Voyage.Model, cfg.Voyage.BaseURL, embedDim, batchSize, log)
 		if err != nil {
 			db.Close(ctx)
 			return nil, nil, fmt.Errorf("voyage embedder: %w", err)
@@ -126,7 +126,7 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 			db.Close(ctx)
 			return nil, nil, fmt.Errorf("gemini embedder: GEMINI_API_KEY is required")
 		}
-		emb, err = gemini.NewGeminiEmbedder(genaiClient, &cfg.Gemini, log)
+		emb, err = gemini.NewGeminiEmbedder(genaiClient, cfg.Gemini.EmbedModel, embedDim, batchSize, log)
 		if err != nil {
 			db.Close(ctx)
 			return nil, nil, fmt.Errorf("gemini embedder: %w", err)
