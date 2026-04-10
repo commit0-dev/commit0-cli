@@ -316,9 +316,11 @@ func (qs *QueryService) conceptRerank(fused []types.ScoredNode, question string)
 			}
 		}
 
-		// Centrality boost: well-connected nodes are more important
+		// Centrality boost: well-connected nodes get a mild relevance bump.
+		// Capped to prevent hub nodes from dominating semantic results.
 		if fused[i].Centrality > 0 {
-			boost *= 1 + math.Log(float64(fused[i].Centrality)+1)*0.1
+			centralityBoost := math.Min(1+math.Log(float64(fused[i].Centrality)+1)*0.1, 1.3)
+			boost *= centralityBoost
 		}
 
 		fused[i].FusedScore *= boost

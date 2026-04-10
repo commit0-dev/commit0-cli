@@ -49,11 +49,13 @@ func ReciprocalRankFusion(vector []types.ScoredNode, fts []types.ScoredNode, w R
 		}
 	}
 
-	// Apply centrality boost: score *= log(1 + centrality)
-	// Guard against Centrality=0 which would zero out scores
+	// Apply centrality boost: score *= log(1 + centrality), capped at 2x.
+	// Without the cap, high-centrality nodes (e.g., agent hub functions with
+	// centrality >100) dominate every search regardless of semantic relevance.
 	for id, node := range nodes {
 		score := scores[id]
 		boost := math.Max(1.0, math.Log1p(float64(node.Centrality)))
+		boost = math.Min(boost, 2.0) // cap: centrality never more than 2x benefit
 		scores[id] = score * boost
 	}
 
