@@ -47,6 +47,26 @@ func (r *Resolver) Resolve(nodes []types.CodeNode, edges []types.CodeEdge) ([]ty
 
 	// ── Pass 2: resolve EdgeCalls targets ─────────────────────────────────
 
+	// Build a suffix map for method resolution: ".MethodName" → node ID.
+	// This handles receiver-based calls like s.ImportBundle where the
+	// tree-sitter gives us "s.ImportBundle" but we need "app.SyncService.ImportBundle".
+	suffixToID := make(map[string]string, len(nodes))
+	suffixAmbiguous := make(map[string]bool)
+	for _, n := range nodes {
+		if n.Kind != types.NodeFunction || n.Qualified == "" {
+			continue
+		}
+		// Extract the last segment: "app.SyncService.ImportBundle" → ".ImportBundle"
+		if dot := strings.LastIndex(n.Qualified, "."); dot >= 0 {
+			suffix := n.Qualified[dot:] // ".ImportBundle"
+			if _, exists := suffixToID[suffix]; exists {
+				suffixAmbiguous[suffix] = true // ambiguous — multiple matches
+			} else {
+				suffixToID[suffix] = n.ID
+			}
+		}
+	}
+
 	for i := range edges {
 		e := &edges[i]
 		if e.Kind != types.EdgeCalls {
@@ -56,8 +76,17 @@ func (r *Resolver) Resolve(nodes []types.CodeNode, edges []types.CodeEdge) ([]ty
 		// by the extractors. Try to resolve it.
 		if id, ok := qualifiedToID[e.ToID]; ok {
 			e.ToID = id
+			continue
 		}
-		// If not found, leave as-is — the graph store may resolve it later.
+		// Suffix match: "s.ImportBundle" → extract ".ImportBundle" → match against qualified names.
+		if dot := strings.LastIndex(e.ToID, "."); dot >= 0 {
+			suffix := e.ToID[dot:]
+			if !suffixAmbiguous[suffix] {
+				if id, ok := suffixToID[suffix]; ok {
+					e.ToID = id
+				}
+			}
+		}
 	}
 
 	// ── Pass 3: generate EdgeDefines ──────────────────────────────────────
