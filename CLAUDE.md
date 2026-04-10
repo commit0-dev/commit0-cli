@@ -46,6 +46,16 @@ make test-cover     # 98% threshold on internal/app/...
 make lint           # golangci-lint
 ```
 
+## commit0 Development Tools
+
+This project uses its own code intelligence for self-development. When the commit0 server is running, use these tools alongside Grep/Glob/Read:
+
+- **Search** — `commit0-cli query "question" --repo commit0-dev/commit0 --no-agent` for conceptual questions. PREFER over Grep for "how does X work?", "where is Y implemented?". Falls back to Grep if server is not running.
+- **Impact** — `commit0-cli blast <FunctionName> --repo commit0-dev/commit0` BEFORE modifying any function. Check blast radius. If > 20 affected nodes, proceed with extra caution.
+- **Trace** — `commit0-cli trace <symbol> --repo commit0-dev/commit0 --direction forward` to follow call chains. Use `--direction reverse` to find callers. Better than reading file-by-file.
+- **Re-index** — `commit0-cli index .` after multi-file changes so search/trace/blast reflect current code. Incremental, fast.
+- **Check server** — `commit0-cli repo list 2>/dev/null` to verify server is running before using tools.
+
 ## When to Reference Docs
 
 | You're working on... | Read this doc |
