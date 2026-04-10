@@ -187,6 +187,8 @@ type serveServices struct {
 	rootCause  *app.RootCauseAnalysisService
 	apiSurface *app.APISurfaceService
 	syncSvc    *app.SyncService
+	peerStore  domain.PeerStore
+	scopeStore domain.ScopeStore
 	memMgr     *memory.Manager
 	sessionSvc app.SessionStore
 	cleanup    func()
@@ -271,6 +273,8 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		rootCause:  rootCauseSvc,
 		apiSurface: apiSurfaceSvc,
 		syncSvc:    syncSvc,
+		peerStore:  d.db.AsPeerStore(),
+		scopeStore: d.db.AsScopeStore(),
 		memMgr:     memMgr,
 		sessionSvc: sessionSvc,
 		cleanup:    cleanup,

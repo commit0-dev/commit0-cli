@@ -55,7 +55,7 @@ var serveCmd = &cobra.Command{
 
 		// Register sync routes if the sync service is available.
 		if svcs.syncSvc != nil {
-			server.SetSyncService(svcs.syncSvc)
+			server.SetSyncService(svcs.syncSvc, svcs.peerStore, svcs.scopeStore, cfg.Sync.Passphrase)
 		}
 
 		// Handle OS signals for graceful shutdown.

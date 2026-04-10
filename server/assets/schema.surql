@@ -411,6 +411,27 @@ DEFINE FIELD OVERWRITE created_at ON chat_message TYPE datetime VALUE time::now(
 DEFINE INDEX IF NOT EXISTS chat_msg_sess_idx ON chat_message FIELDS session_id;
 
 -- ─────────────────────────────────────────
+-- P2P Sync: Peer Registry
+-- ─────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE peer SCHEMAFULL;
+DEFINE FIELD OVERWRITE name         ON peer TYPE string ASSERT string::len($value) > 0;
+DEFINE FIELD OVERWRITE endpoint     ON peer TYPE string;
+DEFINE FIELD OVERWRITE api_url      ON peer TYPE string;
+DEFINE FIELD OVERWRITE added_at     ON peer TYPE datetime VALUE time::now();
+DEFINE FIELD OVERWRITE last_sync_at ON peer TYPE option<datetime>;
+DEFINE INDEX OVERWRITE peer_name_idx ON peer FIELDS name UNIQUE;
+
+-- ─────────────────────────────────────────
+-- P2P Sync: Scope (repos to sync)
+-- ─────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE sync_scope SCHEMAFULL;
+DEFINE FIELD OVERWRITE repo_slug ON sync_scope TYPE string ASSERT string::len($value) > 0;
+DEFINE FIELD OVERWRITE added_at  ON sync_scope TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE scope_repo_idx ON sync_scope FIELDS repo_slug UNIQUE;
+
+-- ─────────────────────────────────────────
 -- Schema Version (for migration tracking)
 -- ─────────────────────────────────────────
 
@@ -418,4 +439,4 @@ DEFINE TABLE OVERWRITE schema_version SCHEMAFULL;
 DEFINE FIELD OVERWRITE version    ON schema_version TYPE int;
 DEFINE FIELD OVERWRITE applied_at ON schema_version TYPE datetime VALUE time::now();
 
-INSERT INTO schema_version (version) VALUES (1) ON DUPLICATE KEY UPDATE version = 1;
+INSERT INTO schema_version (version) VALUES (2) ON DUPLICATE KEY UPDATE version = 2;

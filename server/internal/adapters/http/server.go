@@ -32,6 +32,8 @@ type Server struct {
 	rootCauseSvc *app.RootCauseAnalysisService
 	apiSurfSvc   *app.APISurfaceService
 	syncSvc      *app.SyncService
+	peerStore    domain.PeerStore
+	scopeStore   domain.ScopeStore
 	cfg          *config.ServerConfig
 	log          *slog.Logger
 	jobs         *indexJobStore
