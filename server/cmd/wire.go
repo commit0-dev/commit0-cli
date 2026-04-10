@@ -14,6 +14,8 @@ import (
 	gitadapter "github.com/commit0-dev/commit0/server/internal/adapters/git"
 	localadapter "github.com/commit0-dev/commit0/server/internal/adapters/local"
 	"github.com/commit0-dev/commit0/server/internal/adapters/openrouter"
+	consuladapter "github.com/commit0-dev/commit0/server/internal/adapters/consul"
+	mdnsadapter "github.com/commit0-dev/commit0/server/internal/adapters/mdns"
 	quicadapter "github.com/commit0-dev/commit0/server/internal/adapters/quic"
 	syncadapter "github.com/commit0-dev/commit0/server/internal/adapters/sync"
 	"github.com/commit0-dev/commit0/server/internal/adapters/surreal"
@@ -189,6 +191,7 @@ type serveServices struct {
 	apiSurface *app.APISurfaceService
 	syncSvc    *app.SyncService
 	transport  domain.PeerTransport
+	discovery  domain.PeerDiscovery
 	peerStore  domain.PeerStore
 	scopeStore domain.ScopeStore
 	memMgr     *memory.Manager
@@ -270,6 +273,22 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		}
 	}
 
+	// Discovery (Consul or mDNS based on config).
+	var disc domain.PeerDiscovery
+	switch cfg.Sync.DiscoveryMode {
+	case "mdns":
+		disc = mdnsadapter.New(cfg.Sync.InstanceName)
+		log.Info("sync discovery: mDNS (LAN only)")
+	default: // "consul"
+		if cd, cdErr := consuladapter.New(cfg.Sync.ConsulAddr, cfg.Sync.ConsulToken); cdErr != nil {
+			log.Warn("consul discovery unavailable, falling back to mDNS", "err", cdErr)
+			disc = mdnsadapter.New(cfg.Sync.InstanceName)
+		} else {
+			disc = cd
+			log.Info("sync discovery: Consul", "addr", cfg.Sync.ConsulAddr)
+		}
+	}
+
 	return &serveServices{
 		index:      indexSvc,
 		query:      querySvc,
@@ -284,6 +303,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		apiSurface: apiSurfaceSvc,
 		syncSvc:    syncSvc,
 		transport:  quicTransport,
+		discovery:  disc,
 		peerStore:  d.db.AsPeerStore(),
 		scopeStore: d.db.AsScopeStore(),
 		memMgr:     memMgr,

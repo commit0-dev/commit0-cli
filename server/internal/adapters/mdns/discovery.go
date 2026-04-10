@@ -1,4 +1,5 @@
 // Package mdns provides mDNS-based LAN peer discovery for commit0 P2P sync.
+// Kept as a fallback when Consul is not available.
 package mdns
 
 import (
@@ -8,23 +9,20 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 const (
-	// ServiceType is the mDNS service type for commit0 sync.
-	ServiceType = "_commit0._udp"
-	// MulticastAddr is the standard mDNS multicast address.
+	ServiceType   = "_commit0._udp"
 	MulticastAddr = "224.0.0.251:5353"
 )
 
-// DiscoveredPeer represents a commit0 peer found via mDNS.
-type DiscoveredPeer struct {
-	Name     string
-	Endpoint string // host:port for QUIC
-	APIURL   string // HTTP control plane
-}
+// Compile-time interface check.
+var _ domain.PeerDiscovery = (*Discovery)(nil)
 
-// Discovery handles mDNS service announcement and peer discovery.
+// Discovery implements PeerDiscovery using mDNS multicast on the LAN.
 type Discovery struct {
 	instanceName string
 	quicPort     int
@@ -32,108 +30,99 @@ type Discovery struct {
 	log          *slog.Logger
 }
 
-// NewDiscovery creates an mDNS discovery service.
-func NewDiscovery(instanceName string, quicPort, httpPort int) *Discovery {
+// New creates an mDNS discovery service.
+func New(instanceName string) *Discovery {
 	return &Discovery{
 		instanceName: instanceName,
-		quicPort:     quicPort,
-		httpPort:     httpPort,
 		log:          slog.Default().With("adapter", "mdns"),
 	}
 }
 
-// Announce registers the local commit0 server on the LAN via mDNS.
-// Runs until ctx is cancelled.
-func (d *Discovery) Announce(ctx context.Context) error {
-	d.log.Info("mDNS announcing",
-		"service", ServiceType,
-		"instance", d.instanceName,
-		"quic_port", d.quicPort,
-	)
+func (d *Discovery) Register(ctx context.Context, name string, quicPort, httpPort int) error {
+	d.instanceName = name
+	d.quicPort = quicPort
+	d.httpPort = httpPort
+	d.log.Info("mDNS registered", "name", name, "quic_port", quicPort)
 
-	// Simple periodic announcement via multicast UDP.
-	// In production, use a proper mDNS library (e.g., hashicorp/mdns).
-	// For now, this is a lightweight implementation using raw multicast.
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			if err := d.sendAnnouncement(); err != nil {
-				d.log.Debug("mDNS announce failed", "err", err)
+	// Start periodic announcements.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				d.sendAnnouncement()
 			}
 		}
-	}
+	}()
+	return nil
 }
 
-// Discover scans the LAN for commit0 peers via mDNS.
-// Returns discovered peers within the timeout window.
-func (d *Discovery) Discover(ctx context.Context, timeout time.Duration) ([]DiscoveredPeer, error) {
-	d.log.Info("mDNS scanning for peers", "timeout", timeout)
-
+func (d *Discovery) Discover(ctx context.Context) ([]types.PeerInfo, error) {
 	addr, err := net.ResolveUDPAddr("udp4", MulticastAddr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve mDNS addr: %w", err)
 	}
-
 	conn, err := net.ListenMulticastUDP("udp4", nil, addr)
 	if err != nil {
 		return nil, fmt.Errorf("listen multicast: %w", err)
 	}
 	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 
-	conn.SetReadDeadline(time.Now().Add(timeout))
-
-	var peers []DiscoveredPeer
+	var peers []types.PeerInfo
 	buf := make([]byte, 4096)
-
 	for {
 		n, src, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				break // scan timeout reached
-			}
-			return peers, nil
+			break
 		}
-
-		msg := string(buf[:n])
-		if !strings.Contains(msg, ServiceType) {
-			continue
-		}
-
-		// Parse announcement: "commit0|<instance>|<quic_port>|<http_port>"
-		parts := strings.Split(msg, "|")
+		parts := strings.Split(string(buf[:n]), "|")
 		if len(parts) < 4 || parts[0] != "commit0" {
 			continue
 		}
-
-		peer := DiscoveredPeer{
+		peers = append(peers, types.PeerInfo{
 			Name:     parts[1],
 			Endpoint: fmt.Sprintf("%s:%s", src.IP.String(), parts[2]),
 			APIURL:   fmt.Sprintf("http://%s:%s", src.IP.String(), parts[3]),
-		}
-		peers = append(peers, peer)
-		d.log.Info("mDNS peer discovered", "name", peer.Name, "endpoint", peer.Endpoint)
+			AddedAt:  time.Now(),
+		})
 	}
-
 	return peers, nil
 }
 
-func (d *Discovery) sendAnnouncement() error {
+func (d *Discovery) Watch(ctx context.Context, handler func([]types.PeerInfo)) error {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			peers, err := d.Discover(ctx)
+			if err == nil && len(peers) > 0 {
+				handler(peers)
+			}
+		}
+	}
+}
+
+func (d *Discovery) Deregister(ctx context.Context) error {
+	return nil // mDNS has no explicit deregistration
+}
+
+func (d *Discovery) sendAnnouncement() {
 	addr, err := net.ResolveUDPAddr("udp4", MulticastAddr)
 	if err != nil {
-		return err
+		return
 	}
 	conn, err := net.DialUDP("udp4", nil, addr)
 	if err != nil {
-		return err
+		return
 	}
 	defer conn.Close()
-
 	msg := fmt.Sprintf("commit0|%s|%d|%d|%s", d.instanceName, d.quicPort, d.httpPort, ServiceType)
-	_, err = conn.Write([]byte(msg))
-	return err
+	conn.Write([]byte(msg))
 }

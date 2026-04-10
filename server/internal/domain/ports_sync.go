@@ -77,6 +77,19 @@ type PeerTransport interface {
 	Close() error
 }
 
+// PeerDiscovery handles LAN service discovery for P2P sync.
+// Built-in: Consul (recommended), mDNS (fallback).
+type PeerDiscovery interface {
+	// Register announces the local server to the discovery service.
+	Register(ctx context.Context, name string, quicPort, httpPort int) error
+	// Discover returns currently healthy peers.
+	Discover(ctx context.Context) ([]types.PeerInfo, error)
+	// Watch continuously monitors for peer changes, calling handler on each update.
+	Watch(ctx context.Context, handler func([]types.PeerInfo)) error
+	// Deregister removes the local server from the discovery service.
+	Deregister(ctx context.Context) error
+}
+
 // PeerHandler processes incoming requests from remote peers (server side).
 type PeerHandler interface {
 	HandleManifestRequest(ctx context.Context, repoSlug string) (*types.SyncManifest, error)

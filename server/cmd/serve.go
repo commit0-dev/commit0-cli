@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	httpAdapter "github.com/commit0-dev/commit0/server/internal/adapters/http"
 	"github.com/commit0-dev/commit0/server/internal/config"
 )
@@ -52,6 +53,22 @@ var serveCmd = &cobra.Command{
 			svcs.apiSurface,
 			&cfg.Server,
 		)
+
+		// Start peer discovery (Consul or mDNS).
+		if svcs.discovery != nil {
+			if err := svcs.discovery.Register(ctx, cfg.Sync.InstanceName, cfg.Sync.QUICPort, cfg.Server.Port); err != nil {
+				slog.Warn("discovery register failed", "err", err)
+			} else {
+				defer svcs.discovery.Deregister(context.Background())
+				if cfg.Sync.AutoDiscover {
+					go svcs.discovery.Watch(ctx, func(peers []types.PeerInfo) {
+						for i := range peers {
+							svcs.peerStore.UpsertPeer(ctx, &peers[i])
+						}
+					})
+				}
+			}
+		}
 
 		// Register sync routes if the sync service is available.
 		if svcs.syncSvc != nil {

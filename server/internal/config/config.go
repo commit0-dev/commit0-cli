@@ -33,7 +33,10 @@ type SyncConfig struct {
 	AutoDiscover bool   // env: SYNC_AUTO_DISCOVER (mDNS LAN discovery, default: false)
 	AutoPull     bool   // env: SYNC_AUTO_PULL (auto-pull on notification, default: false)
 	AutoPush     bool   // env: SYNC_AUTO_PUSH (auto-push after index, default: false)
-	InstanceName string // env: SYNC_INSTANCE_NAME (mDNS instance name, default: hostname)
+	InstanceName  string // env: SYNC_INSTANCE_NAME (mDNS instance name, default: hostname)
+	ConsulAddr    string // env: SYNC_CONSUL_ADDR (default: "127.0.0.1:8500")
+	ConsulToken   string // env: SYNC_CONSUL_TOKEN (optional, for Consul ACL)
+	DiscoveryMode string // env: SYNC_DISCOVERY_MODE ("consul" or "mdns", default: "consul")
 }
 
 // OpenRouterConfig holds settings for OpenRouter API (multi-model gateway).
@@ -176,7 +179,10 @@ func Load(cfgPath string) (*Config, error) {
 			AutoDiscover: v.GetBool("sync.auto_discover"),
 			AutoPull:     v.GetBool("sync.auto_pull"),
 			AutoPush:     v.GetBool("sync.auto_push"),
-			InstanceName: v.GetString("sync.instance_name"),
+			InstanceName:  v.GetString("sync.instance_name"),
+			ConsulAddr:    v.GetString("sync.consul_addr"),
+			ConsulToken:   v.GetString("sync.consul_token"),
+			DiscoveryMode: v.GetString("sync.discovery_mode"),
 		},
 	}
 
@@ -299,7 +305,10 @@ func bindEnvs(v *viper.Viper) {
 		"sync.auto_discover": "SYNC_AUTO_DISCOVER",
 		"sync.auto_pull":     "SYNC_AUTO_PULL",
 		"sync.auto_push":     "SYNC_AUTO_PUSH",
-		"sync.instance_name": "SYNC_INSTANCE_NAME",
+		"sync.instance_name":  "SYNC_INSTANCE_NAME",
+		"sync.consul_addr":    "SYNC_CONSUL_ADDR",
+		"sync.consul_token":   "SYNC_CONSUL_TOKEN",
+		"sync.discovery_mode": "SYNC_DISCOVERY_MODE",
 	}
 	for key, env := range envMap {
 		v.MustBindEnv(key, env)
