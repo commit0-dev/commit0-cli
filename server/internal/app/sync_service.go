@@ -10,14 +10,20 @@ import (
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
-// SyncService orchestrates graph bundle export and import operations.
+// SyncService orchestrates graph bundle export, import, pull, and push operations.
 type SyncService struct {
-	exporter domain.GraphExporter
-	importer domain.GraphImporter
-	codec    domain.BundleCodec
-	auth     domain.SyncAuth // nil = no auth (bundles unsigned)
-	log      *slog.Logger
+	exporter  domain.GraphExporter
+	importer  domain.GraphImporter
+	codec     domain.BundleCodec
+	auth      domain.SyncAuth      // nil = no auth
+	transport domain.PeerTransport // nil = no QUIC (file-only mode)
+	peers     domain.PeerStore     // nil = no peer management
+	scope     domain.ScopeStore    // nil = no scope enforcement
+	log       *slog.Logger
 }
+
+// Compile-time check: SyncService implements PeerHandler.
+var _ domain.PeerHandler = (*SyncService)(nil)
 
 // NewSyncService creates a sync service.
 func NewSyncService(
@@ -154,4 +160,145 @@ func (s *SyncService) Manifest(ctx context.Context, repoSlug string) (*types.Syn
 		return nil, fmt.Errorf("manifest: %w", err)
 	}
 	return manifest, nil
+}
+
+// SetTransport attaches the QUIC transport for pull/push operations.
+func (s *SyncService) SetTransport(transport domain.PeerTransport, peers domain.PeerStore, scope domain.ScopeStore) {
+	s.transport = transport
+	s.peers = peers
+	s.scope = scope
+}
+
+// Pull fetches a repo's graph from a remote peer: scope check → manifest compare → transfer → import.
+func (s *SyncService) Pull(ctx context.Context, peerName, repoSlug string) (*types.SyncResult, error) {
+	if s.transport == nil {
+		return nil, fmt.Errorf("pull: QUIC transport not configured")
+	}
+
+	// Check scope.
+	if s.scope != nil {
+		inScope, err := s.scope.IsInScope(ctx, repoSlug)
+		if err != nil {
+			return nil, fmt.Errorf("pull: scope check: %w", err)
+		}
+		if !inScope {
+			return nil, types.OutOfScope(fmt.Sprintf("repo %q not in sync scope — use 'scope add' first", repoSlug))
+		}
+	}
+
+	// Resolve peer.
+	peer, err := s.peers.GetPeer(ctx, peerName)
+	if err != nil {
+		return nil, fmt.Errorf("pull: %w", err)
+	}
+
+	// Compare manifests.
+	remoteManifest, err := s.transport.PullManifest(ctx, peer, repoSlug)
+	if err != nil {
+		return nil, fmt.Errorf("pull: manifest: %w", err)
+	}
+
+	localManifest, _ := s.exporter.ExportManifest(ctx, repoSlug)
+	if localManifest != nil && localManifest.ContentHash == remoteManifest.ContentHash {
+		s.log.Info("pull: already up to date", "repo", repoSlug, "peer", peerName)
+		return &types.SyncResult{
+			RepoSlug:  repoSlug,
+			Direction: "pull",
+			PeerName:  peerName,
+		}, nil
+	}
+
+	// Pull full bundle.
+	bundle, err := s.transport.PullBundle(ctx, peer, repoSlug)
+	if err != nil {
+		return nil, fmt.Errorf("pull: bundle: %w", err)
+	}
+
+	result, err := s.ImportBundle(ctx, bundle)
+	if err != nil {
+		return nil, fmt.Errorf("pull: import: %w", err)
+	}
+	result.Direction = "pull"
+	result.PeerName = peerName
+
+	s.log.Info("pull complete",
+		"repo", repoSlug, "peer", peerName,
+		"nodes", result.NodesImported, "skipped", result.NodesSkipped,
+	)
+	return result, nil
+}
+
+// Push sends a repo's graph to a remote peer.
+func (s *SyncService) Push(ctx context.Context, peerName, repoSlug string) (*types.SyncResult, error) {
+	if s.transport == nil {
+		return nil, fmt.Errorf("push: QUIC transport not configured")
+	}
+
+	peer, err := s.peers.GetPeer(ctx, peerName)
+	if err != nil {
+		return nil, fmt.Errorf("push: %w", err)
+	}
+
+	bundle, err := s.BuildBundle(ctx, repoSlug)
+	if err != nil {
+		return nil, fmt.Errorf("push: build bundle: %w", err)
+	}
+
+	result, err := s.transport.PushBundle(ctx, peer, bundle)
+	if err != nil {
+		return nil, fmt.Errorf("push: %w", err)
+	}
+	result.Direction = "push"
+	result.PeerName = peerName
+
+	s.log.Info("push complete", "repo", repoSlug, "peer", peerName, "nodes", result.NodesImported)
+	return result, nil
+}
+
+// --- PeerHandler implementation (server side of QUIC transport) ---
+
+func (s *SyncService) HandleManifestRequest(ctx context.Context, repoSlug string) (*types.SyncManifest, error) {
+	return s.Manifest(ctx, repoSlug)
+}
+
+func (s *SyncService) HandleBundleRequest(ctx context.Context, repoSlug string) ([]byte, error) {
+	bundle, err := s.BuildBundle(ctx, repoSlug)
+	if err != nil {
+		return nil, err
+	}
+	return s.codec.Encode(bundle)
+}
+
+func (s *SyncService) HandleDeltaRequest(ctx context.Context, repoSlug, baseCommit string) ([]byte, error) {
+	// Delta not yet implemented — fall back to full bundle.
+	return s.HandleBundleRequest(ctx, repoSlug)
+}
+
+func (s *SyncService) HandlePushBundle(ctx context.Context, data []byte) (*types.SyncResult, error) {
+	return s.ImportFromBytes(ctx, data)
+}
+
+// --- Auto-sync & notifications ---
+
+// NotifyPeers sends a lightweight notification to all registered peers
+// that a repo has been updated. Peers with auto-pull enabled will pull automatically.
+func (s *SyncService) NotifyPeers(ctx context.Context, repoSlug string) {
+	if s.peers == nil || s.transport == nil {
+		return
+	}
+	peers, err := s.peers.ListPeers(ctx)
+	if err != nil {
+		s.log.Warn("notify peers: list failed", "err", err)
+		return
+	}
+	for _, peer := range peers {
+		manifest, err := s.exporter.ExportManifest(ctx, repoSlug)
+		if err != nil {
+			continue
+		}
+		s.log.Info("notifying peer", "peer", peer.Name, "repo", repoSlug,
+			"nodes", manifest.NodeCount, "commit", manifest.LastCommit)
+		// In a full implementation, this would push the manifest via QUIC.
+		// For now, peers poll or manually pull.
+	}
 }

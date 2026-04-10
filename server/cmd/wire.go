@@ -14,6 +14,7 @@ import (
 	gitadapter "github.com/commit0-dev/commit0/server/internal/adapters/git"
 	localadapter "github.com/commit0-dev/commit0/server/internal/adapters/local"
 	"github.com/commit0-dev/commit0/server/internal/adapters/openrouter"
+	quicadapter "github.com/commit0-dev/commit0/server/internal/adapters/quic"
 	syncadapter "github.com/commit0-dev/commit0/server/internal/adapters/sync"
 	"github.com/commit0-dev/commit0/server/internal/adapters/surreal"
 	"github.com/commit0-dev/commit0/server/internal/adapters/treesitter"
@@ -187,6 +188,7 @@ type serveServices struct {
 	rootCause  *app.RootCauseAnalysisService
 	apiSurface *app.APISurfaceService
 	syncSvc    *app.SyncService
+	transport  domain.PeerTransport
 	peerStore  domain.PeerStore
 	scopeStore domain.ScopeStore
 	memMgr     *memory.Manager
@@ -244,8 +246,9 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 
 	apiSurfaceSvc := app.NewAPISurfaceService(d.db, flowSvc, d.explainer, cfg)
 
-	// Sync service (P2P graph sync — Sub-Phase A: export/import only).
+	// Sync service (P2P graph sync).
 	var syncSvc *app.SyncService
+	var quicTransport domain.PeerTransport
 	codec, err := syncadapter.NewCBORCodec()
 	if err != nil {
 		log.Warn("sync: CBOR codec init failed", "err", err)
@@ -258,6 +261,13 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 			log.Info("sync enabled without auth (no SYNC_PASSPHRASE set)")
 		}
 		syncSvc = app.NewSyncService(d.db, d.db, codec, auth)
+
+		// QUIC transport for P2P data plane.
+		if qt, qErr := quicadapter.NewTransport(cfg.Sync.Passphrase, codec); qErr != nil {
+			log.Warn("sync: QUIC transport init failed", "err", qErr)
+		} else {
+			quicTransport = qt
+		}
 	}
 
 	return &serveServices{
@@ -273,6 +283,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		rootCause:  rootCauseSvc,
 		apiSurface: apiSurfaceSvc,
 		syncSvc:    syncSvc,
+		transport:  quicTransport,
 		peerStore:  d.db.AsPeerStore(),
 		scopeStore: d.db.AsScopeStore(),
 		memMgr:     memMgr,

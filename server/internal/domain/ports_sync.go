@@ -60,3 +60,27 @@ type SyncAuth interface {
 	// VerifyBundle checks the integrity signature.
 	VerifyBundle(contentHash, signature string) error
 }
+
+// PeerTransport handles the data plane for P2P graph sync over QUIC.
+type PeerTransport interface {
+	// PullManifest retrieves the remote peer's manifest for a repo.
+	PullManifest(ctx context.Context, peer *types.PeerInfo, repoSlug string) (*types.SyncManifest, error)
+	// PullBundle retrieves the full graph bundle from a peer.
+	PullBundle(ctx context.Context, peer *types.PeerInfo, repoSlug string) (*types.GraphBundle, error)
+	// PullDelta retrieves incremental changes since baseCommit.
+	PullDelta(ctx context.Context, peer *types.PeerInfo, repoSlug, baseCommit string) (*types.SyncDelta, error)
+	// PushBundle sends a graph bundle to a peer.
+	PushBundle(ctx context.Context, peer *types.PeerInfo, bundle *types.GraphBundle) (*types.SyncResult, error)
+	// Serve starts listening for incoming peer connections.
+	Serve(ctx context.Context, addr string, handler PeerHandler) error
+	// Close shuts down the transport.
+	Close() error
+}
+
+// PeerHandler processes incoming requests from remote peers (server side).
+type PeerHandler interface {
+	HandleManifestRequest(ctx context.Context, repoSlug string) (*types.SyncManifest, error)
+	HandleBundleRequest(ctx context.Context, repoSlug string) ([]byte, error)
+	HandleDeltaRequest(ctx context.Context, repoSlug, baseCommit string) ([]byte, error)
+	HandlePushBundle(ctx context.Context, data []byte) (*types.SyncResult, error)
+}

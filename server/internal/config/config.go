@@ -28,8 +28,12 @@ type Config struct {
 
 // SyncConfig holds settings for P2P graph sync.
 type SyncConfig struct {
-	Passphrase string // env: SYNC_PASSPHRASE (shared secret for auth)
-	QUICPort   int    // env: SYNC_QUIC_PORT (default: 9443)
+	Passphrase   string // env: SYNC_PASSPHRASE (shared secret for auth)
+	QUICPort     int    // env: SYNC_QUIC_PORT (default: 9443)
+	AutoDiscover bool   // env: SYNC_AUTO_DISCOVER (mDNS LAN discovery, default: false)
+	AutoPull     bool   // env: SYNC_AUTO_PULL (auto-pull on notification, default: false)
+	AutoPush     bool   // env: SYNC_AUTO_PUSH (auto-push after index, default: false)
+	InstanceName string // env: SYNC_INSTANCE_NAME (mDNS instance name, default: hostname)
 }
 
 // OpenRouterConfig holds settings for OpenRouter API (multi-model gateway).
@@ -167,8 +171,12 @@ func Load(cfgPath string) (*Config, error) {
 			WriteTimeoutSec: v.GetInt("server.write_timeout_sec"),
 		},
 		Sync: SyncConfig{
-			Passphrase: v.GetString("sync.passphrase"),
-			QUICPort:   v.GetInt("sync.quic_port"),
+			Passphrase:   v.GetString("sync.passphrase"),
+			QUICPort:     v.GetInt("sync.quic_port"),
+			AutoDiscover: v.GetBool("sync.auto_discover"),
+			AutoPull:     v.GetBool("sync.auto_pull"),
+			AutoPush:     v.GetBool("sync.auto_push"),
+			InstanceName: v.GetString("sync.instance_name"),
 		},
 	}
 
@@ -286,8 +294,12 @@ func bindEnvs(v *viper.Viper) {
 		"server.read_timeout_sec":  "SERVER_READ_TIMEOUT",
 		"server.write_timeout_sec": "SERVER_WRITE_TIMEOUT",
 
-		"sync.passphrase": "SYNC_PASSPHRASE",
-		"sync.quic_port":  "SYNC_QUIC_PORT",
+		"sync.passphrase":    "SYNC_PASSPHRASE",
+		"sync.quic_port":     "SYNC_QUIC_PORT",
+		"sync.auto_discover": "SYNC_AUTO_DISCOVER",
+		"sync.auto_pull":     "SYNC_AUTO_PULL",
+		"sync.auto_push":     "SYNC_AUTO_PUSH",
+		"sync.instance_name": "SYNC_INSTANCE_NAME",
 	}
 	for key, env := range envMap {
 		v.MustBindEnv(key, env)

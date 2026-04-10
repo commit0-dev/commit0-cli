@@ -33,6 +33,10 @@ func (s *Server) SetSyncService(
 	sync.POST("/import", s.handleSyncImport)
 	sync.GET("/manifest/:slug", s.handleSyncManifest)
 
+	// Pull/Push
+	sync.POST("/pull", s.handleSyncPull)
+	sync.POST("/push", s.handleSyncPush)
+
 	// Remote peer management
 	sync.POST("/remotes", s.handleAddRemote)
 	sync.GET("/remotes", s.handleListRemotes)
@@ -199,4 +203,42 @@ func (s *Server) handleRemoveScope(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"repo_slug": slug, "status": "removed"})
+}
+
+// --- Pull/Push handlers ---
+
+func (s *Server) handleSyncPull(c *gin.Context) {
+	var req struct {
+		PeerName string `json:"peer_name" binding:"required"`
+		RepoSlug string `json:"repo_slug" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+
+	result, err := s.syncSvc.Pull(c.Request.Context(), req.PeerName, req.RepoSlug)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) handleSyncPush(c *gin.Context) {
+	var req struct {
+		PeerName string `json:"peer_name" binding:"required"`
+		RepoSlug string `json:"repo_slug" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+
+	result, err := s.syncSvc.Push(c.Request.Context(), req.PeerName, req.RepoSlug)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

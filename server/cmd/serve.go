@@ -56,6 +56,17 @@ var serveCmd = &cobra.Command{
 		// Register sync routes if the sync service is available.
 		if svcs.syncSvc != nil {
 			server.SetSyncService(svcs.syncSvc, svcs.peerStore, svcs.scopeStore, cfg.Sync.Passphrase)
+
+			// Start QUIC transport for P2P data plane.
+			if svcs.transport != nil {
+				svcs.syncSvc.SetTransport(svcs.transport, svcs.peerStore, svcs.scopeStore)
+				quicAddr := fmt.Sprintf(":%d", cfg.Sync.QUICPort)
+				go func() {
+					if err := svcs.transport.Serve(ctx, quicAddr, svcs.syncSvc); err != nil {
+						slog.Error("QUIC transport error", "err", err)
+					}
+				}()
+			}
 		}
 
 		// Handle OS signals for graceful shutdown.

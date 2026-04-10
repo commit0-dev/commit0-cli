@@ -95,8 +95,57 @@ var syncManifestCmd = &cobra.Command{
 	},
 }
 
+var pullCmd = &cobra.Command{
+	Use:   "pull <remote> <repo-slug>",
+	Short: "Pull graph data from a remote peer",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := sdk.New(serverURL(cmd))
+		result, err := c.SyncPull(cmd.Context(), sdk.SyncPullRequest{
+			PeerName: args[0],
+			RepoSlug: args[1],
+		})
+		if err != nil {
+			return err
+		}
+
+		if result.NodesImported == 0 && result.NodesSkipped == 0 {
+			fmt.Println("Already up to date.")
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "Pulled %s from %s: %d nodes, %d edges (%d skipped)\n",
+			result.RepoSlug, result.PeerName, result.NodesImported, result.EdgesImported, result.NodesSkipped)
+		if result.ReEmbedQueued {
+			fmt.Fprintln(os.Stderr, "Re-embedding queued for imported nodes.")
+		}
+		return nil
+	},
+}
+
+var pushCmd = &cobra.Command{
+	Use:   "push <remote> <repo-slug>",
+	Short: "Push graph data to a remote peer",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := sdk.New(serverURL(cmd))
+		result, err := c.SyncPush(cmd.Context(), sdk.SyncPullRequest{
+			PeerName: args[0],
+			RepoSlug: args[1],
+		})
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(os.Stderr, "Pushed %s to %s: %d nodes imported on remote\n",
+			result.RepoSlug, result.PeerName, result.NodesImported)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(syncCmd)
+	rootCmd.AddCommand(pullCmd)
+	rootCmd.AddCommand(pushCmd)
 	syncCmd.AddCommand(syncExportCmd)
 	syncCmd.AddCommand(syncImportCmd)
 	syncCmd.AddCommand(syncManifestCmd)
