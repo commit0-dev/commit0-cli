@@ -162,6 +162,75 @@ func TestResolver_NonCallEdgesUntouched(t *testing.T) {
 
 // ── TestResolver_ModuleNodesSkipped ──────────────────────────────────────────
 
+// ── TestResolver_SuffixMatchResolvesReceiverCalls ───────────────────────────
+// Verifies that "s.ImportBundle" resolves to "app.SyncService.ImportBundle"
+// via suffix matching — the key fix for method-on-receiver call resolution.
+func TestResolver_SuffixMatchResolvesReceiverCalls(t *testing.T) {
+	nodes := []types.CodeNode{
+		{ID: "function:app⋅SyncService⋅Pull", Kind: types.NodeFunction, Qualified: "app.SyncService.Pull", FilePath: "sync.go"},
+		{ID: "function:app⋅SyncService⋅ImportBundle", Kind: types.NodeFunction, Qualified: "app.SyncService.ImportBundle", FilePath: "sync.go"},
+		{ID: "function:app⋅SyncService⋅BuildBundle", Kind: types.NodeFunction, Qualified: "app.SyncService.BuildBundle", FilePath: "sync.go"},
+		{ID: "file:sync⋅go", Kind: types.NodeFile, FilePath: "sync.go", Qualified: "sync.go"},
+	}
+	edges := []types.CodeEdge{
+		// Tree-sitter gives us "s.ImportBundle" as the raw call target
+		{Kind: types.EdgeCalls, FromID: "function:app⋅SyncService⋅Pull", ToID: "s.ImportBundle"},
+		// And "s.BuildBundle" from Push
+		{Kind: types.EdgeCalls, FromID: "function:app⋅SyncService⋅Pull", ToID: "s.BuildBundle"},
+	}
+
+	r := &Resolver{}
+	_, resolved := r.Resolve(nodes, edges)
+
+	// Check that suffix matching resolved the calls
+	callEdges := 0
+	for _, e := range resolved {
+		if e.Kind != types.EdgeCalls {
+			continue
+		}
+		callEdges++
+		switch e.ToID {
+		case "function:app⋅SyncService⋅ImportBundle":
+			// OK — resolved via suffix ".ImportBundle"
+		case "function:app⋅SyncService⋅BuildBundle":
+			// OK — resolved via suffix ".BuildBundle"
+		default:
+			t.Errorf("unresolved call edge: FromID=%s ToID=%s", e.FromID, e.ToID)
+		}
+	}
+	if callEdges != 2 {
+		t.Errorf("expected 2 call edges, got %d", callEdges)
+	}
+}
+
+// ── TestResolver_SuffixMatchSkipsAmbiguous ──────────────────────────────────
+// When multiple functions share the same method name, suffix matching must
+// NOT resolve (ambiguous) to avoid wrong edges.
+func TestResolver_SuffixMatchSkipsAmbiguous(t *testing.T) {
+	nodes := []types.CodeNode{
+		{ID: "function:a⋅Foo⋅Close", Kind: types.NodeFunction, Qualified: "a.Foo.Close", FilePath: "a.go"},
+		{ID: "function:b⋅Bar⋅Close", Kind: types.NodeFunction, Qualified: "b.Bar.Close", FilePath: "b.go"},
+		{ID: "function:main⋅run", Kind: types.NodeFunction, Qualified: "main.run", FilePath: "main.go"},
+		{ID: "file:main⋅go", Kind: types.NodeFile, FilePath: "main.go", Qualified: "main.go"},
+	}
+	edges := []types.CodeEdge{
+		{Kind: types.EdgeCalls, FromID: "function:main⋅run", ToID: "x.Close"},
+	}
+
+	r := &Resolver{}
+	_, resolved := r.Resolve(nodes, edges)
+
+	for _, e := range resolved {
+		if e.Kind == types.EdgeCalls && e.FromID == "function:main⋅run" {
+			if e.ToID != "x.Close" {
+				t.Errorf("ambiguous call should NOT be resolved; got ToID=%s", e.ToID)
+			}
+			return
+		}
+	}
+	t.Error("call edge not found")
+}
+
 func TestResolver_ModuleNodesSkipped(t *testing.T) {
 	nodes := []types.CodeNode{
 		{ID: "file:f⋅go", Kind: types.NodeFile, FilePath: "f.go", Qualified: "f.go"},
