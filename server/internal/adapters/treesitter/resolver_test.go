@@ -231,6 +231,38 @@ func TestResolver_SuffixMatchSkipsAmbiguous(t *testing.T) {
 	t.Error("call edge not found")
 }
 
+// Strategy 4: interface dispatch — ambiguous suffix resolved to single non-test impl.
+func TestResolver_InterfaceDispatchResolvesToProductionImpl(t *testing.T) {
+	nodes := []types.CodeNode{
+		// Production implementation
+		{ID: "function:surreal⋅SurrealAdapter⋅GetNode", Kind: types.NodeFunction, Qualified: "surreal.SurrealAdapter.GetNode", FilePath: "adapters/surreal/graph_store.go"},
+		// Test stub (should be excluded)
+		{ID: "function:app⋅stubGraphStore⋅GetNode", Kind: types.NodeFunction, Qualified: "app.stubGraphStore.GetNode", FilePath: "app/stubs_test.go"},
+		// Another test stub
+		{ID: "function:http⋅httpTestGraphStore⋅GetNode", Kind: types.NodeFunction, Qualified: "http.httpTestGraphStore.GetNode", FilePath: "adapters/http/handlers_test.go"},
+		// Caller
+		{ID: "function:app⋅IndexService⋅Index", Kind: types.NodeFunction, Qualified: "app.IndexService.Index", FilePath: "app/index_service.go"},
+		{ID: "file:app⋅index", Kind: types.NodeFile, FilePath: "app/index_service.go", Qualified: "app/index_service.go"},
+	}
+	edges := []types.CodeEdge{
+		// is.store.GetNode — ambiguous suffix ".GetNode" matches 3 types
+		{Kind: types.EdgeCalls, FromID: "function:app⋅IndexService⋅Index", ToID: "is.store.GetNode"},
+	}
+
+	r := &Resolver{}
+	_, resolved := r.Resolve(nodes, edges)
+
+	for _, e := range resolved {
+		if e.Kind == types.EdgeCalls && e.FromID == "function:app⋅IndexService⋅Index" {
+			if e.ToID != "function:surreal⋅SurrealAdapter⋅GetNode" {
+				t.Errorf("interface dispatch: got ToID=%s, want surreal.SurrealAdapter.GetNode", e.ToID)
+			}
+			return
+		}
+	}
+	t.Error("call edge not found")
+}
+
 func TestResolver_SamePackagePrefixResolves(t *testing.T) {
 	nodes := []types.CodeNode{
 		{ID: "function:app⋅IndexService⋅Reembed", Kind: types.NodeFunction, Qualified: "app.IndexService.Reembed", FilePath: "index.go"},

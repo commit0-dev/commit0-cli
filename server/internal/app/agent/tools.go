@@ -134,6 +134,7 @@ func getRepoPath(ctx tool.Context) string {
 type searchInput struct {
 	Question string `json:"question"`
 	TopK     int    `json:"top_k"`
+	FilePath string `json:"file_path,omitempty"`
 }
 type searchOutput struct {
 	ResultCount int            `json:"result_count"`
@@ -168,6 +169,7 @@ func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
 		result, err := svc.Query(context.Background(), app.QueryRequest{
 			Question: input.Question, RepoSlug: getRepoSlug(ctx), TopK: topK,
 			NoExplain: true, // agent generates its own explanation — skip LLM explain call
+			FilePath: input.FilePath,
 		})
 		if err != nil {
 			return searchOutput{}, err

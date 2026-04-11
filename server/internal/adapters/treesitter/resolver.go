@@ -111,6 +111,30 @@ func (r *Resolver) Resolve(nodes []types.CodeNode, edges []types.CodeEdge) ([]ty
 			if !suffixAmbiguous[suffix] {
 				if id, ok := suffixToID[suffix]; ok {
 					e.ToID = id
+					continue
+				}
+			}
+
+			// Strategy 4: interface dispatch — for ambiguous suffix matches
+			// (e.g., ".GetNode" matches SurrealAdapter, stubGraphStore, etc.),
+			// resolve to the single non-test production implementation.
+			// This works because commit0 uses hexagonal arch: each interface
+			// has exactly one production adapter + test stubs in *_test.go.
+			if suffixAmbiguous[suffix] {
+				var candidates []string
+				for _, n := range nodes {
+					if n.Kind != types.NodeFunction || n.Qualified == "" {
+						continue
+					}
+					if strings.HasSuffix(n.Qualified, suffix[1:]) &&
+						!strings.Contains(n.FilePath, "_test.go") &&
+						!strings.HasPrefix(n.Name, "Test") {
+						candidates = append(candidates, n.ID)
+					}
+				}
+				if len(candidates) == 1 {
+					e.ToID = candidates[0]
+					continue
 				}
 			}
 		}
