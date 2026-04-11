@@ -1,94 +1,136 @@
 ---
 name: commit0-self-dev-loop
 description: >
-  Autonomous self-development loop. Uses ONLY commit0-cli commands to explore
-  the codebase. When a tool fails, is slow, gives wrong results, or is missing —
-  THAT is the finding. Writes all findings to .claude/self-dev-findings.md.
-  DO NOT use Grep, Glob, Read, Agent, or any non-commit0 tool. This forces you
-  to experience the product as a real user. TRIGGER when: user says self-dev,
-  self-improve, use commit0 on itself, or run the loop.
+  Autonomous self-development loop. Uses ONLY commit0-cli commands to DISCOVER
+  issues (search, trace, blast, analyze). When a tool fails, is slow, gives wrong
+  results, or is missing — THAT is the finding. File Read/Write/Edit ARE allowed
+  for IMPLEMENTING fixes. Writes findings to .claude/self-dev-findings.md.
+  TRIGGER when: user says self-dev, self-improve, use commit0 on itself, run the loop.
 ---
 
 # commit0 Self-Development Loop
 
-## The Rule
+## Two Modes
 
-**You may ONLY use commit0-cli commands.** No Grep. No Glob. No Read. No Agent subagents. Only:
+**Discovery mode** — ONLY commit0-cli. No Grep, Glob, Agent subagents.
+**Fix mode** — Read, Write, Edit, Bash (go build/test) ARE allowed to implement fixes.
+
+The rule: you must DISCOVER problems using commit0's own tools. But you may use
+standard dev tools to FIX those problems.
+
+---
+
+## Discovery Mode — commit0-cli ONLY
 
 ```bash
+commit0-cli repo list
 commit0-cli query "..." --repo <slug> --no-agent
 commit0-cli query "..." --repo <slug>          # agent mode
 commit0-cli trace <symbol> --repo <slug> --direction forward|reverse
 commit0-cli blast <symbol> --repo <slug>
 commit0-cli analyze --repo <slug> --focus <area>
 commit0-cli index .
-commit0-cli repo list
 ```
 
-If you need information and commit0 can't provide it — **that's a finding**. Write it down.
+If you need information and commit0 can't provide it — **that's a finding**.
 
-## The Loop
+### What to try
 
-### Step 1: Use the tools
-
-Run commit0-cli commands to understand the codebase. Try to answer real questions:
+Run these commands and record every friction:
 - "What does function X do?" → `query`
 - "Who calls function X?" → `trace --direction reverse`
 - "What breaks if I change X?" → `blast`
-- "What are the problems in this codebase?" → `analyze`
+- "What are the problems?" → `analyze`
+- "Show me this function's code" → ??? (missing tool = finding)
+- "List functions in this file" → ??? (missing tool = finding)
 
-### Step 2: Record every friction point
+### What to record
 
-For EVERY command you run, note:
+For EVERY command, note in `.claude/self-dev-findings.md`:
 - Did it return useful results? If not, why?
-- Was it fast enough? (>5s for a simple query = too slow)
+- Was it fast enough? (>5s = too slow for simple queries)
 - Did it find the right code? Or irrelevant results?
 - Was there a tool you needed but doesn't exist?
 - Did it crash, timeout, or return an error?
 
-Write ALL findings to `.claude/self-dev-findings.md` in this format:
+Format:
 
 ```markdown
-## Findings — [date]
-
 ### Tool Gaps (commit0 is missing this capability)
-- [ ] Description of what's needed and why
+- [ ] Description — why it's needed
 
 ### Wrong Results (tool returned incorrect/irrelevant output)
-- [ ] Command run, what it returned, what was expected
+- [ ] Command → what returned → what expected
 
 ### Performance Issues (too slow, timeout, crash)
-- [ ] Command run, how long it took, what happened
+- [ ] Command → how long → what happened
 
 ### UX Issues (confusing output, bad defaults, missing flags)
-- [ ] Description of the friction
+- [ ] Description of friction
 ```
 
-### Step 3: Prioritize and plan
+---
 
-After collecting findings, rank them:
-1. **Blocking** — tool doesn't work at all (crash, wrong results)
-2. **Major** — tool works but gives useless results
-3. **Minor** — tool works but UX is rough
+## Fix Mode — Standard Dev Tools Allowed
 
-For each blocking/major finding, write a concrete improvement plan in the findings file.
+After discovering issues, switch to fix mode:
 
-### Step 4: Implement fixes
+1. **Read** the relevant source files
+2. **Edit/Write** the fix
+3. **Bash**: `go vet`, `go test`, `go build` to verify
+4. **Re-run the commit0-cli command** that found the issue to verify the fix
 
-Fix the highest-priority tool issues. Then re-run the same commands to verify the fix worked.
+### Rules for fixing
 
-### Step 5: Repeat
+- Follow CLAUDE.md rules (hexagonal arch, domain errors, etc.)
+- Read the file before editing
+- Run `go vet` and `go test` after every change
+- Re-run the original commit0-cli command to prove the fix works
+- Update `.claude/self-dev-findings.md` — mark fixed items with [x]
 
-After fixing, go back to Step 1. Use the improved tools. Find new issues. Fix them. This is the loop.
+---
 
-## What NOT to do
+## The Loop
 
-- Do NOT use Grep to "cheat" around commit0's limitations
-- Do NOT use Read to look at files directly
-- Do NOT use Glob to find files
-- Do NOT use Agent subagents for exploration
-- If you catch yourself reaching for a non-commit0 tool, STOP and ask: "Why can't commit0 do this?" — then write that as a finding
+```
+Step 1: DISCOVER (commit0-cli only)
+  → Run tools, record friction in findings file
 
-## The goal
+Step 2: PRIORITIZE
+  → Blocking > Major > Minor
+  → Pick top 1-3 findings to fix
 
-The goal is NOT to find bugs in the code. The goal is to find gaps in the TOOLS. Every friction point is a product improvement opportunity. The findings file becomes the roadmap.
+Step 3: FIX (standard dev tools allowed)
+  → Read source, implement fix, test, verify
+
+Step 4: VERIFY (commit0-cli only)
+  → Re-run the original command that exposed the issue
+  → Did the fix work? Update findings file
+
+Step 5: RE-INDEX
+  → commit0-cli index .
+  → Graph now reflects the fixes
+
+Step 6: REPEAT from Step 1
+  → Stop when no blocking/major findings remain
+```
+
+---
+
+## Quick Reference
+
+```bash
+# Discovery
+commit0-cli repo list
+commit0-cli query "question" --repo <slug> --no-agent
+commit0-cli trace <Symbol> --repo <slug> --direction forward|reverse
+commit0-cli blast <Symbol> --repo <slug>
+commit0-cli analyze --repo <slug> --focus all|architecture|dead-code|consistency|hotspots|data-flow|temporal
+commit0-cli index .
+
+# Fix verification
+go vet ./server/... ./cli/... ./sdk/...
+go test ./server/internal/app/... ./server/internal/adapters/...
+go build -o bin/commit0 ./server
+go build -o bin/commit0-cli ./cli
+```
