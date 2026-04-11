@@ -193,10 +193,12 @@ UPSERT type::record($record_id) CONTENT {
     start_line:   $start_line,
     end_line:     $end_line,
     docstring:    $docstring,
+    body:         $body,
     summary:      $summary,
     concepts:     $concepts,
     content_hash: $content_hash,
-    embedding:    $embedding
+    embedding:    $embedding,
+    visibility:   $visibility
 };`
 	case "file":
 		return `

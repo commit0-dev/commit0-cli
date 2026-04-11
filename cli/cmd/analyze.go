@@ -102,5 +102,5 @@ a structured report with findings and suggested fixes.`,
 func init() {
 	rootCmd.AddCommand(analyzeCmd)
 	analyzeCmd.Flags().String("repo", "", "Repository slug (required)")
-	analyzeCmd.Flags().String("focus", "all", "Analysis focus: architecture, dead-code, consistency, hotspots, all")
+	analyzeCmd.Flags().String("focus", "all", "Analysis focus: architecture, dead-code, consistency, hotspots, data-flow, temporal, all")
 }
