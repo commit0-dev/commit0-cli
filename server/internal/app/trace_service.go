@@ -85,6 +85,10 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 		return nil, fmt.Errorf("trace %s: %w", req.Direction, err)
 	}
 
+	// Dedup hops by qualified name — graph traversal may return multiple
+	// edge paths to the same node, causing duplicates.
+	hops = dedupHops(hops)
+
 	// Build explanation (non-fatal). Structured output first, fallback to streaming.
 	graphStart := time.Now()
 	explanation := ""
@@ -185,6 +189,27 @@ func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) 
 	}
 
 	return nil, domain.NotFound(fmt.Sprintf("symbol %s not found", symbol))
+}
+
+// dedupHops removes duplicate nodes from trace results, keeping the first occurrence.
+func dedupHops(hops []types.TraceHop) []types.TraceHop {
+	seen := make(map[string]bool)
+	result := make([]types.TraceHop, 0, len(hops))
+	for _, h := range hops {
+		key := h.Node.Qualified
+		if key == "" {
+			key = h.Node.ID
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if len(h.Children) > 0 {
+			h.Children = dedupHops(h.Children)
+		}
+		result = append(result, h)
+	}
+	return result
 }
 
 // collectHopExcerpts recursively collects code excerpts from trace hops.
