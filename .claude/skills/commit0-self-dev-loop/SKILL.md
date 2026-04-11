@@ -29,17 +29,61 @@ Fixes MUST follow the written solution.
 
 ### Discovery Mode — commit0-cli ONLY
 
+Use these tools to explore the codebase and find gaps. No Grep, Glob, Read, or
+Agent subagents. If commit0 can't answer your question — that's a finding.
+
+#### Search (semantic, ranked)
 ```bash
-commit0-cli repo list
-commit0-cli query "..." --repo <slug> --no-agent
-commit0-cli query "..." --repo <slug>
-commit0-cli trace <symbol> --repo <slug> --direction forward|reverse
-commit0-cli blast <symbol> --repo <slug>
-commit0-cli analyze --repo <slug> --focus all|architecture|dead-code|consistency|hotspots|data-flow|temporal
-commit0-cli index .
+commit0-cli query "how does X work" --repo <slug> --no-agent --no-explain
+commit0-cli query "functions related to sync" --repo <slug> --no-agent --no-explain --top-k 20
 ```
 
-No Grep. No Glob. No Agent subagents. If commit0 can't answer your question, that's a finding.
+**Filters:**
+```bash
+--kind function|class|file|module    # filter by node kind
+--file server/internal/app/          # filter by file/directory prefix
+--no-explain                         # skip LLM explanation (6x faster)
+```
+
+#### Read code
+```bash
+commit0-cli show <symbol> --repo <slug>          # print function/struct body
+commit0-cli show Pull --repo <slug>              # partial names work (fuzzy resolve)
+commit0-cli ls <file-path> --repo <slug>         # list all nodes in a file
+```
+
+#### Trace call chains
+```bash
+commit0-cli trace <symbol> --repo <slug> --direction forward   # what does it call?
+commit0-cli trace <symbol> --repo <slug> --direction reverse   # who calls it?
+commit0-cli trace ImportBundle --repo <slug> --direction reverse --depth 3
+```
+Partial names work. 4 resolution strategies: exact → same-package → suffix → interface dispatch.
+
+#### Impact analysis
+```bash
+commit0-cli blast <symbol> --repo <slug>            # transitive blast radius
+commit0-cli blast ImportBundle --repo <slug>         # partial names work
+```
+
+#### Self-analysis (agent-powered, uses all tools internally)
+```bash
+commit0-cli analyze --repo <slug> --focus all
+commit0-cli analyze --repo <slug> --focus architecture    # hexagonal layer violations
+commit0-cli analyze --repo <slug> --focus dead-code       # unreachable functions
+commit0-cli analyze --repo <slug> --focus consistency     # handler ↔ SDK ↔ CLI gaps
+commit0-cli analyze --repo <slug> --focus hotspots        # high blast-radius nodes
+commit0-cli analyze --repo <slug> --focus data-flow       # sensitive data paths, mutations
+commit0-cli analyze --repo <slug> --focus temporal        # high-churn risky code
+```
+
+#### Server management
+```bash
+commit0-cli status                    # server state: idle or indexing (N jobs)
+commit0-cli repo list                 # list indexed repos
+commit0-cli index .                   # incremental index (skips unchanged files)
+commit0-cli index . --reparse         # re-parse ALL files with current resolver (no delete)
+```
 
 ### Fix Mode — Standard dev tools allowed
 
@@ -48,11 +92,37 @@ But ONLY after writing the solution in SOLUTION.md.
 
 ---
 
+## Architecture Awareness
+
+commit0 has **6 analysis techniques** across **13 edge types**. When investigating
+issues, consider ALL of them — not just call graphs:
+
+| Technique | Edge Types | Use For |
+|-----------|-----------|---------|
+| Call graph | calls, imports, defines, inherits, uses | Who calls what, dependencies |
+| Data flow | data_flow, reads, writes | How data moves, field mutations, taint |
+| Control flow | control_flow | If/else branches, loops, defers |
+| Data dependence | data_dep | Variable def-use chains |
+| Route discovery | route | HTTP endpoints, handler chains |
+| Temporal | introduced_commit, last_modified | When code changed, who changed it |
+
+The resolver has **4 strategies** for call edge resolution:
+1. Exact match (qualified name)
+2. Same-package prefix (bare function → pkg.Function)
+3. Suffix match (s.Method → .Method)
+4. Interface dispatch (ambiguous → single non-test production impl)
+
+**Database**: Dual connection pool — 8 read + 4 write connections.
+Queries work during indexing. Configurable via `SURREAL_READ_POOL`, `SURREAL_WRITE_POOL`.
+
+---
+
 ## The Loop
 
 ### Step 1: DISCOVER (commit0-cli only)
 
-Run tools. Try to answer real questions about the codebase. Record every friction point in `FINDINGS.md`. Add new entries to `BACKLOG.md` with status `open`.
+Run tools. Try to answer real questions about the codebase. Record every friction
+in `FINDINGS.md`. Add new entries to `BACKLOG.md` with status `open`.
 
 ### Step 2: PRIORITIZE
 
@@ -83,13 +153,15 @@ Fix the code exactly as specified in the solution. No extra changes.
 Re-run the exact commit0-cli command from the solution's verification section.
 Did the fix work?
 
-- **Yes** → Update `BACKLOG.md` status to `solved`. Move solution to "Completed" section in `SOLUTION.md`. Update `FINDINGS.md` to mark item `[x]`.
+- **Yes** → Update `BACKLOG.md` status to `solved`. Move solution to "Completed"
+  section in `SOLUTION.md`. Update `FINDINGS.md` to mark item `[x]`.
 - **No** → Revise solution, try again.
 
 ### Step 6: RE-INDEX
 
 ```bash
-commit0-cli index .
+commit0-cli index .              # incremental (fast, skips unchanged)
+commit0-cli index . --reparse    # full re-parse (after resolver changes)
 ```
 
 ### Step 7: REPEAT from Step 1
@@ -101,13 +173,27 @@ Stop when: no `blocking` or `major` items remain in BACKLOG.md, or user says sto
 ## Quick Reference
 
 ```bash
-# Discovery
+# Discovery — search
+commit0-cli query "question" --repo <slug> --no-agent --no-explain
+commit0-cli query "question" --repo <slug> --no-agent --no-explain --kind function
+commit0-cli query "question" --repo <slug> --no-agent --no-explain --file server/internal/app/
+
+# Discovery — read code
+commit0-cli show <symbol> --repo <slug>
+commit0-cli ls <file-path> --repo <slug>
+
+# Discovery — graph analysis
+commit0-cli trace <symbol> --repo <slug> --direction forward|reverse
+commit0-cli blast <symbol> --repo <slug>
+commit0-cli analyze --repo <slug> --focus all|architecture|dead-code|consistency|hotspots|data-flow|temporal
+
+# Discovery — server state
+commit0-cli status
 commit0-cli repo list
-commit0-cli query "question" --repo <slug> --no-agent
-commit0-cli trace <Symbol> --repo <slug> --direction forward|reverse
-commit0-cli blast <Symbol> --repo <slug>
-commit0-cli analyze --repo <slug> --focus <area>
+
+# Indexing
 commit0-cli index .
+commit0-cli index . --reparse
 
 # Fix verification
 go vet ./server/... ./cli/... ./sdk/...

@@ -1,49 +1,45 @@
 ---
 name: commit0-search
-description: Semantic code search powered by commit0. TRIGGER when: you need to understand how a feature works, find implementations of a concept, or explore unfamiliar code. Use INSTEAD of Grep for conceptual questions like "how does X work?" or "where is Y implemented?". Grep is better for exact string matches; commit0-search is better for semantic understanding.
+description: Semantic code search powered by commit0. TRIGGER when you need to understand how a feature works, find implementations of a concept, or explore unfamiliar code. Use INSTEAD of Grep for conceptual questions. Grep is better for exact strings; commit0-search is better for semantic understanding. Supports --kind, --file, --no-explain filters.
 ---
 
 # commit0 Semantic Search
 
-## How to use
-
+## Basic usage
 ```bash
-commit0-cli query "your question" --repo <slug> --no-agent
+commit0-cli query "your question" --repo <slug> --no-agent --no-explain
 ```
 
-The `--no-agent` flag gives direct results (faster). Without it, an agent does multi-step analysis with tool use (deeper but slower).
+## Filters
+```bash
+--no-explain              # skip LLM explanation (1.5s vs 10s)
+--no-agent                # direct search, no multi-step agent
+--kind function           # only functions (also: class, file, module)
+--kind class              # only structs/interfaces
+--file server/internal/   # only results in this directory
+--top-k 20                # number of results (default 10)
+```
 
 ## Examples
-
 ```bash
-# Understanding a feature
-commit0-cli query "how does the embedding pipeline work?" --repo commit0-dev/commit0 --no-agent
+# Find port interfaces
+commit0-cli query "port interfaces" --repo <slug> --no-agent --no-explain --kind class
 
-# Finding implementations
-commit0-cli query "where is HMAC authentication implemented?" --repo commit0-dev/commit0 --no-agent
+# Functions in a specific package
+commit0-cli query "sync" --repo <slug> --no-agent --no-explain --file server/internal/app/sync
 
-# Finding related code
-commit0-cli query "all functions that interact with SurrealDB" --repo commit0-dev/commit0 --no-agent --top-k 20
+# Find HTTP handlers only
+commit0-cli query "HTTP handler" --repo <slug> --no-agent --no-explain --kind function --file server/internal/adapters/http/
+
+# Fast broad search
+commit0-cli query "authentication" --repo <slug> --no-agent --no-explain --top-k 20
 ```
 
-## Output
+## When to use this vs Grep
 
-Returns a table of functions/classes ranked by semantic relevance:
-- **Score**: combined vector similarity + full-text match + graph centrality
-- **Location**: file:line for each result
-- **Explanation**: LLM-generated summary of findings
-
-## When to use this instead of Grep
-
-| Use commit0-search | Use Grep |
+| commit0-search | Grep |
 |---|---|
 | "How does auth work?" | `domain.ErrAuthFailed` |
-| "Where is rate limiting?" | `SetRetryCount` |
 | "Functions related to sync" | `func.*Sync` |
+| "Port interfaces in domain" | `type.*interface` |
 | Conceptual, architectural | Exact string, symbol name |
-
-## Getting the repo slug
-
-```bash
-commit0-cli repo list
-```

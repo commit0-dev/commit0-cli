@@ -1,56 +1,46 @@
 ---
 name: commit0-trace
-description: Trace call chains through the codebase. TRIGGER when understanding data flow, debugging how a value reaches a destination, following a request from handler to database, or understanding who calls a function. Use INSTEAD of manually reading file-by-file.
+description: Trace call chains through the codebase. TRIGGER when understanding data flow, debugging how a value reaches a destination, following a request from handler to database, or understanding who calls a function. Partial names work. 4 resolver strategies including interface dispatch. Use INSTEAD of manually reading file-by-file.
 ---
 
 # commit0 Call Graph Tracing
 
 ## Forward trace — "what does this function call?"
-
 ```bash
 commit0-cli trace <symbol> --repo <slug> --direction forward --depth 5
 ```
 
-Example — trace from an HTTP handler to the database:
-
-```bash
-commit0-cli trace handleSyncExport --repo commit0-dev/commit0 --direction forward
-```
-
 ## Reverse trace — "who calls this function?"
-
 ```bash
 commit0-cli trace <symbol> --repo <slug> --direction reverse --depth 3
 ```
 
-Example — find all callers of `UpsertNode`:
-
+## Partial names work
 ```bash
-commit0-cli trace UpsertNode --repo commit0-dev/commit0 --direction reverse
+commit0-cli trace Pull --repo <slug> --direction forward       # → app.SyncService.Pull
+commit0-cli trace ImportBundle --repo <slug> --direction reverse # → finds all callers
 ```
 
-## Output
-
-Tree of call hops:
-
+## Read the code of traced functions
+```bash
+commit0-cli show app.SyncService.Pull --repo <slug>     # print full function body
+commit0-cli ls server/internal/app/sync_service.go --repo <slug>  # list all functions in file
 ```
--> BuildBundle (app/sync_service.go:45)
-  -> ExportBundle (adapters/surreal/graph_exporter.go:17)
-    -> ListAllNodes (adapters/surreal/graph_store.go:933)
-    -> ListAllEdges (adapters/surreal/graph_store.go:957)
-```
+
+## Resolution (4 strategies)
+1. Exact match (fully qualified name)
+2. Same-package prefix (bare function → pkg.Function)
+3. Suffix match (s.Method → .Method)
+4. Interface dispatch (ambiguous → single non-test production implementation)
 
 ## When to use
 
 | Scenario | Direction | Why |
 |---|---|---|
-| "How does a request flow?" | forward | Handler -> service -> adapter -> DB |
+| "How does a request flow?" | forward | Handler → service → adapter → DB |
 | "Who calls this?" | reverse | Find all entry points to a function |
 | "How does data reach X?" | forward | Trace data flow from source |
 | "What depends on X?" | reverse | Similar to blast but shows the tree |
 
-## Depth guidelines
-
-- `--depth 3`: quick overview (default for reverse)
-- `--depth 5`: standard analysis (default for forward)
-- `--depth 10`: deep exploration (for complex flows)
+## Works during indexing
+Dual connection pool ensures trace responds even while index writes are active.
