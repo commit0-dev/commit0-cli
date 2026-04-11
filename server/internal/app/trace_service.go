@@ -150,7 +150,20 @@ func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) 
 		return node, nil
 	}
 
-	// Fallback to vector search
+	// Fallback: suffix match — try all nodes ending with ".Symbol"
+	// This handles partial names like "ImportBundle" → "app.SyncService.ImportBundle"
+	allNodes, listErr := ts.store.ListAllNodes(ctx, repo)
+	if listErr == nil {
+		suffix := "." + symbol
+		for i := range allNodes {
+			if len(allNodes[i].Qualified) > len(suffix) &&
+				allNodes[i].Qualified[len(allNodes[i].Qualified)-len(suffix):] == suffix {
+				return &allNodes[i], nil
+			}
+		}
+	}
+
+	// Fallback: vector search
 	if ts.embedder != nil && ts.vectorIdx != nil {
 		query, err := ts.embedder.EmbedQuery(ctx, symbol)
 		if err != nil {
@@ -160,7 +173,7 @@ func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) 
 		results, err := ts.vectorIdx.Search(ctx, query, domain.VectorSearchOpts{
 			RepoSlug: repo,
 			TopK:     1,
-			MinScore: 0.8,
+			MinScore: 0.5,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("vector search: %w", err)
