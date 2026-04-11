@@ -56,7 +56,10 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	}
 
 	if req.MaxDepth <= 0 {
-		req.MaxDepth = 10
+		req.MaxDepth = 3 // default 3 (was 10 — depth 10 causes 8min+ graph traversal)
+	}
+	if req.MaxDepth > 5 {
+		req.MaxDepth = 5 // cap at 5 — deeper traversals are exponentially slower
 	}
 
 	// Resolve symbol

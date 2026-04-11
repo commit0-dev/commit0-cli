@@ -51,6 +51,6 @@ var blastCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(blastCmd)
 	blastCmd.Flags().String("repo", "", "Repository slug")
-	blastCmd.Flags().Int("max-depth", 10, "Maximum traversal depth")
+	blastCmd.Flags().Int("max-depth", 3, "Maximum traversal depth (default 3, max 5)")
 	blastCmd.Flags().Bool("no-explain", false, "Skip LLM explanation (faster)")
 }
