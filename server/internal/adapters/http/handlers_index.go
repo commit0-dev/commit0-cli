@@ -79,6 +79,7 @@ type startIndexRequest struct {
 	Languages []string `json:"languages"`
 	Exclude   []string `json:"exclude"`
 	Force     bool     `json:"force"`
+	Reparse   bool     `json:"reparse"`
 }
 
 // handleStartIndex handles POST /api/v1/index.
@@ -124,6 +125,7 @@ func (s *Server) handleStartIndex(c *gin.Context) {
 			RepoSlug:  req.RepoSlug,
 			Languages: req.Languages,
 			Force:     req.Force,
+			Reparse:   req.Reparse,
 		}, onProgress)
 
 		s.jobs.update(jobID, func(j *IndexJob) {

@@ -22,7 +22,8 @@ type IndexRequest struct {
 	RepoPath  string
 	RepoSlug  string
 	Languages []string
-	Force     bool
+	Force     bool // delete all nodes then re-index (heavy, may crash on large repos)
+	Reparse   bool // skip ContentHash check, re-parse all files with current resolver (no delete)
 }
 
 // IndexResult represents the result of an indexing operation.
@@ -176,7 +177,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 				// Incremental indexing: skip files whose content hasn't changed.
 				// Look up the file node by qualified name (= file path) and compare
 				// its stored content hash against the freshly parsed one.
-				if !req.Force && parsed.ContentHash != "" {
+				if !req.Force && !req.Reparse && parsed.ContentHash != "" {
 					existingFile, err := is.store.GetNodeByQualified(parseCtx, req.RepoSlug, file.Path)
 					if err == nil && existingFile != nil && existingFile.ContentHash == parsed.ContentHash {
 						is.log.Debug("skipping unchanged file", "file", file.Path)

@@ -13,6 +13,7 @@ type StartIndexRequest struct {
 	Languages []string `json:"languages,omitempty"`
 	Exclude   []string `json:"exclude,omitempty"`
 	Force     bool     `json:"force,omitempty"`
+	Reparse   bool     `json:"reparse,omitempty"`
 }
 
 // IndexProgress represents the current state of an index job.

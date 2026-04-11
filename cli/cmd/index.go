@@ -47,6 +47,7 @@ Examples:
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
+		reparse, _ := cmd.Flags().GetBool("reparse")
 		fmt.Printf("Indexing %s as %q...\n", repoPath, repoSlug)
 
 		c := sdk.New(serverURL(cmd))
@@ -55,6 +56,7 @@ Examples:
 			RepoSlug:  repoSlug,
 			Languages: languages,
 			Force:     force,
+			Reparse:   reparse,
 		}, func(p sdk.IndexProgress) {
 			fmt.Printf("\r  %d files, %d nodes...", p.FilesIndexed, p.NodesCreated)
 		})
@@ -71,4 +73,5 @@ func init() {
 	rootCmd.AddCommand(indexCmd)
 	indexCmd.Flags().String("languages", "", "Comma-separated list of languages to index (e.g. go,python)")
 	indexCmd.Flags().Bool("force", false, "Delete existing nodes before indexing (removes stale data)")
+	indexCmd.Flags().Bool("reparse", false, "Re-parse all files with current resolver (no delete, no ContentHash skip)")
 }
