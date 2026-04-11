@@ -21,11 +21,12 @@ func (s *Server) handleHealth(c *gin.Context) {
 // ---- Query ----------------------------------------------------------------
 
 type queryRequest struct {
-	Question  string  `json:"question"`
-	RepoSlug  string  `json:"repo_slug"`
-	TopK      int     `json:"top_k"`
-	MinScore  float64 `json:"min_score"`
-	NoExplain bool    `json:"no_explain"`
+	Question  string   `json:"question"`
+	RepoSlug  string   `json:"repo_slug"`
+	TopK      int      `json:"top_k"`
+	MinScore  float64  `json:"min_score"`
+	NoExplain bool     `json:"no_explain"`
+	NodeKinds []string `json:"node_kinds"`
 }
 
 // handleQuery handles POST /api/v1/query.
@@ -40,12 +41,19 @@ func (s *Server) handleQuery(c *gin.Context) {
 		return
 	}
 
+	// Convert string node kinds to typed.
+	var nodeKinds []types.NodeKind
+	for _, k := range req.NodeKinds {
+		nodeKinds = append(nodeKinds, types.NodeKind(k))
+	}
+
 	result, err := s.querySvc.Query(c.Request.Context(), app.QueryRequest{
 		Question:  req.Question,
 		RepoSlug:  req.RepoSlug,
 		TopK:      req.TopK,
 		MinScore:  req.MinScore,
 		NoExplain: req.NoExplain,
+		NodeKinds: nodeKinds,
 	})
 	if err != nil {
 		writeError(c, err)

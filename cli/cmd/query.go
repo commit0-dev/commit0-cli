@@ -129,19 +129,19 @@ func runDirectQuery(cmd *cobra.Command, c *sdk.Client, question, repoSlug string
 	kindFlag, _ := cmd.Flags().GetString("kind")
 	noExplain, _ := cmd.Flags().GetBool("no-explain")
 
-	var nodeKinds []types.NodeKind
+	var nodeKinds []string
 	if kindFlag != "" {
 		for _, k := range strings.Split(kindFlag, ",") {
-			nodeKinds = append(nodeKinds, types.NodeKind(strings.TrimSpace(k)))
+			nodeKinds = append(nodeKinds, strings.TrimSpace(k))
 		}
 	}
-	_ = nodeKinds // NodeKinds not sent via HTTP API currently — future enhancement
 
 	result, err := c.Query(cmd.Context(), sdk.QueryRequest{
 		Question:  question,
 		RepoSlug:  repoSlug,
 		TopK:      topK,
 		NoExplain: noExplain,
+		NodeKinds: nodeKinds,
 	})
 	if err != nil {
 		return fmt.Errorf("query: %w", err)

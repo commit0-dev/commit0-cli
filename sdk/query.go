@@ -9,11 +9,12 @@ import (
 
 // QueryRequest is the request body for semantic code search.
 type QueryRequest struct {
-	Question  string  `json:"question"`
-	RepoSlug  string  `json:"repo_slug"`
-	TopK      int     `json:"top_k,omitempty"`
-	MinScore  float64 `json:"min_score,omitempty"`
-	NoExplain bool    `json:"no_explain,omitempty"`
+	Question  string   `json:"question"`
+	RepoSlug  string   `json:"repo_slug"`
+	TopK      int      `json:"top_k,omitempty"`
+	MinScore  float64  `json:"min_score,omitempty"`
+	NoExplain bool     `json:"no_explain,omitempty"`
+	NodeKinds []string `json:"node_kinds,omitempty"`
 }
 
 // Query performs a semantic code search (non-agent direct mode).
