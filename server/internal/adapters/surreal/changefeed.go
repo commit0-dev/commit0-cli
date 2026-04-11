@@ -19,7 +19,7 @@ type ChangefeedEntry struct {
 // Returns nil, nil if no changes or changefeeds are unavailable.
 func (a *SurrealAdapter) ReadChangefeed(ctx context.Context, table string, since time.Time) ([]ChangefeedEntry, error) {
 	q := fmt.Sprintf("SHOW CHANGES FOR TABLE %s SINCE '%s' LIMIT 1000;", table, since.UTC().Format(time.RFC3339))
-	results, err := surrealdb.Query[[]ChangefeedEntry](ctx, a.db, q, nil)
+	results, err := surrealdb.Query[[]ChangefeedEntry](ctx, a.readDB(), q, nil)
 	if err != nil {
 		// Changefeeds may not be available (data older than 7d, or table recreated).
 		a.log.Debug("changefeed unavailable", "table", table, "since", since, "err", err)

@@ -30,7 +30,7 @@ func (a *SurrealAdapter) UpsertNodeTemporal(ctx context.Context, node *types.Cod
 		last_modified_at:     $ts
 	};`
 
-	_, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	_, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"id":     models.NewRecordID(table, localID),
 		"commit": commitHash,
 		"ts":     commitTime,
@@ -61,7 +61,7 @@ func (a *SurrealAdapter) UpsertEdgeTemporal(ctx context.Context, edge *types.Cod
 		localID = edgeID
 	}
 
-	_, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	_, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"id":     models.NewRecordID(table, localID),
 		"commit": commitHash,
 		"ts":     commitTime,
@@ -84,7 +84,7 @@ func (a *SurrealAdapter) MarkNodeRemoved(ctx context.Context, nodeID, commitHash
 		removed_commit: $commit
 	};`
 
-	_, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	_, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"id":     models.NewRecordID(table, localID),
 		"commit": commitHash,
 	})
@@ -116,7 +116,7 @@ func (a *SurrealAdapter) QueryTemporalRange(ctx context.Context, repoSlug, fromC
 			AND (introduced_commit IS NOT NONE OR last_modified_commit IS NOT NONE)
 			ORDER BY last_modified_at DESC LIMIT 100;`, table)
 
-		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, params)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.writeDB(), q, params)
 		if err != nil {
 			continue
 		}
@@ -150,7 +150,7 @@ func (a *SurrealAdapter) NodeHistory(ctx context.Context, nodeID string) ([]type
 	}
 
 	const q = `SELECT * FROM type::record($id);`
-	results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]nodeRow](ctx, a.writeDB(), q, map[string]any{
 		"id": models.NewRecordID(table, localID),
 	})
 	if err != nil {
@@ -190,7 +190,7 @@ func (a *SurrealAdapter) EdgesIntroducedAt(ctx context.Context, repoSlug, commit
 	edgeTables := []string{"calls", "data_flow"}
 	for _, table := range edgeTables {
 		q := fmt.Sprintf("SELECT * FROM %s WHERE introduced_commit = $commit LIMIT 100;", table)
-		results, err := surrealdb.Query[[]edgeRow](ctx, a.db, q, params)
+		results, err := surrealdb.Query[[]edgeRow](ctx, a.writeDB(), q, params)
 		if err != nil {
 			continue
 		}

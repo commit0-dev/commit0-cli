@@ -38,13 +38,33 @@ func (a *SurrealAdapter) AsVectorIndex() domain.VectorIndex { return &VectorAdap
 func (a *SurrealAdapter) AsTextIndex() domain.TextIndex { return &TextAdapter{a} }
 
 // SurrealAdapter implements GraphStore, VectorIndex, and TextIndex
-// using SurrealDB 3.0 via WebSocket.
+// using SurrealDB 3.0 via WebSocket with dual connection pools.
+// Read pool handles queries/trace/blast (never blocked by writes).
+// Write pool handles index upserts (concurrent batch writes).
 type SurrealAdapter struct {
-	db       *surrealdb.DB
-	log      *slog.Logger
-	ns       string
-	dbName   string
-	embedDim int // HNSW vector index dimension (e.g. 3072, 1024)
+	db        *surrealdb.DB // primary connection (schema ops)
+	readPool  *ConnPool     // nil = use db (single-conn fallback)
+	writePool *ConnPool     // nil = use db (single-conn fallback)
+	log       *slog.Logger
+	ns        string
+	dbName    string
+	embedDim  int
+}
+
+// readDB returns a connection for read operations (query, trace, blast).
+func (a *SurrealAdapter) readDB() *surrealdb.DB {
+	if a.readPool != nil {
+		return a.readPool.Acquire()
+	}
+	return a.db
+}
+
+// writeDB returns a connection for write operations (upsert, delete).
+func (a *SurrealAdapter) writeDB() *surrealdb.DB {
+	if a.writePool != nil {
+		return a.writePool.Acquire()
+	}
+	return a.db
 }
 
 // defaultRPCTimeout is the fallback if config doesn't specify one.
@@ -120,17 +140,51 @@ func NewSurrealAdapter(ctx context.Context, cfg *config.SurrealConfig, embedDim 
 
 	log.Info("connected", "url", cfg.URL)
 
-	return &SurrealAdapter{
+	adapter := &SurrealAdapter{
 		db:       db,
 		ns:       cfg.Namespace,
 		dbName:   cfg.Database,
 		embedDim: embedDim,
 		log:      log,
-	}, nil
+	}
+
+	// Initialize connection pools for concurrent read/write access.
+	// Read pool: queries, traces, blasts (default 8 connections).
+	// Write pool: index upserts, deletes (default 4 connections).
+	readSize := cfg.ReadPoolSize
+	if readSize <= 0 {
+		readSize = 8
+	}
+	writeSize := cfg.WritePoolSize
+	if writeSize <= 0 {
+		writeSize = 4
+	}
+
+	readPool, err := NewConnPool(ctx, cfg, readSize, "read")
+	if err != nil {
+		log.Warn("read pool init failed, using single connection", "err", err)
+	} else {
+		adapter.readPool = readPool
+	}
+
+	writePool, err := NewConnPool(ctx, cfg, writeSize, "write")
+	if err != nil {
+		log.Warn("write pool init failed, using single connection", "err", err)
+	} else {
+		adapter.writePool = writePool
+	}
+
+	return adapter, nil
 }
 
-// Close shuts down the underlying WebSocket connection.
+// Close shuts down all connections and pools.
 func (a *SurrealAdapter) Close(ctx context.Context) {
+	if a.readPool != nil {
+		a.readPool.Close(ctx)
+	}
+	if a.writePool != nil {
+		a.writePool.Close(ctx)
+	}
 	if err := a.db.Close(ctx); err != nil {
 		a.log.Warn("close error", "err", err)
 	}

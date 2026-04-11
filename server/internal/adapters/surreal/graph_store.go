@@ -371,7 +371,7 @@ func (a *SurrealAdapter) UpsertNode(ctx context.Context, node *types.CodeNode) e
 		return domain.Validation(fmt.Sprintf("unknown node kind: %s", node.Kind))
 	}
 
-	results, err := surrealdb.Query[any](ctx, a.db, q, nodeParams(node))
+	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, nodeParams(node))
 	if err != nil {
 		return fmt.Errorf("upsert node %s: %w", node.ID, err)
 	}
@@ -391,7 +391,7 @@ func (a *SurrealAdapter) GetNode(ctx context.Context, id string) (*types.CodeNod
 	}
 
 	const q = `SELECT * FROM type::record($id);`
-	results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), q, map[string]any{
 		"id": models.NewRecordID(table, localID),
 	})
 	if err != nil {
@@ -417,7 +417,7 @@ func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified
 	const q = `SELECT * FROM $table WHERE repo = $repo_ref AND qualified = $qualified LIMIT 1;`
 
 	for _, table := range tables {
-		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, map[string]any{
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), q, map[string]any{
 			"table":     models.Table(table),
 			"repo_ref":  models.NewRecordID("repo", repo),
 			"qualified": qualified,
@@ -436,7 +436,7 @@ func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified
 	if !strings.Contains(qualified, ".") {
 		const nameQ = `SELECT * FROM $table WHERE repo = $repo_ref AND name = $name LIMIT 1;`
 		for _, table := range tables {
-			results, err := surrealdb.Query[[]nodeRow](ctx, a.db, nameQ, map[string]any{
+			results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), nameQ, map[string]any{
 				"table":    models.Table(table),
 				"repo_ref": models.NewRecordID("repo", repo),
 				"name":     qualified,
@@ -463,7 +463,7 @@ func (a *SurrealAdapter) DeleteNode(ctx context.Context, id string) error {
 	}
 
 	const q = `DELETE type::record($id);`
-	if _, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	if _, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"id": models.NewRecordID(table, localID),
 	}); err != nil {
 		return fmt.Errorf("delete node %s: %w", id, err)
@@ -485,7 +485,7 @@ func (a *SurrealAdapter) DeleteNodesByFile(ctx context.Context, repoSlug, filePa
 	}
 	for _, table := range tables {
 		q := fmt.Sprintf("DELETE FROM %s WHERE repo = $repo_ref AND file_path = $fpath;", table)
-		if _, err := surrealdb.Query[any](ctx, a.db, q, params); err != nil {
+		if _, err := surrealdb.Query[any](ctx, a.writeDB(), q, params); err != nil {
 			return fmt.Errorf("delete nodes by file %s [%s]: %w", filePath, table, err)
 		}
 	}
@@ -494,7 +494,7 @@ func (a *SurrealAdapter) DeleteNodesByFile(ctx context.Context, repoSlug, filePa
 
 func (a *SurrealAdapter) DeleteNodesByRepo(ctx context.Context, repo string) error {
 	const q = `DELETE type::record($repo_id);`
-	results, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"repo_id": models.NewRecordID("repo", repo),
 	})
 	if err != nil {
@@ -524,7 +524,7 @@ func (a *SurrealAdapter) UpsertEdge(ctx context.Context, edge *types.CodeEdge) e
 
 	// Derive repo slug from the FromID.
 	repoSlug := ""
-	results, err := surrealdb.Query[any](ctx, a.db, q, edgeParams(edge, repoSlug))
+	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, edgeParams(edge, repoSlug))
 	if err != nil {
 		return fmt.Errorf("upsert edge %s->%s: %w", edge.FromID, edge.ToID, err)
 	}
@@ -550,7 +550,7 @@ DELETE FROM defines  WHERE in = type::record($id) OR out = type::record($id);
 DELETE FROM inherits WHERE in = type::record($id) OR out = type::record($id);
 DELETE FROM uses     WHERE in = type::record($id) OR out = type::record($id);`
 
-	if _, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	if _, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"id": models.NewRecordID(table, localID),
 	}); err != nil {
 		return fmt.Errorf("delete edges for node %s: %w", nodeID, err)
@@ -592,7 +592,7 @@ func (a *SurrealAdapter) TraceForward(ctx context.Context, startID string, depth
 SELECT id, name, qualified, language, file_path, repo_slug
 FROM $start.{1..%d}(->calls->function);`, depth)
 
-	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]traceRow](ctx, a.readDB(), q, map[string]any{
 		"start": models.NewRecordID(table, localID),
 	})
 	if err != nil {
@@ -621,7 +621,7 @@ func (a *SurrealAdapter) TraceReverse(ctx context.Context, startID string, depth
 SELECT id, name, qualified, language, file_path, repo_slug
 FROM $start.{1..%d}(<-calls<-function);`, depth)
 
-	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]traceRow](ctx, a.readDB(), q, map[string]any{
 		"start": models.NewRecordID(table, localID),
 	})
 	if err != nil {
@@ -696,7 +696,7 @@ FROM $target.{1..%d}(<-calls<-function);`, maxDepth)
 		RepoSlug  string           `json:"repo_slug"`
 	}
 
-	results, err := surrealdb.Query[[]affectedRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]affectedRow](ctx, a.readDB(), q, map[string]any{
 		"target": models.NewRecordID(table, localID),
 	})
 	if err != nil {
@@ -823,7 +823,7 @@ RETURN {
 		Writes  []string      `json:"writes"`
 	}
 
-	results, err := surrealdb.Query[[]neighborhoodRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]neighborhoodRow](ctx, a.readDB(), q, map[string]any{
 		"table":    table,
 		"local_id": localID,
 	})
@@ -878,7 +878,7 @@ SELECT id, name, qualified, language, file_path, repo_slug
 FROM $start.{1..%d}(->data_flow->function);`, depth)
 	}
 
-	results, err := surrealdb.Query[[]traceRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]traceRow](ctx, a.readDB(), q, map[string]any{
 		"start": models.NewRecordID(table, localID),
 	})
 	if err != nil {
@@ -898,7 +898,7 @@ FROM $start.{1..%d}(->data_flow->function);`, depth)
 		revQ := fmt.Sprintf(`
 SELECT id, name, qualified, language, file_path, repo_slug
 FROM $start.{1..%d}(<-data_flow<-function);`, depth)
-		revResults, err := surrealdb.Query[[]traceRow](ctx, a.db, revQ, map[string]any{
+		revResults, err := surrealdb.Query[[]traceRow](ctx, a.readDB(), revQ, map[string]any{
 			"start": models.NewRecordID(table, localID),
 		})
 		if err == nil && revResults != nil && len(*revResults) > 0 {
@@ -930,7 +930,7 @@ func (a *SurrealAdapter) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 	var ids []string
 	for _, table := range tables {
 		q := fmt.Sprintf("SELECT id FROM %s WHERE repo = $repo_ref;", table)
-		results, err := surrealdb.Query[[]idRow](ctx, a.db, q, params)
+		results, err := surrealdb.Query[[]idRow](ctx, a.readDB(), q, params)
 		if err != nil {
 			return nil, fmt.Errorf("list node ids %s [%s]: %w", repoSlug, table, err)
 		}
@@ -957,7 +957,7 @@ func (a *SurrealAdapter) ListAllNodes(ctx context.Context, repoSlug string) ([]t
 	var nodes []types.CodeNode
 	for _, table := range tables {
 		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo_ref;", table)
-		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, params)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), q, params)
 		if err != nil {
 			return nil, fmt.Errorf("list all nodes %s [%s]: %w", repoSlug, table, err)
 		}
@@ -1003,7 +1003,7 @@ func (a *SurrealAdapter) ListAllEdges(ctx context.Context, repoSlug string) ([]t
 		} else {
 			q = fmt.Sprintf("SELECT * FROM %s WHERE in.repo_slug = $repo;", table)
 		}
-		results, err := surrealdb.Query[[]edgeRow](ctx, a.db, q, params)
+		results, err := surrealdb.Query[[]edgeRow](ctx, a.readDB(), q, params)
 		if err != nil {
 			return nil, fmt.Errorf("list all edges %s [%s]: %w", repoSlug, table, err)
 		}
@@ -1059,7 +1059,7 @@ func (a *SurrealAdapter) ListNodesByFile(ctx context.Context, repoSlug, filePath
 	tables := []string{"`function`", "class"}
 	for _, table := range tables {
 		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo_ref AND file_path = $fpath;", table)
-		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, params)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), q, params)
 		if err != nil {
 			return nil, fmt.Errorf("list nodes by file %s [%s]: %w", filePath, table, err)
 		}
@@ -1088,7 +1088,7 @@ func (a *SurrealAdapter) ListRoutes(ctx context.Context, repoSlug string) ([]typ
 	q := `SELECT * FROM route WHERE repo = $repo;`
 	params := map[string]any{"repo": repoSlug}
 
-	results, err := surrealdb.Query[[]routeRow](ctx, a.db, q, params)
+	results, err := surrealdb.Query[[]routeRow](ctx, a.readDB(), q, params)
 	if err != nil {
 		return nil, fmt.Errorf("list routes: %w", err)
 	}
@@ -1131,7 +1131,7 @@ func (a *SurrealAdapter) ListRoutes(ctx context.Context, repoSlug string) ([]typ
 // UpdateRepoIndexedAt sets last_indexed_at using MERGE to avoid wiping other fields.
 func (a *SurrealAdapter) UpdateRepoIndexedAt(ctx context.Context, slug string, t time.Time) error {
 	const q = `UPDATE type::record($id) MERGE { last_indexed_at: $ts };`
-	_, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	_, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"id": models.NewRecordID("repo", slug),
 		"ts": t,
 	})
@@ -1144,7 +1144,7 @@ func (a *SurrealAdapter) UpdateRepoIndexedAt(ctx context.Context, slug string, t
 // FindRepoByRemoteURL finds a repo by its normalized remote URL.
 func (a *SurrealAdapter) FindRepoByRemoteURL(ctx context.Context, remoteURL string) (*types.Repo, error) {
 	const q = `SELECT * FROM repo WHERE remote_url = $url LIMIT 1;`
-	results, err := surrealdb.Query[[]repoRow](ctx, a.db, q, map[string]any{"url": remoteURL})
+	results, err := surrealdb.Query[[]repoRow](ctx, a.readDB(), q, map[string]any{"url": remoteURL})
 	if err != nil {
 		return nil, fmt.Errorf("find repo by remote url: %w", err)
 	}
@@ -1179,7 +1179,7 @@ func (a *SurrealAdapter) ListNodesByConcepts(ctx context.Context, repoSlug strin
 	tables := []string{"`function`", "class"}
 	for _, table := range tables {
 		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo_ref AND concepts CONTAINSANY $concepts LIMIT $lim;", table)
-		results, err := surrealdb.Query[[]nodeRow](ctx, a.db, q, params)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.writeDB(), q, params)
 		if err != nil {
 			continue // non-fatal
 		}
@@ -1212,7 +1212,7 @@ func (a *SurrealAdapter) UpsertFileBatch(ctx context.Context, nodes []types.Code
 			continue
 		}
 		err := retry.WithRetry(ctx, 3, func() error {
-			results, err := surrealdb.Query[any](ctx, a.db, q, nodeParams(node))
+			results, err := surrealdb.Query[any](ctx, a.writeDB(), q, nodeParams(node))
 			if err != nil {
 				return classifySurrealError(err)
 			}
@@ -1240,7 +1240,7 @@ func (a *SurrealAdapter) UpsertFileBatch(ctx context.Context, nodes []types.Code
 		if q == "" {
 			continue
 		}
-		results, err := surrealdb.Query[any](ctx, a.db, q, edgeParams(edge, repoSlug))
+		results, err := surrealdb.Query[any](ctx, a.writeDB(), q, edgeParams(edge, repoSlug))
 		if err != nil {
 			return fmt.Errorf("relate edge %s->%s: %w", edge.FromID, edge.ToID, err)
 		}
@@ -1285,7 +1285,7 @@ UPSERT type::record($id) CONTENT {
 		languages = []string{}
 	}
 
-	results, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
 		"id":              models.NewRecordID("repo", repo.Slug),
 		"slug":            repo.Slug,
 		"path":            repo.Path,
@@ -1309,7 +1309,7 @@ UPSERT type::record($id) CONTENT {
 // GetRepo retrieves a repository by its slug.
 func (a *SurrealAdapter) GetRepo(ctx context.Context, slug string) (*types.Repo, error) {
 	const q = `SELECT * FROM type::record($id);`
-	results, err := surrealdb.Query[[]repoRow](ctx, a.db, q, map[string]any{
+	results, err := surrealdb.Query[[]repoRow](ctx, a.readDB(), q, map[string]any{
 		"id": models.NewRecordID("repo", slug),
 	})
 	if err != nil {
@@ -1326,7 +1326,7 @@ func (a *SurrealAdapter) GetRepo(ctx context.Context, slug string) (*types.Repo,
 // ListRepos returns all repositories ordered by slug.
 func (a *SurrealAdapter) ListRepos(ctx context.Context) ([]types.Repo, error) {
 	const q = `SELECT * FROM repo ORDER BY slug ASC;`
-	results, err := surrealdb.Query[[]repoRow](ctx, a.db, q, nil)
+	results, err := surrealdb.Query[[]repoRow](ctx, a.readDB(), q, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list repos: %w", err)
 	}

@@ -112,7 +112,7 @@ func (a *SurrealAdapter) traceFieldFlowRecursive(
 		Metadata  map[string]string `json:"metadata"`
 	}
 
-	results, err := surrealdb.Query[[]flowEdgeRow](ctx, a.db, q, params)
+	results, err := surrealdb.Query[[]flowEdgeRow](ctx, a.readDB(), q, params)
 	if err != nil {
 		return nil // non-fatal: stop traversal at this branch
 	}
@@ -196,7 +196,7 @@ func (a *SurrealAdapter) FindMutations(ctx context.Context, repoSlug string, fie
 		Metadata map[string]string `json:"metadata"`
 	}
 
-	results, err := surrealdb.Query[[]mutRow](ctx, a.db, q, params)
+	results, err := surrealdb.Query[[]mutRow](ctx, a.readDB(), q, params)
 	if err != nil {
 		return nil, fmt.Errorf("find mutations: %w", err)
 	}

@@ -72,6 +72,8 @@ type SurrealConfig struct {
 	ConnectTimeoutS int // Max seconds to wait for initial connection (default 30)
 	RPCTimeoutS     int // Max seconds per RPC call (default 300)
 	StartupRetries  int // Number of retries for connection + schema on startup (default 5)
+	ReadPoolSize    int // Number of read connections (default 8, env: SURREAL_READ_POOL)
+	WritePoolSize   int // Number of write connections (default 4, env: SURREAL_WRITE_POOL)
 }
 
 // GeminiConfig holds Gemini API settings.
@@ -125,11 +127,13 @@ func Load(cfgPath string) (*Config, error) {
 
 	cfg := &Config{
 		Surreal: SurrealConfig{
-			URL:       v.GetString("surreal.url"),
-			User:      v.GetString("surreal.user"),
-			Pass:      v.GetString("surreal.pass"),
-			Namespace: v.GetString("surreal.namespace"),
-			Database:  v.GetString("surreal.database"),
+			URL:           v.GetString("surreal.url"),
+			User:          v.GetString("surreal.user"),
+			Pass:          v.GetString("surreal.pass"),
+			Namespace:     v.GetString("surreal.namespace"),
+			Database:      v.GetString("surreal.database"),
+			ReadPoolSize:  v.GetInt("surreal.read_pool_size"),
+			WritePoolSize: v.GetInt("surreal.write_pool_size"),
 		},
 		EmbedProvider: v.GetString("embed.provider"),
 		LLMProvider:   v.GetString("llm.provider"),
@@ -262,7 +266,9 @@ func bindEnvs(v *viper.Viper) {
 		"surreal.user":      "SURREAL_USER",
 		"surreal.pass":      "SURREAL_PASS",
 		"surreal.namespace": "SURREAL_NAMESPACE",
-		"surreal.database":  "SURREAL_DATABASE",
+		"surreal.database":        "SURREAL_DATABASE",
+		"surreal.read_pool_size":  "SURREAL_READ_POOL",
+		"surreal.write_pool_size": "SURREAL_WRITE_POOL",
 
 		"embed.provider":   "EMBED_PROVIDER",
 		"embed.dim":        "EMBED_DIM",
