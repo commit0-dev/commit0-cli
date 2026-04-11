@@ -13,6 +13,7 @@ type TraceRequest struct {
 	RepoSlug  string `json:"repo_slug"`
 	Direction string `json:"direction"`
 	Depth     int    `json:"depth"`
+	NoExplain bool   `json:"no_explain,omitempty"`
 }
 
 // Trace performs a call graph trace and returns the full result as JSON.

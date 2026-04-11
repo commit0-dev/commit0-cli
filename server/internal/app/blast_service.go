@@ -15,9 +15,10 @@ import (
 
 // BlastRequest represents a blast radius analysis request.
 type BlastRequest struct {
-	Symbol   string
-	RepoSlug string
-	MaxDepth int
+	Symbol    string
+	RepoSlug  string
+	MaxDepth  int
+	NoExplain bool
 }
 
 // BlastService analyzes code change impact.
@@ -78,7 +79,7 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	// Build explanation (non-fatal). Structured first, fallback to streaming.
 	explanation := ""
 	var structuredSummary *types.BlastExplanation
-	if bs.explainer != nil {
+	if bs.explainer != nil && !req.NoExplain {
 		excerpts := []domain.CodeExcerpt{
 			{
 				Qualified: target.Qualified,

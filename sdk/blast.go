@@ -9,9 +9,10 @@ import (
 
 // BlastRequest is the request body for blast radius operations.
 type BlastRequest struct {
-	Symbol   string `json:"symbol"`
-	RepoSlug string `json:"repo_slug"`
-	MaxDepth int    `json:"max_depth"`
+	Symbol    string `json:"symbol"`
+	RepoSlug  string `json:"repo_slug"`
+	MaxDepth  int    `json:"max_depth"`
+	NoExplain bool   `json:"no_explain,omitempty"`
 }
 
 // Blast performs a blast radius analysis.

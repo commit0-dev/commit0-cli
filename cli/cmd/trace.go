@@ -18,6 +18,7 @@ var traceCmd = &cobra.Command{
 		repoSlug, _ := cmd.Flags().GetString("repo")
 		direction, _ := cmd.Flags().GetString("direction")
 		depth, _ := cmd.Flags().GetInt("depth")
+		noExplain, _ := cmd.Flags().GetBool("no-explain")
 
 		c := sdk.New(serverURL(cmd))
 		result, err := c.Trace(cmd.Context(), sdk.TraceRequest{
@@ -25,6 +26,7 @@ var traceCmd = &cobra.Command{
 			RepoSlug:  repoSlug,
 			Direction: direction,
 			Depth:     depth,
+			NoExplain: noExplain,
 		})
 		if err != nil {
 			return fmt.Errorf("trace: %w", err)
@@ -63,4 +65,5 @@ func init() {
 	traceCmd.Flags().String("repo", "", "Repository slug")
 	traceCmd.Flags().String("direction", "forward", "Trace direction: forward or reverse")
 	traceCmd.Flags().Int("depth", 5, "Maximum trace depth")
+	traceCmd.Flags().Bool("no-explain", false, "Skip LLM explanation (faster)")
 }

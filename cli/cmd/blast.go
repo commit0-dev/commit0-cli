@@ -15,12 +15,14 @@ var blastCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoSlug, _ := cmd.Flags().GetString("repo")
 		maxDepth, _ := cmd.Flags().GetInt("max-depth")
+		noExplain, _ := cmd.Flags().GetBool("no-explain")
 
 		c := sdk.New(serverURL(cmd))
 		result, err := c.Blast(cmd.Context(), sdk.BlastRequest{
-			Symbol:   args[0],
-			RepoSlug: repoSlug,
-			MaxDepth: maxDepth,
+			Symbol:    args[0],
+			RepoSlug:  repoSlug,
+			MaxDepth:  maxDepth,
+			NoExplain: noExplain,
 		})
 		if err != nil {
 			return fmt.Errorf("blast: %w", err)
@@ -50,4 +52,5 @@ func init() {
 	rootCmd.AddCommand(blastCmd)
 	blastCmd.Flags().String("repo", "", "Repository slug")
 	blastCmd.Flags().Int("max-depth", 10, "Maximum traversal depth")
+	blastCmd.Flags().Bool("no-explain", false, "Skip LLM explanation (faster)")
 }

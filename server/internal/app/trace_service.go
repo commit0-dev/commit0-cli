@@ -18,6 +18,7 @@ type TraceRequest struct {
 	RepoSlug  string
 	Direction string
 	Depth     int
+	NoExplain bool
 }
 
 // TraceService traces code flow paths.
@@ -93,7 +94,7 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 	graphStart := time.Now()
 	explanation := ""
 	var structuredExplan *types.TraceExplanation
-	if ts.explainer != nil {
+	if ts.explainer != nil && !req.NoExplain {
 		var excerpts []domain.CodeExcerpt
 		ts.collectHopExcerpts(hops, &excerpts)
 

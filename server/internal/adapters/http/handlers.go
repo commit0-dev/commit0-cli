@@ -89,6 +89,7 @@ type traceRequest struct {
 	RepoSlug  string `json:"repo_slug"`
 	Direction string `json:"direction"`
 	Depth     int    `json:"depth"`
+	NoExplain bool   `json:"no_explain"`
 }
 
 // handleTrace handles POST /api/v1/trace with SSE streaming.
@@ -114,6 +115,7 @@ func (s *Server) handleTrace(c *gin.Context) {
 		RepoSlug:  req.RepoSlug,
 		Direction: req.Direction,
 		Depth:     req.Depth,
+		NoExplain: req.NoExplain,
 	})
 	if err != nil {
 		writeError(c, err)
@@ -164,6 +166,7 @@ func (s *Server) handleTraceJSON(c *gin.Context) {
 		RepoSlug:  req.RepoSlug,
 		Direction: req.Direction,
 		Depth:     req.Depth,
+		NoExplain: req.NoExplain,
 	})
 	if err != nil {
 		writeError(c, err)
@@ -175,9 +178,10 @@ func (s *Server) handleTraceJSON(c *gin.Context) {
 // ---- Blast ----------------------------------------------------------------
 
 type blastRequest struct {
-	Symbol   string `json:"symbol"`
-	RepoSlug string `json:"repo_slug"`
-	MaxDepth int    `json:"max_depth"`
+	Symbol    string `json:"symbol"`
+	RepoSlug  string `json:"repo_slug"`
+	MaxDepth  int    `json:"max_depth"`
+	NoExplain bool   `json:"no_explain"`
 }
 
 // handleBlast handles POST /api/v1/blast.
@@ -193,9 +197,10 @@ func (s *Server) handleBlast(c *gin.Context) {
 	}
 
 	result, err := s.blastSvc.Blast(c.Request.Context(), app.BlastRequest{
-		Symbol:   req.Symbol,
-		RepoSlug: req.RepoSlug,
-		MaxDepth: req.MaxDepth,
+		Symbol:    req.Symbol,
+		RepoSlug:  req.RepoSlug,
+		MaxDepth:  req.MaxDepth,
+		NoExplain: req.NoExplain,
 	})
 	if err != nil {
 		writeError(c, err)
