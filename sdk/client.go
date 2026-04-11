@@ -71,6 +71,22 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
+// HealthCheck returns the server health status including state and active jobs.
+func (c *Client) HealthCheck(ctx context.Context) (map[string]any, error) {
+	var result map[string]any
+	resp, err := c.rc.R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get("/health")
+	if err != nil {
+		return nil, fmt.Errorf("health check: %w", err)
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("health check failed: %d", resp.StatusCode())
+	}
+	return result, nil
+}
+
 // BaseURL returns the configured server URL (for error messages).
 func (c *Client) BaseURL() string {
 	return c.rc.BaseURL()

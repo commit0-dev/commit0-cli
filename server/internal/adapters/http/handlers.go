@@ -13,9 +13,27 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// handleHealth returns a simple liveness check.
+// handleHealth returns liveness check with server state (idle/indexing).
 func (s *Server) handleHealth(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	activeJobs := 0
+	if s.jobs != nil {
+		s.jobs.mu.RLock()
+		for _, j := range s.jobs.jobs {
+			if j.Status == "indexing" {
+				activeJobs++
+			}
+		}
+		s.jobs.mu.RUnlock()
+	}
+	state := "idle"
+	if activeJobs > 0 {
+		state = "indexing"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":      "ok",
+		"state":       state,
+		"active_jobs": activeJobs,
+	})
 }
 
 // ---- Query ----------------------------------------------------------------
@@ -27,6 +45,7 @@ type queryRequest struct {
 	MinScore  float64  `json:"min_score"`
 	NoExplain bool     `json:"no_explain"`
 	NodeKinds []string `json:"node_kinds"`
+	FilePath  string   `json:"file_path"`
 }
 
 // handleQuery handles POST /api/v1/query.
@@ -54,6 +73,7 @@ func (s *Server) handleQuery(c *gin.Context) {
 		MinScore:  req.MinScore,
 		NoExplain: req.NoExplain,
 		NodeKinds: nodeKinds,
+		FilePath:  req.FilePath,
 	})
 	if err != nil {
 		writeError(c, err)

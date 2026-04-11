@@ -40,6 +40,7 @@ func init() {
 	queryCmd.Flags().String("kind", "", "Filter by node kind: function, class, file, module (comma-separated)")
 	queryCmd.Flags().Bool("no-agent", false, "Skip agent, use direct search only")
 	queryCmd.Flags().Bool("no-explain", false, "Skip LLM explanation (faster, table only)")
+	queryCmd.Flags().String("file", "", "Filter results to this file/directory path prefix")
 }
 
 const maxAgentRetries = 2
@@ -128,6 +129,7 @@ func runDirectQuery(cmd *cobra.Command, c *sdk.Client, question, repoSlug string
 	topK, _ := cmd.Flags().GetInt("top-k")
 	kindFlag, _ := cmd.Flags().GetString("kind")
 	noExplain, _ := cmd.Flags().GetBool("no-explain")
+	filePath, _ := cmd.Flags().GetString("file")
 
 	var nodeKinds []string
 	if kindFlag != "" {
@@ -142,6 +144,7 @@ func runDirectQuery(cmd *cobra.Command, c *sdk.Client, question, repoSlug string
 		TopK:      topK,
 		NoExplain: noExplain,
 		NodeKinds: nodeKinds,
+		FilePath:  filePath,
 	})
 	if err != nil {
 		return fmt.Errorf("query: %w", err)

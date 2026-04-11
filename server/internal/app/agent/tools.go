@@ -162,8 +162,12 @@ func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
 		if topK <= 0 {
 			topK = 10
 		}
+		if topK > 20 {
+			topK = 20 // cap to reduce token consumption and avoid rate limits
+		}
 		result, err := svc.Query(context.Background(), app.QueryRequest{
 			Question: input.Question, RepoSlug: getRepoSlug(ctx), TopK: topK,
+			NoExplain: true, // agent generates its own explanation — skip LLM explain call
 		})
 		if err != nil {
 			return searchOutput{}, err

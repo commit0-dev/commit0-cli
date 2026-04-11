@@ -15,6 +15,7 @@ type QueryRequest struct {
 	MinScore  float64  `json:"min_score,omitempty"`
 	NoExplain bool     `json:"no_explain,omitempty"`
 	NodeKinds []string `json:"node_kinds,omitempty"`
+	FilePath  string   `json:"file_path,omitempty"`
 }
 
 // Query performs a semantic code search (non-agent direct mode).

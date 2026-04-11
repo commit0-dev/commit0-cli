@@ -25,6 +25,7 @@ type QueryRequest struct {
 	TopK      int
 	MinScore  float64
 	NoExplain bool
+	FilePath  string // filter results to this file/directory prefix
 }
 
 // QueryService handles semantic code search.
@@ -142,6 +143,17 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 
 	// Concept-boosted reranking
 	fused = qs.conceptRerank(fused, req.Question)
+
+	// File-path filter: keep only nodes matching the prefix.
+	if req.FilePath != "" {
+		filtered := fused[:0]
+		for _, n := range fused {
+			if strings.HasPrefix(n.Node.FilePath, req.FilePath) {
+				filtered = append(filtered, n)
+			}
+		}
+		fused = filtered
+	}
 
 	if len(fused) > req.TopK {
 		fused = fused[:req.TopK]
