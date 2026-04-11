@@ -88,6 +88,10 @@ func (s *stubGraphStore) DeleteNodesByRepo(ctx context.Context, repo string) err
 	return nil
 }
 
+func (s *stubGraphStore) DeleteNodesByFile(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (s *stubGraphStore) UpsertEdge(ctx context.Context, edge *types.CodeEdge) error {
 	if s.err != nil {
 		return s.err

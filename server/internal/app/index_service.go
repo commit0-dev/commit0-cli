@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -301,12 +303,52 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		}
 	}
 
+	// Cleanup: remove nodes for files that no longer exist on disk.
+	// This handles deleted/renamed files that would otherwise persist as stale data.
+	if req.RepoPath != "" {
+		is.cleanupStaleNodes(ctx, req.RepoSlug, req.RepoPath)
+	}
+
 	// Mark repo as indexed using MERGE (doesn't wipe other fields).
 	if err := is.store.UpdateRepoIndexedAt(ctx, req.RepoSlug, time.Now()); err != nil {
 		is.log.Warn("failed to update LastIndexedAt", "repo", req.RepoSlug, "err", err)
 	}
 
 	return result, nil
+}
+
+// cleanupStaleNodes removes nodes for files that no longer exist on disk.
+func (is *IndexService) cleanupStaleNodes(ctx context.Context, repoSlug, repoPath string) {
+	allNodes, err := is.store.ListAllNodes(ctx, repoSlug)
+	if err != nil {
+		is.log.Warn("cleanup: list nodes failed", "err", err)
+		return
+	}
+
+	// Collect unique file paths from the graph.
+	graphFiles := make(map[string]bool)
+	for _, n := range allNodes {
+		if n.FilePath != "" {
+			graphFiles[n.FilePath] = true
+		}
+	}
+
+	// Check each file path against the filesystem.
+	var deleted int
+	for filePath := range graphFiles {
+		fullPath := filepath.Join(repoPath, filePath)
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			is.log.Info("cleanup: removing stale file nodes", "file", filePath)
+			if err := is.store.DeleteNodesByFile(ctx, repoSlug, filePath); err != nil {
+				is.log.Warn("cleanup: delete failed", "file", filePath, "err", err)
+			} else {
+				deleted++
+			}
+		}
+	}
+	if deleted > 0 {
+		is.log.Info("cleanup: removed stale nodes", "files_deleted", deleted)
+	}
 }
 
 // ReembedResult holds statistics from a neighborhood re-embedding pass.

@@ -474,6 +474,22 @@ func (a *SurrealAdapter) DeleteNode(ctx context.Context, id string) error {
 // `repo TYPE record<repo> REFERENCE ON DELETE CASCADE`, so the DB cascades the
 // delete to every function, class, file, and module in one round-trip. The repo
 // record is then re-created by UpsertRepo on the next indexing run.
+// DeleteNodesByFile removes all nodes (and their edges) for a specific file in a repo.
+func (a *SurrealAdapter) DeleteNodesByFile(ctx context.Context, repoSlug, filePath string) error {
+	tables := []string{"`function`", "class", "file", "module"}
+	params := map[string]any{
+		"repo_ref": models.NewRecordID("repo", repoSlug),
+		"fpath":    filePath,
+	}
+	for _, table := range tables {
+		q := fmt.Sprintf("DELETE FROM %s WHERE repo = $repo_ref AND file_path = $fpath;", table)
+		if _, err := surrealdb.Query[any](ctx, a.db, q, params); err != nil {
+			return fmt.Errorf("delete nodes by file %s [%s]: %w", filePath, table, err)
+		}
+	}
+	return nil
+}
+
 func (a *SurrealAdapter) DeleteNodesByRepo(ctx context.Context, repo string) error {
 	const q = `DELETE type::record($repo_id);`
 	results, err := surrealdb.Query[any](ctx, a.db, q, map[string]any{

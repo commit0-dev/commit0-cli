@@ -135,6 +135,7 @@ type GraphStore interface {
 	GetNodeByQualified(ctx context.Context, repo, qualified string) (*types.CodeNode, error)
 	DeleteNode(ctx context.Context, id string) error
 	DeleteNodesByRepo(ctx context.Context, repo string) error
+	DeleteNodesByFile(ctx context.Context, repoSlug, filePath string) error
 	UpsertEdge(ctx context.Context, edge *types.CodeEdge) error
 	DeleteEdgesForNode(ctx context.Context, nodeID string) error
 	TraceForward(ctx context.Context, startID string, depth int) ([]types.TraceHop, error)

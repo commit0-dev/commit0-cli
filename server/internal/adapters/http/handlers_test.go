@@ -56,6 +56,7 @@ func (s *httpTestGraphStore) DeleteNode(_ context.Context, _ string) error { ret
 func (s *httpTestGraphStore) DeleteNodesByRepo(_ context.Context, _ string) error {
 	return s.deleteErr
 }
+func (s *httpTestGraphStore) DeleteNodesByFile(_ context.Context, _, _ string) error { return nil }
 func (s *httpTestGraphStore) UpsertEdge(_ context.Context, _ *types.CodeEdge) error { return nil }
 func (s *httpTestGraphStore) DeleteEdgesForNode(_ context.Context, _ string) error  { return nil }
 func (s *httpTestGraphStore) TraceForward(_ context.Context, _ string, _ int) ([]types.TraceHop, error) {
