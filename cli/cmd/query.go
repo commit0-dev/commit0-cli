@@ -39,6 +39,7 @@ func init() {
 	queryCmd.Flags().Int("top-k", 10, "Number of results (direct mode only)")
 	queryCmd.Flags().String("kind", "", "Filter by node kind: function, class, file, module (comma-separated)")
 	queryCmd.Flags().Bool("no-agent", false, "Skip agent, use direct search only")
+	queryCmd.Flags().Bool("no-explain", false, "Skip LLM explanation (faster, table only)")
 }
 
 const maxAgentRetries = 2
@@ -126,6 +127,7 @@ func runAgentTurn(cmd *cobra.Command, c *sdk.Client, message, repoSlug string) (
 func runDirectQuery(cmd *cobra.Command, c *sdk.Client, question, repoSlug string) error {
 	topK, _ := cmd.Flags().GetInt("top-k")
 	kindFlag, _ := cmd.Flags().GetString("kind")
+	noExplain, _ := cmd.Flags().GetBool("no-explain")
 
 	var nodeKinds []types.NodeKind
 	if kindFlag != "" {
@@ -136,9 +138,10 @@ func runDirectQuery(cmd *cobra.Command, c *sdk.Client, question, repoSlug string
 	_ = nodeKinds // NodeKinds not sent via HTTP API currently — future enhancement
 
 	result, err := c.Query(cmd.Context(), sdk.QueryRequest{
-		Question: question,
-		RepoSlug: repoSlug,
-		TopK:     topK,
+		Question:  question,
+		RepoSlug:  repoSlug,
+		TopK:      topK,
+		NoExplain: noExplain,
 	})
 	if err != nil {
 		return fmt.Errorf("query: %w", err)

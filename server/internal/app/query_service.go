@@ -24,6 +24,7 @@ type QueryRequest struct {
 	NodeKinds []types.NodeKind
 	TopK      int
 	MinScore  float64
+	NoExplain bool
 }
 
 // QueryService handles semantic code search.
@@ -164,11 +165,11 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 	}
 
 	// Generate explanation (non-fatal if fails).
-	// Try structured output first, fall back to streaming text.
+	// Skip when NoExplain is set — saves 5-15 seconds per query.
 	explainStart := time.Now()
 	explanation := ""
 	var structuredExplan *types.SearchExplanation
-	if qs.explainer != nil {
+	if qs.explainer != nil && !req.NoExplain {
 		explainReq := domain.ExplainRequest{
 			QueryType:    "search",
 			UserQuery:    req.Question,
