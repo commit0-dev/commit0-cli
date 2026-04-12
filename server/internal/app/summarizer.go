@@ -79,23 +79,35 @@ func (s *Summarizer) SummarizeNodes(ctx context.Context, nodes []types.CodeNode)
 	s.log.Info("summarization complete", "summarized", len(targets))
 }
 
-// needsSummary returns true if a node should be summarized.
+// needsSummary returns true if a node needs LLM summarization.
+// Most nodes don't: docstrings, simple functions, and tests are handled
+// without an LLM call. Only complex undocumented code needs summarization.
 func (s *Summarizer) needsSummary(n *types.CodeNode) bool {
-	// Skip if already has a summary
+	// Already summarized (cached from previous run).
 	if n.Summary != "" {
 		return false
 	}
-	// Only summarize functions and classes
+	// Only functions and classes.
 	if n.Kind != types.NodeFunction && n.Kind != types.NodeClass {
 		return false
 	}
-	// Skip trivial functions (< 3 lines)
-	lineCount := n.EndLine - n.StartLine
-	if lineCount < 3 {
+	// Has a docstring — use it directly (no LLM needed).
+	if n.Docstring != "" {
+		n.Summary = n.Docstring
 		return false
 	}
-	// Skip empty bodies
+	// Empty body.
 	if strings.TrimSpace(n.Body) == "" {
+		return false
+	}
+	// Test/benchmark functions — not useful for search quality.
+	if strings.HasPrefix(n.Name, "Test") || strings.HasPrefix(n.Name, "Benchmark") {
+		return false
+	}
+	// Under 50 LOC — logic is simple enough that signature + name conveys intent.
+	// Only complex functions (50+ LOC) benefit from LLM summarization.
+	lineCount := n.EndLine - n.StartLine
+	if lineCount < 50 {
 		return false
 	}
 	return true
