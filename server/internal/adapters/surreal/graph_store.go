@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
@@ -125,10 +127,13 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		concepts = node.Concepts
 	}
 
+	// Content map uses schema field names directly (repo, file — not repo_ref, file_ref).
+	// record_id is separate (used in UPSERT type::record($record_id)).
 	return map[string]any{
 		"record_id":    models.NewRecordID(table, localID),
 		"name":         node.Name,
 		"qualified":    node.Qualified,
+		"path":         node.FilePath,
 		"file_path":    node.FilePath,
 		"repo_slug":    node.RepoSlug,
 		"language":     node.Language,
@@ -142,8 +147,8 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		"content_hash": node.ContentHash,
 		"embedding":    embedding,
 		"visibility":   defaultVisibility(node.Visibility),
-		"repo_ref":     repoRef,
-		"file_ref":     fileRef,
+		"repo":         repoRef,
+		"file":         fileRef,
 	}
 }
 
@@ -154,155 +159,26 @@ func defaultVisibility(v string) string {
 	return v
 }
 
-// upsertNodeQuery returns the UPSERT SurrealQL for a given table.
-// We store file_path and repo_slug as plain string fields for easy lookup;
-// the repo/file REFERENCE fields point to the proper record IDs.
-func upsertNodeQuery(table string) string {
-	switch table {
-	case "function":
-		return `
-UPSERT type::record($record_id) CONTENT {
-    name:         $name,
-    qualified:    $qualified,
-    file_path:    $file_path,
-    repo_slug:    $repo_slug,
-    file:         $file_ref,
-    repo:         $repo_ref,
-    language:     $language,
-    start_line:   $start_line,
-    end_line:     $end_line,
-    signature:    $signature,
-    docstring:    $docstring,
-    body:         $body,
-    summary:      $summary,
-    concepts:     $concepts,
-    content_hash: $content_hash,
-    embedding:    $embedding,
-    visibility:   $visibility
-};`
-	case "class":
-		return `
-UPSERT type::record($record_id) CONTENT {
-    name:         $name,
-    qualified:    $qualified,
-    file_path:    $file_path,
-    repo_slug:    $repo_slug,
-    file:         $file_ref,
-    repo:         $repo_ref,
-    language:     $language,
-    start_line:   $start_line,
-    end_line:     $end_line,
-    docstring:    $docstring,
-    body:         $body,
-    summary:      $summary,
-    concepts:     $concepts,
-    content_hash: $content_hash,
-    embedding:    $embedding,
-    visibility:   $visibility
-};`
-	case "file":
-		return `
-UPSERT type::record($record_id) CONTENT {
-    path:         $file_path,
-    file_path:    $file_path,
-    repo_slug:    $repo_slug,
-    repo:         $repo_ref,
-    language:     $language,
-    summary:      $summary,
-    concepts:     $concepts,
-    content_hash: $content_hash,
-    embedding:    $embedding
-};`
-	case "module":
-		return `
-UPSERT type::record($record_id) CONTENT {
-    name:      $name,
-    path:      $file_path,
-    file_path: $file_path,
-    repo_slug: $repo_slug,
-    repo:      $repo_ref,
-    language:  $language,
-    docstring: $docstring,
-    summary:   $summary,
-    concepts:  $concepts,
-    embedding: $embedding
-};`
-	}
-	return ""
+// genericUpsertNodeQuery returns a single UPSERT template for ANY node label.
+// Replaces the old 4-case upsertNodeQuery switch (OpenCodeGraph §5.1).
+// The adapter still routes to the correct table by label; SurrealDB schema
+// on SCHEMAFULL tables ignores unknown fields, so extra props are safe.
+func genericUpsertNodeQuery() string {
+	return `UPSERT type::record($record_id) CONTENT $props;`
 }
 
-// relateEdgeQuery returns a RELATE SurrealQL statement for a given EdgeKind.
-func relateEdgeQuery(kind types.EdgeKind) string {
-	switch kind {
-	case types.EdgeCalls:
-		return `
-RELATE $from->calls->$to CONTENT {
-    call_site:  $call_site,
-    is_dynamic: $is_dynamic,
-    call_type:  $call_type,
-    repo:       $repo_ref
-};`
-	case types.EdgeImports:
-		return `
-RELATE $from->imports->$to;`
-	case types.EdgeDefines:
-		return `
-RELATE $from->defines->$to;`
-	case types.EdgeInherits:
-		return `
-RELATE $from->inherits->$to CONTENT {
-    kind: $inherit_kind
-};`
-	case types.EdgeUses:
-		return `
-RELATE $from->uses->$to CONTENT {
-    usage_type: $usage_type
-};`
-	case types.EdgeDataFlow:
-		return `
-RELATE $from->data_flow->$to CONTENT {
-    call_site:  $call_site,
-    param_name: $param_name,
-    arg_expr:   $arg_expr,
-    arg_type:   $arg_type,
-    repo:       $repo_ref
-};`
-	case types.EdgeReads:
-		return `
-RELATE $from->reads->$to CONTENT {
-    field_name: $field_name,
-    repo:       $repo_ref
-};`
-	case types.EdgeWrites:
-		return `
-RELATE $from->writes->$to CONTENT {
-    field_name: $field_name,
-    repo:       $repo_ref
-};`
-	}
-	return ""
+// genericRelateQuery builds a single RELATE statement for ANY edge label.
+// Replaces the old 8-case relateEdgeQuery switch (OpenCodeGraph §7.2).
+// SurrealDB auto-creates SCHEMALESS tables for unknown labels.
+func genericRelateQuery(label string) string {
+	return fmt.Sprintf("RELATE $from->%s->$to CONTENT $props;", label)
 }
 
-// edgeParams builds the variable map for a RELATE statement.
-func edgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
-	callType := edge.CallType
-	if callType == "" {
-		callType = "direct"
-	}
-	inheritKind := "extends"
-	if v, ok := edge.Metadata["kind"]; ok {
-		inheritKind = v
-	}
-	usageType := "reference"
-	if v, ok := edge.Metadata["usage_type"]; ok {
-		usageType = v
-	}
-
+// genericEdgeParams builds the props map for a generic RELATE.
+// All edge-type-specific fields go into one map — no per-type switching.
+func genericEdgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
 	fromTable, fromID := splitRecordID(edge.FromID)
 	toTable, toID := splitRecordID(edge.ToID)
-
-	// Default missing table to "function" — unresolved call targets from the
-	// parser arrive without a table prefix.
 	if fromTable == "" {
 		fromTable = "function"
 	}
@@ -310,25 +186,48 @@ func edgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
 		toTable = "function"
 	}
 
-	// Data-flow metadata
-	paramName := optionalMeta(edge.Metadata, "param_name")
-	argExpr := optionalMeta(edge.Metadata, "arg_expr")
-	argType := optionalMeta(edge.Metadata, "arg_type")
-	fieldName := optionalMeta(edge.Metadata, "field")
+	// Build props from all sources: fixed fields + metadata
+	props := make(map[string]any, len(edge.Metadata)+6)
+	if edge.CallSite != "" {
+		props["call_site"] = edge.CallSite
+	}
+	if edge.CallType != "" {
+		props["call_type"] = edge.CallType
+	} else if edge.Kind == types.EdgeCalls {
+		props["call_type"] = "direct"
+	}
+	if edge.IsDynamic {
+		props["is_dynamic"] = true
+	}
+	// With SCHEMALESS edge tables (OpenCodeGraph), repo is stored as plain string.
+	// No record<repo> reference needed — simpler and works for all edge labels.
+	if repoSlug != "" {
+		props["repo"] = repoSlug
+	}
+	// Copy metadata keys, coercing known numeric fields from string→int
+	// (Metadata is map[string]string but SCHEMAFULL tables expect typed fields)
+	numericFields := map[string]bool{
+		"from_line": true, "to_line": true, "def_line": true,
+		"use_line": true, "mutation_line": true, "start_line": true,
+	}
+	for k, v := range edge.Metadata {
+		if numericFields[k] && v != "" {
+			var n int
+			for _, c := range v {
+				if c >= '0' && c <= '9' {
+					n = n*10 + int(c-'0')
+				}
+			}
+			props[k] = n
+		} else {
+			props[k] = v
+		}
+	}
 
 	return map[string]any{
-		"from":         models.NewRecordID(fromTable, fromID),
-		"to":           models.NewRecordID(toTable, toID),
-		"call_site":    edge.CallSite,
-		"is_dynamic":   edge.IsDynamic,
-		"call_type":    callType,
-		"repo_ref":     models.NewRecordID("repo", repoSlug),
-		"inherit_kind": inheritKind,
-		"usage_type":   usageType,
-		"param_name":   paramName,
-		"arg_expr":     argExpr,
-		"arg_type":     argType,
-		"field_name":   fieldName,
+		"from":  models.NewRecordID(fromTable, fromID),
+		"to":    models.NewRecordID(toTable, toID),
+		"props": props,
 	}
 }
 
@@ -366,12 +265,16 @@ func (a *SurrealAdapter) UpsertNode(ctx context.Context, node *types.CodeNode) e
 		return domain.Validation("node is nil")
 	}
 	table := nodeTable(string(node.Kind))
-	q := upsertNodeQuery(table)
-	if q == "" {
+	if table == "" {
 		return domain.Validation(fmt.Sprintf("unknown node kind: %s", node.Kind))
 	}
-
-	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, nodeParams(node))
+	q := genericUpsertNodeQuery()
+	params := nodeParams(node)
+	// Wrap the params in a $props + $record_id structure for the generic query
+	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
+		"record_id": params["record_id"],
+		"props":     params,
+	})
 	if err != nil {
 		return fmt.Errorf("upsert node %s: %w", node.ID, err)
 	}
@@ -517,14 +420,12 @@ func (a *SurrealAdapter) UpsertEdge(ctx context.Context, edge *types.CodeEdge) e
 	if edge == nil {
 		return domain.Validation("edge is nil")
 	}
-	q := relateEdgeQuery(edge.Kind)
-	if q == "" {
-		return domain.Validation(fmt.Sprintf("unknown edge kind: %s", edge.Kind))
+	if edge.Kind == "" {
+		return domain.Validation("edge kind is empty")
 	}
-
-	// Derive repo slug from the FromID.
+	q := genericRelateQuery(string(edge.Kind))
 	repoSlug := ""
-	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, edgeParams(edge, repoSlug))
+	results, err := surrealdb.Query[any](ctx, a.writeDB(), q, genericEdgeParams(edge, repoSlug))
 	if err != nil {
 		return fmt.Errorf("upsert edge %s->%s: %w", edge.FromID, edge.ToID, err)
 	}
@@ -577,63 +478,93 @@ type traceRow struct {
 	Depth     int    `json:"depth"`
 }
 
-// TraceForward follows call-graph edges outward from startID up to depth hops.
-func (a *SurrealAdapter) TraceForward(ctx context.Context, startID string, depth int) ([]types.TraceHop, error) {
+// TraverseGraph follows edges of the specified labels from startID.
+// This is the label-parameterized traversal from OpenCodeGraph (OPEN_CODE_GRAPH.md §7.3).
+// For multiple labels, runs parallel per-label queries and merges results.
+func (a *SurrealAdapter) TraverseGraph(ctx context.Context, startID string, edgeLabels []string, direction string, maxDepth int) ([]types.TraceHop, error) {
 	table, localID := splitRecordID(startID)
 	if table == "" || localID == "" {
 		return nil, domain.Validation(fmt.Sprintf("invalid start id: %q", startID))
 	}
-	if depth <= 0 {
-		depth = 5
+	if maxDepth <= 0 {
+		maxDepth = 5
+	}
+	if len(edgeLabels) == 0 {
+		edgeLabels = []string{"calls"}
 	}
 
-	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
+	startRef := models.NewRecordID(table, localID)
+	startPtr := &startRef
+
+	// Single label: one query
+	if len(edgeLabels) == 1 {
+		return a.traverseSingleLabel(ctx, startPtr, edgeLabels[0], direction, maxDepth)
+	}
+
+	// Multiple labels: parallel queries, merge + dedup
+	g, gCtx := errgroup.WithContext(ctx)
+	results := make([][]types.TraceHop, len(edgeLabels))
+
+	for i, label := range edgeLabels {
+		g.Go(func() error {
+			hops, err := a.traverseSingleLabel(gCtx, startPtr, label, direction, maxDepth)
+			if err != nil {
+				a.log.Warn("traverse label failed", "label", label, "err", err)
+				return nil // non-fatal per label
+			}
+			results[i] = hops
+			return nil
+		})
+	}
+	_ = g.Wait()
+
+	// Merge and dedup by qualified name
+	seen := make(map[string]bool)
+	var merged []types.TraceHop
+	for _, hops := range results {
+		for _, h := range hops {
+			if h.Node.Qualified != "" && !seen[h.Node.Qualified] {
+				seen[h.Node.Qualified] = true
+				merged = append(merged, h)
+			}
+		}
+	}
+	return merged, nil
+}
+
+// traverseSingleLabel runs a recursive graph traversal for one edge label.
+// Uses a per-query timeout (30s) to prevent dangling edges from blocking the
+// entire request — some labels (data_flow) have many unresolved targets that
+// cause SurrealDB recursive traversal to hang.
+func (a *SurrealAdapter) traverseSingleLabel(ctx context.Context, start *models.RecordID, label, direction string, maxDepth int) ([]types.TraceHop, error) {
+	var arrow string
+	switch direction {
+	case "reverse":
+		arrow = fmt.Sprintf("<-%s<-function", label)
+	default: // "forward"
+		arrow = fmt.Sprintf("->%s->function", label)
+	}
+
 	q := fmt.Sprintf(`
 SELECT id, name, qualified, language, file_path, repo_slug
-FROM $start.{1..%d}(->calls->function);`, depth)
+FROM $start.{1..%d}(%s);`, maxDepth, arrow)
 
-	results, err := surrealdb.Query[[]traceRow](ctx, a.readDB(), q, map[string]any{
-		"start": models.NewRecordID(table, localID),
+	// Per-label timeout prevents one slow label from killing the whole request
+	queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	results, err := surrealdb.Query[[]traceRow](queryCtx, a.readDB(), q, map[string]any{
+		"start": start,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("trace forward %s: %w", startID, err)
+		return nil, err
 	}
-
 	if results == nil || len(*results) == 0 {
 		return nil, nil
 	}
-
-	return buildTraceHops((*results)[0].Result, "calls"), nil
+	return buildTraceHops((*results)[0].Result, label), nil
 }
 
-// TraceReverse follows call-graph edges backward (callers of startID).
-func (a *SurrealAdapter) TraceReverse(ctx context.Context, startID string, depth int) ([]types.TraceHop, error) {
-	table, localID := splitRecordID(startID)
-	if table == "" || localID == "" {
-		return nil, domain.Validation(fmt.Sprintf("invalid start id: %q", startID))
-	}
-	if depth <= 0 {
-		depth = 5
-	}
-
-	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
-	q := fmt.Sprintf(`
-SELECT id, name, qualified, language, file_path, repo_slug
-FROM $start.{1..%d}(<-calls<-function);`, depth)
-
-	results, err := surrealdb.Query[[]traceRow](ctx, a.readDB(), q, map[string]any{
-		"start": models.NewRecordID(table, localID),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("trace reverse %s: %w", startID, err)
-	}
-
-	if results == nil || len(*results) == 0 {
-		return nil, nil
-	}
-
-	return buildTraceHops((*results)[0].Result, "calls"), nil
-}
 
 // buildTraceHops converts flat traversal rows into a slice of TraceHop.
 // SurrealDB path traversal returns results in BFS order; we build a flat
@@ -672,70 +603,9 @@ func buildTraceHops(rows []traceRow, _ string) []types.TraceHop {
 	return hops
 }
 
-// BlastRadius returns all nodes that transitively depend on targetID.
-func (a *SurrealAdapter) BlastRadius(ctx context.Context, targetID string, maxDepth int) ([]types.AffectedNode, error) {
-	table, localID := splitRecordID(targetID)
-	if table == "" || localID == "" {
-		return nil, domain.Validation(fmt.Sprintf("invalid target id: %q", targetID))
-	}
-	if maxDepth <= 0 {
-		maxDepth = 10
-	}
+// BlastRadius is deprecated — use TraverseGraph with direction="reverse".
+// Kept only for test stub compat.
 
-	// SurrealDB 3.0 recursive traversal: record.{min..max}(path)
-	q := fmt.Sprintf(`
-SELECT id, name, qualified, language, file_path, repo_slug
-FROM $target.{1..%d}(<-calls<-function);`, maxDepth)
-
-	type affectedRow struct {
-		ID        *models.RecordID `json:"id"`
-		Name      string           `json:"name"`
-		Qualified string           `json:"qualified"`
-		Language  string           `json:"language"`
-		FilePath  string           `json:"file_path"`
-		RepoSlug  string           `json:"repo_slug"`
-	}
-
-	results, err := surrealdb.Query[[]affectedRow](ctx, a.readDB(), q, map[string]any{
-		"target": models.NewRecordID(table, localID),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("blast radius %s: %w", targetID, err)
-	}
-
-	if results == nil || len(*results) == 0 {
-		return nil, nil
-	}
-
-	rows := (*results)[0].Result
-	affected := make([]types.AffectedNode, 0, len(rows))
-	for i, r := range rows {
-		nodeID := ""
-		if r.ID != nil {
-			nodeID = fmt.Sprintf("%s:%v", r.ID.Table, r.ID.ID)
-		}
-		// Derive module from qualified name (everything before first dot).
-		module := r.Qualified
-		if idx := strings.IndexByte(r.Qualified, '.'); idx > 0 {
-			module = r.Qualified[:idx]
-		}
-		affected = append(affected, types.AffectedNode{
-			Node: types.CodeNode{
-				ID:        nodeID,
-				Kind:      kindFromTable(r.ID.Table),
-				Name:      r.Name,
-				Qualified: r.Qualified,
-				Language:  r.Language,
-				FilePath:  r.FilePath,
-				RepoSlug:  r.RepoSlug,
-			},
-			HopCount: i + 1,
-			Module:   module,
-			Path:     r.FilePath,
-		})
-	}
-	return affected, nil
-}
 
 // ---------------------------------------------------------------------------
 // GraphStore — Neighborhood & data-flow queries
@@ -750,6 +620,7 @@ type neighborRow struct {
 	FilePath  string           `json:"file_path"`
 	ParamName string           `json:"param_name"`
 	ArgExpr   string           `json:"arg_expr"`
+	FieldName string           `json:"field_name"`
 	StartLine int              `json:"start_line"`
 }
 
@@ -775,84 +646,65 @@ func (a *SurrealAdapter) GetNeighborhood(ctx context.Context, nodeID string) (*d
 	}
 
 	// Single multi-LET query fetches all neighbor categories in one round-trip.
-	q := `
-LET $node = type::record($table + ":" + $local_id);
+	// Use separate queries to avoid FETCH/dereference on dangling record IDs.
+	// Dangling edges (unresolved targets) cause SurrealDB errors when accessed
+	// via out.qualified because the target record doesn't exist.
+	nb := &domain.Neighborhood{}
+	nodeRef := models.NewRecordID(table, localID)
+	params := map[string]any{"node": nodeRef}
 
-LET $callees = (
-    SELECT out.qualified AS qualified, out.signature AS signature,
-           out.docstring AS docstring, out.file_path  AS file_path,
-           out.start_line AS start_line
-    FROM calls WHERE in = $node LIMIT 30 FETCH out
-);
-LET $callers = (
-    SELECT in.qualified AS qualified, in.signature AS signature,
-           in.docstring AS docstring, in.file_path  AS file_path,
-           in.start_line AS start_line
-    FROM calls WHERE out = $node LIMIT 30 FETCH in
-);
-LET $sinks = (
-    SELECT out.qualified AS qualified, out.signature AS signature,
-           out.file_path AS file_path, out.start_line AS start_line,
-           param_name, arg_expr
-    FROM data_flow WHERE in = $node LIMIT 20 FETCH out
-);
-LET $sources = (
-    SELECT in.qualified AS qualified, in.signature AS signature,
-           in.file_path AS file_path, in.start_line AS start_line,
-           param_name, arg_expr
-    FROM data_flow WHERE out = $node LIMIT 20 FETCH in
-);
-LET $reads_f  = (SELECT field_name FROM reads  WHERE in = $node);
-LET $writes_f = (SELECT field_name FROM writes WHERE in = $node);
-
-RETURN {
-    callees:  $callees,
-    callers:  $callers,
-    sinks:    $sinks,
-    sources:  $sources,
-    reads:    $reads_f.field_name,
-    writes:   $writes_f.field_name
-};`
-
-	type neighborhoodRow struct {
-		Callees []neighborRow `json:"callees"`
-		Callers []neighborRow `json:"callers"`
-		Sinks   []neighborRow `json:"sinks"`
-		Sources []neighborRow `json:"sources"`
-		Reads   []string      `json:"reads"`
-		Writes  []string      `json:"writes"`
+	// Callees: functions this node calls (outbound calls edges where target exists)
+	if rows, err := a.neighborQuery(ctx, "SELECT out AS id, out.qualified AS qualified, out.signature AS signature, out.docstring AS docstring, out.file_path AS file_path, out.start_line AS start_line FROM calls WHERE in = $node AND out.qualified != NONE LIMIT 30;", params); err == nil {
+		for _, r := range rows {
+			nb.Callees = append(nb.Callees, neighborRowToNeighborNode(r))
+		}
 	}
-
-	results, err := surrealdb.Query[[]neighborhoodRow](ctx, a.readDB(), q, map[string]any{
-		"table":    table,
-		"local_id": localID,
-	})
-	if err != nil {
-		// Non-fatal: return an empty neighborhood so callers can proceed.
-		return &domain.Neighborhood{}, nil //nolint:nilerr
+	// Callers: functions that call this node (inbound calls edges)
+	if rows, err := a.neighborQuery(ctx, "SELECT in AS id, in.qualified AS qualified, in.signature AS signature, in.docstring AS docstring, in.file_path AS file_path, in.start_line AS start_line FROM calls WHERE out = $node AND in.qualified != NONE LIMIT 30;", params); err == nil {
+		for _, r := range rows {
+			nb.Callers = append(nb.Callers, neighborRowToNeighborNode(r))
+		}
 	}
-	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
-		return &domain.Neighborhood{}, nil
+	// Data sinks: functions that receive data from this node
+	if rows, err := a.neighborQuery(ctx, "SELECT out AS id, out.qualified AS qualified, out.signature AS signature, out.file_path AS file_path, out.start_line AS start_line, param_name, arg_expr FROM data_flow WHERE in = $node AND out.qualified != NONE LIMIT 20;", params); err == nil {
+		for _, r := range rows {
+			nb.DataSinks = append(nb.DataSinks, neighborRowToNeighborNode(r))
+		}
 	}
-
-	row := (*results)[0].Result[0]
-	nb := &domain.Neighborhood{
-		Reads:  row.Reads,
-		Writes: row.Writes,
+	// Data sources: functions whose data flows into this node
+	if rows, err := a.neighborQuery(ctx, "SELECT in AS id, in.qualified AS qualified, in.signature AS signature, in.file_path AS file_path, in.start_line AS start_line, param_name, arg_expr FROM data_flow WHERE out = $node AND in.qualified != NONE LIMIT 20;", params); err == nil {
+		for _, r := range rows {
+			nb.DataSources = append(nb.DataSources, neighborRowToNeighborNode(r))
+		}
 	}
-	for _, r := range row.Callees {
-		nb.Callees = append(nb.Callees, neighborRowToNeighborNode(r))
+	// Reads/writes
+	if rows, err := a.neighborQuery(ctx, "SELECT field_name FROM reads WHERE in = $node;", params); err == nil {
+		for _, r := range rows {
+			if r.FieldName != "" {
+				nb.Reads = append(nb.Reads, r.FieldName)
+			}
+		}
 	}
-	for _, r := range row.Callers {
-		nb.Callers = append(nb.Callers, neighborRowToNeighborNode(r))
-	}
-	for _, r := range row.Sinks {
-		nb.DataSinks = append(nb.DataSinks, neighborRowToNeighborNode(r))
-	}
-	for _, r := range row.Sources {
-		nb.DataSources = append(nb.DataSources, neighborRowToNeighborNode(r))
+	if rows, err := a.neighborQuery(ctx, "SELECT field_name FROM writes WHERE in = $node;", params); err == nil {
+		for _, r := range rows {
+			if r.FieldName != "" {
+				nb.Writes = append(nb.Writes, r.FieldName)
+			}
+		}
 	}
 	return nb, nil
+}
+
+// neighborQuery runs a single neighborhood sub-query and returns the result rows.
+func (a *SurrealAdapter) neighborQuery(ctx context.Context, q string, params map[string]any) ([]neighborRow, error) {
+	results, err := surrealdb.Query[[]neighborRow](ctx, a.readDB(), q, params)
+	if err != nil {
+		return nil, err
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+	return (*results)[0].Result, nil
 }
 
 // TraceDataFlow follows data_flow edges from startID.
@@ -946,6 +798,42 @@ func (a *SurrealAdapter) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 	return ids, nil
 }
 
+// ListFilePaths returns distinct file paths for all nodes in a repo (lightweight query).
+// Used by cleanupStaleNodes to check which files still exist on disk.
+func (a *SurrealAdapter) ListFilePaths(ctx context.Context, repoSlug string) ([]string, error) {
+	// SurrealDB: use GROUP BY for distinct values, or just SELECT file_path
+	// and deduplicate client-side (simpler, avoids SQL dialect issues).
+	q := `SELECT file_path FROM function WHERE repo = $repo_ref;
+	SELECT file_path FROM class WHERE repo = $repo_ref;
+	SELECT path AS file_path FROM file WHERE repo = $repo_ref;`
+
+	type row struct {
+		FilePath string `json:"file_path"`
+	}
+
+	results, err := surrealdb.Query[[]row](ctx, a.readDB(), q, map[string]any{
+		"repo_ref": models.NewRecordID("repo", repoSlug),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list file paths %s: %w", repoSlug, err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]bool)
+	var paths []string
+	for _, res := range *results {
+		for _, r := range res.Result {
+			if r.FilePath != "" && !seen[r.FilePath] {
+				seen[r.FilePath] = true
+				paths = append(paths, r.FilePath)
+			}
+		}
+	}
+	return paths, nil
+}
+
 // ListAllNodes returns all nodes (function, class, file, module) for a repo with full data.
 // Used by GraphExporter for building sync bundles.
 func (a *SurrealAdapter) ListAllNodes(ctx context.Context, repoSlug string) ([]types.CodeNode, error) {
@@ -989,8 +877,8 @@ func (a *SurrealAdapter) ListAllEdges(ctx context.Context, repoSlug string) ([]t
 		RemovedCommit    string            `json:"removed_commit"`
 	}
 
-	// Edge tables with a direct `repo` field: calls, data_flow, reads, writes.
-	// Other tables: filter via the source node's repo_slug (in.repo_slug).
+	// With SCHEMALESS edge tables, all edges store repo as a plain string prop.
+	// Tables that have repo: filter directly. Others: filter via source node.
 	tablesWithRepo := map[string]bool{"calls": true, "data_flow": true, "reads": true, "writes": true}
 	edgeTables := []string{"calls", "imports", "defines", "inherits", "uses", "data_flow", "reads", "writes"}
 	params := map[string]any{"repo": repoSlug}
@@ -1081,10 +969,11 @@ func (a *SurrealAdapter) ListRoutes(ctx context.Context, repoSlug string) ([]typ
 		Out         *models.RecordID `json:"out"`
 		HTTPMethod  string           `json:"http_method"`
 		HTTPPath    string           `json:"http_path"`
-		Middleware  []string         `json:"middleware"`
+		Middleware  any              `json:"middleware"` // string or []string depending on SCHEMALESS storage
 		GroupPrefix string           `json:"group_prefix"`
 	}
 
+	// With SCHEMALESS edge tables, repo is stored as a plain string, not record<repo>
 	q := `SELECT * FROM route WHERE repo = $repo;`
 	params := map[string]any{"repo": repoSlug}
 
@@ -1105,8 +994,21 @@ func (a *SurrealAdapter) ListRoutes(ctx context.Context, repoSlug string) ([]typ
 		if r.GroupPrefix != "" {
 			meta["group_prefix"] = r.GroupPrefix
 		}
-		if len(r.Middleware) > 0 {
-			meta["middleware"] = strings.Join(r.Middleware, ",")
+		switch mw := r.Middleware.(type) {
+		case string:
+			if mw != "" {
+				meta["middleware"] = mw
+			}
+		case []any:
+			parts := make([]string, 0, len(mw))
+			for _, v := range mw {
+				if s, ok := v.(string); ok {
+					parts = append(parts, s)
+				}
+			}
+			if len(parts) > 0 {
+				meta["middleware"] = strings.Join(parts, ",")
+			}
 		}
 
 		fromID := ""
@@ -1207,12 +1109,16 @@ func (a *SurrealAdapter) UpsertFileBatch(ctx context.Context, nodes []types.Code
 	for i := range nodes {
 		node := &nodes[i]
 		table := nodeTable(string(node.Kind))
-		q := upsertNodeQuery(table)
-		if q == "" {
+		if table == "" {
 			continue
 		}
+		q := genericUpsertNodeQuery()
+		params := nodeParams(node)
 		err := retry.WithRetry(ctx, 3, func() error {
-			results, err := surrealdb.Query[any](ctx, a.writeDB(), q, nodeParams(node))
+			results, err := surrealdb.Query[any](ctx, a.writeDB(), q, map[string]any{
+				"record_id": params["record_id"],
+				"props":     params,
+			})
 			if err != nil {
 				return classifySurrealError(err)
 			}
@@ -1236,11 +1142,11 @@ func (a *SurrealAdapter) UpsertFileBatch(ctx context.Context, nodes []types.Code
 
 	for i := range edges {
 		edge := &edges[i]
-		q := relateEdgeQuery(edge.Kind)
-		if q == "" {
+		if edge.Kind == "" {
 			continue
 		}
-		results, err := surrealdb.Query[any](ctx, a.writeDB(), q, edgeParams(edge, repoSlug))
+		q := genericRelateQuery(string(edge.Kind))
+		results, err := surrealdb.Query[any](ctx, a.writeDB(), q, genericEdgeParams(edge, repoSlug))
 		if err != nil {
 			return fmt.Errorf("relate edge %s->%s: %w", edge.FromID, edge.ToID, err)
 		}

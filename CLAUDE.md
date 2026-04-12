@@ -61,13 +61,8 @@ This project uses its own code intelligence for self-development. When the commi
 
 | You're working on... | Read this doc |
 |---|---|
-| Understanding the project mission | [docs/VISION.md](docs/VISION.md) |
 | System design, layers, tech stack | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Services, ports, HTTP API, agent | [docs/BACKEND.md](docs/BACKEND.md) |
 | SurrealDB schema, indexes, queries | [docs/DATABASE.md](docs/DATABASE.md) |
-| Indexing or retrieval pipeline | [docs/PIPELINE.md](docs/PIPELINE.md) |
-| Security analysis, taint, CPG | [docs/SECURITY_ROADMAP.md](docs/SECURITY_ROADMAP.md) |
+| Graph abstraction, techniques, pipeline | [docs/OPEN_CODE_GRAPH.md](docs/OPEN_CODE_GRAPH.md) |
 | Navigating unfamiliar code | [docs/LAYOUT.md](docs/LAYOUT.md) |
-| Embedding model selection | [docs/EMBEDDING_RESEARCH.md](docs/EMBEDDING_RESEARCH.md) |
-| Local-first / offline strategy | [docs/LOCAL_MODEL.md](docs/LOCAL_MODEL.md) |
-| Commit zero feature design | [docs/DESIGN.md](docs/DESIGN.md) |

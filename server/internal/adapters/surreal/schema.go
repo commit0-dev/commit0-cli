@@ -14,7 +14,7 @@ import (
 // schemaVersion is the version number written to the schema_version table
 // by the DDL in schema.surql. Bump this when the schema changes.
 // Bump when: schema structure changes OR default embed dimension changes.
-const schemaVersion = 13
+const schemaVersion = 17 // 16: OpenCodeGraph — batch-drop edge tables + recreate as SCHEMALESS
 
 // SchemaVersion returns the current schema version for external callers.
 func SchemaVersion() int { return schemaVersion }
@@ -34,6 +34,19 @@ func (a *SurrealAdapter) ApplySchema(ctx context.Context) error {
 	// instead of dropping tables. Graph structure is preserved.
 	if err := a.migrateEmbeddings(ctx, embedDim); err != nil {
 		a.log.Warn("could not migrate embeddings", "err", err)
+	}
+
+	// OpenCodeGraph migration: drop old SCHEMAFULL edge tables in one batch
+	// so the field definitions are fully removed before SCHEMALESS recreation.
+	// Must be a single multi-statement query (not split) so SurrealDB commits
+	// the REMOVE before the DEFINE in the main DDL.
+	// Pre-create FTS analyzers before DDL runs — the splitStatements approach
+	// sometimes fails to create the code_analyzer (SurrealDB parser issue with
+	// TOKENIZERS class keyword in standalone statements). Create them explicitly.
+	analyzerDDL := `DEFINE ANALYZER IF NOT EXISTS code_analyzer TOKENIZERS class, blank FILTERS lowercase, ascii;
+DEFINE ANALYZER IF NOT EXISTS nl_analyzer TOKENIZERS blank FILTERS lowercase, ascii, snowball(english);`
+	if _, err := surrealdb.Query[any](ctx, a.db, analyzerDDL, nil); err != nil {
+		a.log.Warn("pre-create analyzers failed", "err", err)
 	}
 
 	ddl := strings.ReplaceAll(assets.SchemaSurQL, "{{EMBED_DIM}}", strconv.Itoa(embedDim))
@@ -76,6 +89,12 @@ func (a *SurrealAdapter) ApplySchema(ctx context.Context) error {
 				}
 			}
 		}
+	}
+
+	// Stamp the actual code version into the DB so the next startup skips DDL.
+	versionQ := fmt.Sprintf("INSERT INTO schema_version (version) VALUES (%d) ON DUPLICATE KEY UPDATE version = %d;", schemaVersion, schemaVersion)
+	if _, err := surrealdb.Query[any](ctx, a.db, versionQ, nil); err != nil {
+		a.log.Warn("failed to update schema_version", "err", err)
 	}
 
 	a.log.Info("schema applied", "version", schemaVersion, "statements", len(stmts))

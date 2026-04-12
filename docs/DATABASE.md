@@ -2,8 +2,7 @@
 
 > SurrealDB 3.0 schema, indexing strategy, query patterns, and performance tuning.
 
-**Source of truth:** `assets/schema.surql` (embedded in binary via `go:embed`)
-**Go SDK:** `surrealdb/surrealdb.go` · **Protocol:** WebSocket for streaming, HTTP for DEFINE API
+**Source of truth:** `server/assets/schema.surql` (embedded in binary via `go:embed`)
 
 ---
 
@@ -13,14 +12,13 @@ Unifies graph traversal, vector ANN search, and full-text search in one query la
 
 | Feature | commit0 Use Case |
 |---|---|
-| HNSW vector indexes | Memory-bounded ANN for code embeddings |
-| Computed fields (`COMPUTED`) | Derived centrality metrics, evaluated on read |
-| Record references (`REFERENCE`) | Bidirectional file→function navigation, cascading deletes |
+| HNSW vector indexes | ANN search over code embeddings |
+| Computed fields (`COMPUTED`) | Derived centrality metrics, entry point detection |
+| Record references (`REFERENCE`) | Bidirectional navigation, cascading deletes |
 | Client-side transactions | Atomic batch upsert of nodes + edges during indexing |
-| Changefeeds | Incremental re-indexing — detect what changed since last run |
 | Full-text search (BM25) | Hybrid symbol + natural language search |
-| Strict mode | Schema enforcement — no accidental schemaless drift |
-| DEFINE API | DB-native HTTP endpoints (query, trace, blast) |
+| SCHEMALESS relations | Extensible edge types — no schema migration for new analysis techniques |
+| Recursive traversal (`.{1..N}`) | Bounded graph walks with inline filtering |
 
 ---
 
@@ -28,13 +26,20 @@ Unifies graph traversal, vector ANN search, and full-text search in one query la
 
 ```
 Namespace: commit0
-  └─ Database: codebase (STRICT mode)
-       ├── Node tables:  repo, file, function, class, module
-       ├── Edge tables:  calls, imports, defines, inherits, uses,
-       │                 data_flow, reads, writes, route, control_flow, data_dep
-       ├── System:       chat_session, chat_message, memory, schema_version
-       └── Indexes:      HNSW vector, BM25 full-text, compound
+  Database: codebase
+    Node tables (SCHEMAFULL):  repo, file, function, class, module
+    Edge tables (SCHEMALESS):  calls, imports, defines, inherits, uses,
+                               data_flow, reads, writes, route, control_flow, data_dep
+    System tables:             chat_session, chat_message, memory,
+                               commit_history, schema_version, peer, sync_scope
+    Indexes:                   HNSW vector, BM25 full-text, compound
 ```
+
+### Schema Strategy
+
+- **Node tables** are SCHEMAFULL — they carry HNSW vector indexes and COMPUTED fields that require defined columns.
+- **Edge tables** are SCHEMALESS — they store properties via `RELATE ... CONTENT $props`. New edge types are created automatically on first `RELATE` with no `DEFINE TABLE` needed.
+- **Repo as graph node** — the `repo` table is a graph node with `REFERENCE ON DELETE CASCADE` on all other node tables. Deleting a repo cascades to all its nodes and edges.
 
 ---
 
@@ -42,34 +47,39 @@ Namespace: commit0
 
 | Table | Key Fields | Special Features |
 |-------|-----------|-----------------|
-| `repo` | slug (UNIQUE), path, languages, last_commit, last_indexed_at | `is_stale` COMPUTED field |
-| `file` | path, repo (REFERENCE CASCADE), language, content_hash, embedding | Per-file content hashing |
-| `function` | name, qualified (UNIQUE per repo), signature, body, embedding | `centrality` COMPUTED, `is_entry_point` COMPUTED |
+| `repo` | slug, path, languages, last_commit, last_indexed_at | `is_stale` COMPUTED field, CASCADE delete |
+| `file` | path, repo (REFERENCE), language, content_hash, embedding | Per-file content hashing |
+| `function` | name, qualified, signature, body, embedding | `centrality` COMPUTED, `call_count` COMPUTED, `is_entry_point` COMPUTED |
 | `class` | name, qualified, docstring, embedding | REFERENCE to file + repo |
 | `module` | name, path, embedding | Package/module level |
 
-**Computed fields** (evaluated on read, zero storage):
-- `call_count` = `count(<-calls<-function)`
-- `centrality` = `count(<-calls<-function) + count(->calls->function)`
-- `is_entry_point` = no callers AND has callees
+### Computed Fields (evaluated on read)
+
+```sql
+centrality     = count(<-calls<-function) + count(->calls->function)
+call_count     = count(<-calls<-function)
+is_entry_point = count(<-calls<-function) == 0 AND count(->calls->function) > 0
+```
 
 ---
 
 ## 4. Edge Tables (13 Types)
 
-| Edge | From → To | Key Fields |
-|------|-----------|-----------|
-| `calls` | function → function | call_site, is_dynamic, call_type |
-| `imports` | file → module | alias |
-| `defines` | file/module → function/class | — |
-| `inherits` | class → class | kind (extends/implements/embeds) |
-| `uses` | function → class | — |
-| `data_flow` | function → function | field_path, mutation_kind, metadata |
-| `reads` | function → field | — |
-| `writes` | function → field | — |
-| `route` | handler → function | method, path, middleware |
-| `control_flow` | node → node | kind (if/else/loop/return) |
-| `data_dep` | node → node | kind (def/use), variable |
+| Edge | From -> To | Key Properties |
+|------|-----------|---------------|
+| `calls` | function -> function | call_site, is_dynamic, call_type, repo |
+| `imports` | file -> module | alias, repo |
+| `defines` | file/module -> function/class | repo |
+| `inherits` | class -> class | kind (extends/implements/embeds) |
+| `uses` | function -> class | repo |
+| `data_flow` | function -> function | field_path, mutation_kind, param_name, arg_expr |
+| `reads` | function -> field | repo |
+| `writes` | function -> field | repo |
+| `route` | handler -> function | http_method, http_path, middleware |
+| `control_flow` | node -> node | branch_type, condition, from_line, to_line |
+| `data_dep` | node -> node | var_name, def_line, use_line, def_type |
+
+All edge tables are SCHEMALESS with only `in`/`out` indexes. Properties are stored as arbitrary key-value pairs via `RELATE ... CONTENT`.
 
 ---
 
@@ -77,42 +87,28 @@ Namespace: commit0
 
 ```sql
 DEFINE INDEX fn_vec_idx ON function FIELDS embedding
-    HNSW DIMENSION 3072 DIST COSINE TYPE F32 EFC 200 M 16;
+    HNSW DIMENSION $dim DIST COSINE TYPE F32 EFC 200 M 16;
 ```
+
+The dimension (`$dim`) is set by `EMBED_DIM` config (default 1024). All embedding providers normalize to this dimension.
 
 | Parameter | Value | Rationale |
 |---|---|---|
-| DIMENSION | 3072 | Gemini Embedding 2 max fidelity |
 | DIST | COSINE | Standard for normalized embeddings |
-| TYPE | F32 | 50% memory savings over F64, negligible recall loss |
-| EFC | 200 | Higher than default for better recall on code |
-| M | 16 | Slightly above default — code embeddings have dense clusters |
-
-**Memory estimate:** 100K functions × 3072 × 4 bytes = ~1.2 GB + ~20% HNSW overhead ≈ 1.4 GB
+| TYPE | F32 | 50% memory savings over F64 |
+| EFC | 200 | Higher recall for code embedding clusters |
+| M | 16 | Slightly above default for dense clusters |
 
 ### Vector Query
 
 ```sql
--- ANN search with effort parameter
 SELECT *, vector::distance::knn() AS dist
 FROM function WHERE embedding <|10, 40|> $q_vec;
 ```
 
-### Hybrid Search (Vector + FTS + Graph)
-
-```sql
-LET $q_vec = <embedding>;
-SELECT *, vector::distance::knn() AS vec_dist, search::score(1) AS fts_score, centrality
-FROM function
-WHERE embedding <|20|> $q_vec
-   OR (name @1@ $q_text OR qualified @1@ $q_text OR docstring @1@ $q_text)
-ORDER BY (1.0 / (60 + vec_dist)) * math::log(1 + centrality) DESC
-LIMIT 10;
-```
-
 ---
 
-## 6. Full-Text Search
+## 6. Full-Text Search (BM25)
 
 ```sql
 DEFINE ANALYZER code_analyzer TOKENIZERS class, blank FILTERS lowercase, ascii;
@@ -124,35 +120,32 @@ DEFINE INDEX fn_doc_fts  ON function FIELDS docstring FULLTEXT ANALYZER nl_analy
 
 ---
 
-## 7. Graph Traversal Patterns
+## 7. Graph Traversal
+
+Label-parameterized traversal is the core query pattern. All analysis techniques use the same mechanism with different edge label sets.
 
 **Forward trace** (call chain):
 ```sql
-SELECT ->calls->(function AS hop1), ->calls->calls->(function AS hop2) ... FROM function:$start_id;
+SELECT *.{1..5}(->calls->function) FROM type::record($start);
 ```
 
 **Reverse trace** (blast radius):
 ```sql
-SELECT <-calls<-(function AS hop1), <-calls<-calls<-(function AS hop2) ... FROM function:$target_id;
+SELECT *.{1..5}(<-calls<-function) FROM type::record($start);
 ```
 
-**Cross-entity** (classes used by callers):
+**Data flow trace** (field tracking):
 ```sql
-SELECT <-calls<-(function)->uses->(class) AS affected_types FROM function:$target_id;
+SELECT *.{1..10}(->data_flow(WHERE field_path = $field)->function) FROM type::record($start);
 ```
 
-**Semantic + structural** (similar AND in call neighborhood):
-```sql
-LET $neighbors = SELECT ->calls->function.id, <-calls<-function.id FROM function:$fn_id;
-SELECT *, vector::similarity::cosine(embedding, $fn.embedding) AS sim
-FROM function WHERE id IN $neighbors.ids AND sim > 0.75 ORDER BY sim DESC;
-```
+**Multi-label traversal** is done via parallel per-label queries merged client-side, since SurrealDB does not support `(->edge_a | ->edge_b)` in one recursive expression.
 
 ---
 
-## 8. Transactions
+## 8. Batch Operations
 
-Atomic batch upsert — all nodes and edges from a single file committed together via client-side transactions:
+Atomic batch upsert — all nodes and edges from a single file committed together:
 
 ```go
 tx, _ := db.BeginTransaction(ctx)
@@ -161,58 +154,29 @@ defer tx.Cancel(ctx)
 tx.Commit(ctx)
 ```
 
-Snapshot isolation: concurrent workers on different files don't conflict.
+Generic edge storage — one query template for all edge types:
 
----
-
-## 9. Changefeeds (Incremental Re-indexing)
-
-```sql
-DEFINE TABLE function SCHEMAFULL CHANGEFEED 7d;
-SHOW CHANGES FOR TABLE function SINCE $last_run_timestamp LIMIT 1000;
+```go
+q := fmt.Sprintf("RELATE $from->%s->$to CONTENT $props;", edge.Label)
 ```
 
-Flow: `git diff` → changed file paths → compare content_hash → re-parse → re-embed → upsert.
-
 ---
 
-## 10. Session & Memory Storage
+## 9. Session and Memory Storage
 
 ```sql
--- Chat sessions (multi-turn conversations)
 DEFINE TABLE chat_session SCHEMAFULL;
--- Chat messages per session
 DEFINE TABLE chat_message SCHEMAFULL;
--- Persistent memory with vector retrieval
 DEFINE TABLE memory SCHEMAFULL;
-DEFINE INDEX memory_vec_idx ON memory FIELDS embedding HNSW DIMENSION 3072 DIST COSINE TYPE F32;
+DEFINE INDEX memory_vec_idx ON memory FIELDS embedding HNSW DIMENSION $dim DIST COSINE TYPE F32;
 ```
 
 ---
 
-## 11. Performance
-
-### Capacity Planning
-
-| Codebase | Functions | Edges | Vector Storage | Total DB |
-|---|---|---|---|---|
-| Small (10K LOC) | ~500 | ~2,000 | 6 MB | ~50 MB |
-| Medium (100K LOC) | ~5,000 | ~20,000 | 60 MB | ~500 MB |
-| Large (1M LOC) | ~50,000 | ~200,000 | 600 MB | ~5 GB |
-| Monorepo (10M LOC) | ~500,000 | ~2,000,000 | 6 GB | ~50 GB |
-
-### Optimization
-
-- `REBUILD INDEX fn_vec_idx ON function;` — after bulk imports
-- `EXPLAIN FULL SELECT ...` — verify index utilization
-- Schema versioning via `schema_version` table with `ApplySchema()` in Go
-
----
-
-## 12. Configuration
+## 10. Configuration
 
 ```bash
-SURREAL_URL=ws://localhost:8000          # WebSocket
+SURREAL_URL=ws://localhost:8000
 SURREAL_USER=root
 SURREAL_PASS=root
 SURREAL_NAMESPACE=commit0

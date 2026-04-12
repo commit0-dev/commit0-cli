@@ -103,17 +103,15 @@ All settings are controlled by environment variables. A JSON config file can be 
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | _(required)_ | Google Gemini API key |
+| `EMBED_PROVIDER` | `gemini` | Embedding provider: `gemini`, `voyage`, `ollama` |
+| `LLM_PROVIDER` | `gemini` | LLM provider: `gemini`, `openrouter`, `ollama` |
+| `EMBED_DIM` | `1024` | Normalized embedding dimension for HNSW |
 | `SURREAL_URL` | `ws://localhost:8000` | SurrealDB WebSocket URL |
 | `SURREAL_USER` | `root` | SurrealDB username |
 | `SURREAL_PASS` | `root` | SurrealDB password |
-| `SURREAL_NAMESPACE` | `commit0` | SurrealDB namespace |
-| `SURREAL_DATABASE` | `codebase` | SurrealDB database |
-| `GEMINI_EMBED_MODEL` | `gemini-embedding-2-preview` | Embedding model |
-| `GEMINI_EXPLAIN_MODEL` | `gemini-2.0-flash` | LLM for explanations |
+| `GEMINI_API_KEY` | — | Google Gemini API key (if using Gemini provider) |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL (if using Ollama provider) |
 | `SERVER_PORT` | `8080` | HTTP server port |
-| `INDEX_WORKERS_EMBED` | `4` | Parallel embedding workers |
-| `INDEX_WORKERS_STORE` | `8` | Parallel store workers |
 
 ---
 
@@ -125,10 +123,11 @@ Go · Python · TypeScript · JavaScript
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — design principles, hexagonal architecture diagram
-- [Backend](docs/BACKEND.md) — service layer, adapter implementations, concurrency patterns
-- [Database](docs/DATABASE.md) — SurrealDB schema, indexes, and query patterns
-- [Directory Layout](docs/LAYOUT.md) — full annotated file tree
+- [Architecture](docs/ARCHITECTURE.md) — design principles, hexagonal architecture, tech stack
+- [Backend](docs/BACKEND.md) — services, port interfaces, HTTP API, agent orchestration
+- [Database](docs/DATABASE.md) — SurrealDB schema, indexes, query patterns
+- [OpenCodeGraph](docs/OPEN_CODE_GRAPH.md) — unified graph abstraction, analysis techniques
+- [Directory Layout](docs/LAYOUT.md) — annotated file tree
 
 ---
 

@@ -189,7 +189,7 @@ func TestContextBuilderDefaultMaxBodyRunes(t *testing.T) {
 
 func TestContextBuilderWithStoreNilNode(t *testing.T) {
 	store := newStubGraphStore()
-	cb := NewContextBuilderWithStore(1000, store)
+	cb := NewContextBuilderWithGraph(1000, store)
 	if cb.ForNodeCtx(context.Background(), nil) != "" {
 		t.Error("ForNodeCtx(nil) should return empty string")
 	}
@@ -210,7 +210,7 @@ func TestContextBuilderForNodeCtxNoStore(t *testing.T) {
 
 func TestContextBuilderForNodeCtxNoID(t *testing.T) {
 	store := newStubGraphStore()
-	cb := NewContextBuilderWithStore(1000, store)
+	cb := NewContextBuilderWithGraph(1000, store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "pkg.F", Language: "go",
 		FilePath: "f.go", ID: "", Body: "func F() {}",
@@ -227,7 +227,7 @@ func TestContextBuilderForNodeCtxWithNeighborhood(t *testing.T) {
 		Callees: []domain.NeighborNode{{Qualified: "pkg.G", Signature: "(x int) error"}},
 		Callers: []domain.NeighborNode{{Qualified: "pkg.H"}},
 	}
-	cb := NewContextBuilderWithStore(1000, store)
+	cb := NewContextBuilderWithGraph(1000, store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "pkg.F", Language: "go",
 		FilePath: "f.go", ID: "function:pkg⋅F", Body: "func F() {}",
@@ -251,7 +251,7 @@ func TestContextBuilderForNodeCtxWithNeighborhood(t *testing.T) {
 
 func TestContextBuilderForNodeCtxEmptyNeighborhood(t *testing.T) {
 	store := newStubGraphStore()
-	cb := NewContextBuilderWithStore(1000, store)
+	cb := NewContextBuilderWithGraph(1000, store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "pkg.H", Language: "go",
 		FilePath: "h.go", ID: "function:pkg⋅H", Body: "func H() {}",
@@ -272,7 +272,7 @@ func TestContextBuilderForNodeCtxDataFlow(t *testing.T) {
 		Reads:       []string{"User.Email"},
 		Writes:      []string{"User.UpdatedAt"},
 	}
-	cb := NewContextBuilderWithStore(1000, store)
+	cb := NewContextBuilderWithGraph(1000, store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "svc.Update", Language: "go",
 		FilePath: "svc.go", ID: "function:svc⋅Update", Body: "func Update() {}",

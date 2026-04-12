@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -16,14 +17,15 @@ import (
 // handleHealth returns liveness check with server state (idle/indexing).
 func (s *Server) handleHealth(c *gin.Context) {
 	activeJobs := 0
-	if s.jobs != nil {
-		s.jobs.mu.RLock()
-		for _, j := range s.jobs.jobs {
-			if j.Status == "indexing" {
+	if s.trackers != nil {
+		s.trackers.mu.RLock()
+		for _, t := range s.trackers.trackers {
+			snap := t.Snapshot()
+			if snap.Status == "indexing" {
 				activeJobs++
 			}
 		}
-		s.jobs.mu.RUnlock()
+		s.trackers.mu.RUnlock()
 	}
 	state := "idle"
 	if activeJobs > 0 {
@@ -85,11 +87,12 @@ func (s *Server) handleQuery(c *gin.Context) {
 // ---- Trace (SSE) ----------------------------------------------------------
 
 type traceRequest struct {
-	Symbol    string `json:"symbol"`
-	RepoSlug  string `json:"repo_slug"`
-	Direction string `json:"direction"`
-	Depth     int    `json:"depth"`
-	NoExplain bool   `json:"no_explain"`
+	Symbol     string   `json:"symbol"`
+	RepoSlug   string   `json:"repo_slug"`
+	Direction  string   `json:"direction"`
+	Depth      int      `json:"depth"`
+	NoExplain  bool     `json:"no_explain"`
+	EdgeLabels []string `json:"edge_labels,omitempty"`
 }
 
 // handleTrace handles POST /api/v1/trace with SSE streaming.
@@ -111,11 +114,12 @@ func (s *Server) handleTrace(c *gin.Context) {
 	}
 
 	result, err := s.traceSvc.Trace(c.Request.Context(), app.TraceRequest{
-		Symbol:    req.Symbol,
-		RepoSlug:  req.RepoSlug,
-		Direction: req.Direction,
-		Depth:     req.Depth,
-		NoExplain: req.NoExplain,
+		Symbol:     req.Symbol,
+		RepoSlug:   req.RepoSlug,
+		Direction:  req.Direction,
+		Depth:      req.Depth,
+		NoExplain:  req.NoExplain,
+		EdgeLabels: req.EdgeLabels,
 	})
 	if err != nil {
 		writeError(c, err)
@@ -162,11 +166,12 @@ func (s *Server) handleTraceJSON(c *gin.Context) {
 	}
 
 	result, err := s.traceSvc.Trace(c.Request.Context(), app.TraceRequest{
-		Symbol:    req.Symbol,
-		RepoSlug:  req.RepoSlug,
-		Direction: req.Direction,
-		Depth:     req.Depth,
-		NoExplain: req.NoExplain,
+		Symbol:     req.Symbol,
+		RepoSlug:   req.RepoSlug,
+		Direction:  req.Direction,
+		Depth:      req.Depth,
+		NoExplain:  req.NoExplain,
+		EdgeLabels: req.EdgeLabels,
 	})
 	if err != nil {
 		writeError(c, err)
@@ -178,10 +183,11 @@ func (s *Server) handleTraceJSON(c *gin.Context) {
 // ---- Blast ----------------------------------------------------------------
 
 type blastRequest struct {
-	Symbol    string `json:"symbol"`
-	RepoSlug  string `json:"repo_slug"`
-	MaxDepth  int    `json:"max_depth"`
-	NoExplain bool   `json:"no_explain"`
+	Symbol     string   `json:"symbol"`
+	RepoSlug   string   `json:"repo_slug"`
+	MaxDepth   int      `json:"max_depth"`
+	NoExplain  bool     `json:"no_explain"`
+	EdgeLabels []string `json:"edge_labels,omitempty"`
 }
 
 // handleBlast handles POST /api/v1/blast.
@@ -197,10 +203,11 @@ func (s *Server) handleBlast(c *gin.Context) {
 	}
 
 	result, err := s.blastSvc.Blast(c.Request.Context(), app.BlastRequest{
-		Symbol:    req.Symbol,
-		RepoSlug:  req.RepoSlug,
-		MaxDepth:  req.MaxDepth,
-		NoExplain: req.NoExplain,
+		Symbol:     req.Symbol,
+		RepoSlug:   req.RepoSlug,
+		MaxDepth:   req.MaxDepth,
+		NoExplain:  req.NoExplain,
+		EdgeLabels: req.EdgeLabels,
 	})
 	if err != nil {
 		writeError(c, err)
@@ -260,9 +267,9 @@ func (s *Server) handleCreateRepo(c *gin.Context) {
 	c.JSON(http.StatusCreated, repo)
 }
 
-// handleGetRepo handles GET /api/v1/repos/:slug.
+// handleGetRepo handles GET /api/v1/repos/*slug.
 func (s *Server) handleGetRepo(c *gin.Context) {
-	slug := c.Param("slug")
+	slug := strings.TrimPrefix(c.Param("slug"), "/")
 	repo, err := s.repoSvc.GetRepo(c.Request.Context(), slug)
 	if err != nil {
 		writeError(c, err)
@@ -271,9 +278,9 @@ func (s *Server) handleGetRepo(c *gin.Context) {
 	c.JSON(http.StatusOK, repo)
 }
 
-// handleDeleteRepo handles DELETE /api/v1/repos/:slug.
+// handleDeleteRepo handles DELETE /api/v1/repos/*slug.
 func (s *Server) handleDeleteRepo(c *gin.Context) {
-	slug := c.Param("slug")
+	slug := strings.TrimPrefix(c.Param("slug"), "/")
 	repo, err := s.repoSvc.DeleteRepo(c.Request.Context(), slug)
 	if err != nil {
 		writeError(c, err)
@@ -293,7 +300,7 @@ func (s *Server) handleNodeLookup(c *gin.Context) {
 		return
 	}
 
-	node, err := s.db.GetNodeByQualified(c.Request.Context(), repo, qualified)
+	node, err := s.graph.FindNode(c.Request.Context(), repo, qualified)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -310,7 +317,7 @@ func (s *Server) handleNodesByFile(c *gin.Context) {
 		return
 	}
 
-	nodes, err := s.db.ListNodesByFile(c.Request.Context(), repo, path)
+	nodes, err := s.graph.ListNodes(c.Request.Context(), repo, domain.ListOpts{FilePath: path})
 	if err != nil {
 		writeError(c, err)
 		return
@@ -329,7 +336,7 @@ func (s *Server) handleGetNeighborhood(c *gin.Context) {
 		return
 	}
 
-	neighborhood, err := s.db.GetNeighborhood(c.Request.Context(), id)
+	neighborhood, err := s.graph.Neighbors(c.Request.Context(), id)
 	if err != nil {
 		writeError(c, err)
 		return

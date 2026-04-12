@@ -45,13 +45,14 @@ var serveCmd = &cobra.Command{
 			svcs.trace,
 			svcs.blast,
 			svcs.repo,
-			svcs.db,
+			svcs.graph,
 			svcs.agent,
 			svcs.flow,
 			svcs.temporal,
 			svcs.rootCause,
 			svcs.apiSurface,
 			&cfg.Server,
+			cfg,
 		)
 
 		// Start peer discovery (Consul or mDNS).

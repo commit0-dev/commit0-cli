@@ -3,6 +3,7 @@ commit0
 dist/
 coverage.out
 coverage.html
+bin/
 
 # Test outputs
 **/*.out
@@ -19,3 +20,6 @@ coverage.html
 .venv/
 
 node_modules/
+
+.development/
+autoresearch-results.tsv

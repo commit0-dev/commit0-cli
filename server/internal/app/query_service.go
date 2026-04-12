@@ -31,9 +31,7 @@ type QueryRequest struct {
 // QueryService handles semantic code search.
 type QueryService struct {
 	embedder  domain.Embedder
-	vectorIdx domain.VectorIndex
-	textIdx   domain.TextIndex
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	explainer domain.LLMExplainer
 	flowSvc   *DataFlowService // optional: enriches LLM context with data-flow paths
 	cfg       *config.Config
@@ -43,23 +41,16 @@ type QueryService struct {
 // NewQueryService creates a new query service.
 func NewQueryService(
 	embedder domain.Embedder,
-	vectorIdx domain.VectorIndex,
-	textIdx domain.TextIndex,
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
 ) *QueryService {
 	qs := &QueryService{
 		embedder:  embedder,
-		vectorIdx: vectorIdx,
-		textIdx:   textIdx,
-		store:     store,
+		graph:     graph,
 		explainer: explainer,
 		cfg:       cfg,
 		log:       slog.Default().With("service", "query"),
-	}
-	if store != nil {
-		qs.flowSvc = NewDataFlowService(store)
 	}
 	return qs
 }
@@ -103,7 +94,7 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 
 	// Vector search
 	g.Go(func() error {
-		hits, err := qs.vectorIdx.Search(gCtx, queryVec, domain.VectorSearchOpts{
+		hits, err := qs.graph.VectorSearch(gCtx, queryVec, domain.VectorSearchOpts{
 			RepoSlug:  req.RepoSlug,
 			TopK:      req.TopK * 2, // Get more results for merging
 			MinScore:  req.MinScore,
@@ -118,7 +109,7 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 
 	// FTS search
 	g.Go(func() error {
-		hits, err := qs.textIdx.Search(gCtx, req.Question, domain.TextSearchOpts{
+		hits, err := qs.graph.TextSearch(gCtx, req.Question, domain.TextSearchOpts{
 			RepoSlug:  req.RepoSlug,
 			TopK:      req.TopK * 2,
 			NodeKinds: req.NodeKinds,
@@ -240,7 +231,7 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 // candidate pool, deduplicating by node ID. This ensures that when we find
 // "MemoryStore.Save", we also surface "MemoryStore.Load" and "MemoryStore.Clear".
 func (qs *QueryService) expandWithGraph(ctx context.Context, fused []types.ScoredNode, repoSlug string, topK int) []types.ScoredNode {
-	if qs.store == nil {
+	if qs.graph == nil {
 		return fused
 	}
 
@@ -257,7 +248,7 @@ func (qs *QueryService) expandWithGraph(ctx context.Context, fused []types.Score
 		if node.Node.ID == "" {
 			continue
 		}
-		nb, err := qs.store.GetNeighborhood(ctx, node.Node.ID)
+		nb, err := qs.graph.Neighbors(ctx, node.Node.ID)
 		if err != nil || nb == nil {
 			continue
 		}
@@ -265,7 +256,7 @@ func (qs *QueryService) expandWithGraph(ctx context.Context, fused []types.Score
 		// Add callers/callees as candidates with a reduced score
 		neighborScore := node.FusedScore * 0.6
 		for _, caller := range nb.Callers {
-			callerNode, err := qs.store.GetNodeByQualified(ctx, repoSlug, caller.Qualified)
+			callerNode, err := qs.graph.FindNode(ctx, repoSlug, caller.Qualified)
 			if err != nil || callerNode == nil || seen[callerNode.ID] {
 				continue
 			}
@@ -276,7 +267,7 @@ func (qs *QueryService) expandWithGraph(ctx context.Context, fused []types.Score
 			})
 		}
 		for _, callee := range nb.Callees {
-			calleeNode, err := qs.store.GetNodeByQualified(ctx, repoSlug, callee.Qualified)
+			calleeNode, err := qs.graph.FindNode(ctx, repoSlug, callee.Qualified)
 			if err != nil || calleeNode == nil || seen[calleeNode.ID] {
 				continue
 			}

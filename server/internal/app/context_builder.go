@@ -20,7 +20,7 @@ const defaultDocPrefix = "task: code retrieval | document: "
 // The output prioritizes semantic content (Summary, Concepts) over raw metadata,
 // ensuring the embedding captures WHAT code does, not just WHERE it is.
 type ContextBuilder struct {
-	store        domain.GraphStore
+	graph        domain.OpenCodeGraph
 	maxBodyRunes int
 	docPrefix    string // prepended to each document embedding text
 }
@@ -42,9 +42,9 @@ func (cb *ContextBuilder) SetDocPrefix(prefix string) {
 
 // NewContextBuilderWithStore creates a ContextBuilder that also injects
 // graph-neighborhood context (callers/callees) into function embeddings.
-func NewContextBuilderWithStore(maxBodyRunes int, store domain.GraphStore) *ContextBuilder {
+func NewContextBuilderWithGraph(maxBodyRunes int, graph domain.OpenCodeGraph) *ContextBuilder {
 	cb := NewContextBuilder(maxBodyRunes)
-	cb.store = store
+	cb.graph = graph
 	return cb
 }
 
@@ -52,11 +52,11 @@ func NewContextBuilderWithStore(maxBodyRunes int, store domain.GraphStore) *Cont
 // data (callers and callees) when a GraphStore is attached and node.ID is set.
 // Falls back to ForNode if the store is nil or the lookup fails.
 func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) string {
-	if node == nil || cb.store == nil || node.ID == "" {
+	if node == nil || cb.graph == nil || node.ID == "" {
 		return cb.ForNode(node)
 	}
 
-	nb, err := cb.store.GetNeighborhood(ctx, node.ID)
+	nb, err := cb.graph.Neighbors(ctx, node.ID)
 	if err != nil || nb == nil || nb.IsEmpty() {
 		return cb.ForNode(node)
 	}

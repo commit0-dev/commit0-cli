@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,13 +17,25 @@ var blastCmd = &cobra.Command{
 		repoSlug, _ := cmd.Flags().GetString("repo")
 		maxDepth, _ := cmd.Flags().GetInt("max-depth")
 		noExplain, _ := cmd.Flags().GetBool("no-explain")
+		edgesRaw, _ := cmd.Flags().GetString("edges")
+
+		var edgeLabels []string
+		if edgesRaw != "" {
+			for _, e := range strings.Split(edgesRaw, ",") {
+				e = strings.TrimSpace(e)
+				if e != "" {
+					edgeLabels = append(edgeLabels, e)
+				}
+			}
+		}
 
 		c := sdk.New(serverURL(cmd))
 		result, err := c.Blast(cmd.Context(), sdk.BlastRequest{
-			Symbol:    args[0],
-			RepoSlug:  repoSlug,
-			MaxDepth:  maxDepth,
-			NoExplain: noExplain,
+			Symbol:     args[0],
+			RepoSlug:   repoSlug,
+			MaxDepth:   maxDepth,
+			NoExplain:  noExplain,
+			EdgeLabels: edgeLabels,
 		})
 		if err != nil {
 			return fmt.Errorf("blast: %w", err)
@@ -53,4 +66,5 @@ func init() {
 	blastCmd.Flags().String("repo", "", "Repository slug")
 	blastCmd.Flags().Int("max-depth", 3, "Maximum traversal depth (default 3, max 5)")
 	blastCmd.Flags().Bool("no-explain", false, "Skip LLM explanation (faster)")
+	blastCmd.Flags().String("edges", "", "Edge types to follow (comma-separated: calls,data_flow)")
 }

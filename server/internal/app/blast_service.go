@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/commit0-dev/commit0/server/internal/config"
@@ -15,15 +16,16 @@ import (
 
 // BlastRequest represents a blast radius analysis request.
 type BlastRequest struct {
-	Symbol    string
-	RepoSlug  string
-	MaxDepth  int
-	NoExplain bool
+	Symbol     string
+	RepoSlug   string
+	MaxDepth   int
+	NoExplain  bool
+	EdgeLabels []string // which edge types to follow. Empty = ["calls"].
 }
 
 // BlastService analyzes code change impact.
 type BlastService struct {
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	explainer domain.LLMExplainer
 	cfg       *config.Config
 	log       *slog.Logger
@@ -31,12 +33,12 @@ type BlastService struct {
 
 // NewBlastService creates a new blast service.
 func NewBlastService(
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
 ) *BlastService {
 	return &BlastService{
-		store:     store,
+		graph:     graph,
 		explainer: explainer,
 		cfg:       cfg,
 		log:       slog.Default().With("service", "blast"),
@@ -63,14 +65,36 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	}
 
 	// Resolve symbol
-	target, err := bs.store.GetNodeByQualified(ctx, req.RepoSlug, req.Symbol)
+	target, err := bs.graph.FindNode(ctx, req.RepoSlug, req.Symbol)
 	if err != nil {
 		return nil, domain.NotFound(fmt.Sprintf("symbol %s not found", req.Symbol))
 	}
 
-	// Get blast radius
+	// Get blast radius — label-parameterized reverse traversal (OpenCodeGraph §3)
 	graphStart := time.Now()
-	affected, err := bs.store.BlastRadius(ctx, target.ID, req.MaxDepth)
+	labels := req.EdgeLabels
+	if len(labels) == 0 {
+		labels = []string{"calls"} // backward compat default
+	}
+	hops, err := bs.graph.TraverseGraph(ctx, target.ID, labels, "reverse", req.MaxDepth)
+	// Convert TraceHop to AffectedNode for backward compat
+	affected := make([]types.AffectedNode, 0, len(hops))
+	for _, h := range hops {
+		module := h.Node.Qualified
+		if idx := strings.IndexByte(h.Node.Qualified, '.'); idx > 0 {
+			module = h.Node.Qualified[:idx]
+		}
+		hopCount := h.Depth
+		if hopCount <= 0 {
+			hopCount = 1
+		}
+		affected = append(affected, types.AffectedNode{
+			Node:     h.Node,
+			HopCount: hopCount,
+			Module:   module,
+			Path:     h.Node.FilePath,
+		})
+	}
 	if err != nil {
 		return nil, fmt.Errorf("blast radius: %w", err)
 	}

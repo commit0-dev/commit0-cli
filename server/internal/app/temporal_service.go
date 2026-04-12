@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -29,7 +30,7 @@ type TemporalQueryRequest struct {
 // It walks git history to track when nodes and edges were introduced or modified,
 // enabling "when was this function added?" and "what changed between commits?" queries.
 type TemporalService struct {
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	tempStore domain.TemporalStore
 	gitWalker domain.GitWalker
 	parser    domain.Parser
@@ -38,13 +39,13 @@ type TemporalService struct {
 
 // NewTemporalService creates a temporal service.
 func NewTemporalService(
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	tempStore domain.TemporalStore,
 	gitWalker domain.GitWalker,
 	parser domain.Parser,
 ) *TemporalService {
 	return &TemporalService{
-		store:     store,
+		graph:     graph,
 		tempStore: tempStore,
 		gitWalker: gitWalker,
 		parser:    parser,
@@ -114,7 +115,7 @@ func (s *TemporalService) IndexCommitRange(ctx context.Context, req TemporalInde
 					}
 				} else {
 					// Modified file — mark as last modified
-					existing, _ := s.store.GetNodeByQualified(ctx, req.RepoSlug, node.Qualified)
+					existing, _ := s.graph.FindNode(ctx, req.RepoSlug, node.Qualified)
 					if existing == nil {
 						// New node in modified file
 						if err := s.tempStore.UpsertNodeTemporal(ctx, &node, commit.Hash, commit.Timestamp); err != nil {
@@ -162,9 +163,15 @@ func (s *TemporalService) IndexCommitRange(ctx context.Context, req TemporalInde
 func (s *TemporalService) QueryHistory(ctx context.Context, req TemporalQueryRequest) ([]types.TemporalChange, error) {
 	if req.NodeQualified != "" {
 		// Query specific node's history
-		node, err := s.store.GetNodeByQualified(ctx, req.RepoSlug, req.NodeQualified)
+		node, err := s.graph.FindNode(ctx, req.RepoSlug, req.NodeQualified)
 		if err != nil {
 			return nil, err
+		}
+		if node == nil {
+			return nil, domain.NotFound(fmt.Sprintf("symbol %s not found", req.NodeQualified))
+		}
+		if s.tempStore == nil {
+			return nil, domain.Validation("temporal store not available")
 		}
 		return s.tempStore.NodeHistory(ctx, node.ID)
 	}

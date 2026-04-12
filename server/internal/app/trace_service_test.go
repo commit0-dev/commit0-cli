@@ -25,7 +25,7 @@ func TestTraceServiceTraceSuccess(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, nil, cfg)
+	svc := NewTraceService(store, nil, nil, cfg)
 
 	result, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Handler",
@@ -44,7 +44,7 @@ func TestTraceServiceTraceSuccess(t *testing.T) {
 
 func TestTraceServiceTraceEmptySymbol(t *testing.T) {
 	cfg := &config.Config{}
-	svc := NewTraceService(nil, nil, nil, nil, cfg)
+	svc := NewTraceService(nil, nil, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "",
@@ -59,7 +59,7 @@ func TestTraceServiceTraceEmptySymbol(t *testing.T) {
 
 func TestTraceServiceTraceEmptyRepoSlug(t *testing.T) {
 	cfg := &config.Config{}
-	svc := NewTraceService(nil, nil, nil, nil, cfg)
+	svc := NewTraceService(nil, nil, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Func",
@@ -81,7 +81,7 @@ func TestTraceServiceTraceInvalidDirection(t *testing.T) {
 	store.nodesByQ["my-repo::pkg.Func"] = &types.CodeNode{ID: "f1"}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, nil, cfg)
+	svc := NewTraceService(store, nil, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Func",
@@ -100,7 +100,7 @@ func TestTraceServiceTraceDefaultDepth(t *testing.T) {
 	store.traceHops = []types.TraceHop{}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, nil, cfg)
+	svc := NewTraceService(store, nil, nil, cfg)
 
 	// Depth=0 should default to 5 (no error)
 	result, err := svc.Trace(context.Background(), TraceRequest{
@@ -129,7 +129,7 @@ func TestTraceServiceTraceReverse(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, nil, cfg)
+	svc := NewTraceService(store, nil, nil, cfg)
 
 	result, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Handler",
@@ -151,7 +151,7 @@ func TestTraceServiceTraceForwardError(t *testing.T) {
 	store.traceErr = domain.Timeout("graph timeout", nil)
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, nil, cfg)
+	svc := NewTraceService(store, nil, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Func",
@@ -170,7 +170,7 @@ func TestTraceServiceTraceReverseError(t *testing.T) {
 	store.traceErr = domain.Timeout("graph timeout", nil)
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, nil, cfg)
+	svc := NewTraceService(store, nil, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Func",
@@ -186,7 +186,7 @@ func TestTraceServiceTraceReverseError(t *testing.T) {
 func TestTraceServiceTraceNotFound(t *testing.T) {
 	store := newStubGraphStore()
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, nil, cfg)
+	svc := NewTraceService(store, nil, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "nonexistent",
@@ -216,7 +216,7 @@ func TestTraceServiceTraceWithExplainerSuccess(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, explainer, cfg)
+	svc := NewTraceService(store, nil, explainer, cfg)
 
 	result, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Func",
@@ -242,7 +242,7 @@ func TestTraceServiceTraceWithExplainerFails(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, explainer, cfg)
+	svc := NewTraceService(store, nil, explainer, cfg)
 
 	// Explainer failure is non-fatal
 	result, err := svc.Trace(context.Background(), TraceRequest{
@@ -271,7 +271,7 @@ func TestTraceServiceTraceWithExplainerChunkError(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, explainer, cfg)
+	svc := NewTraceService(store, nil, explainer, cfg)
 
 	result, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Func",
@@ -315,7 +315,7 @@ func TestTraceServiceTraceWithChildren(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, nil, nil, explainer, cfg)
+	svc := NewTraceService(store, nil, explainer, cfg)
 
 	result, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "pkg.Root",
@@ -335,18 +335,16 @@ func TestTraceServiceTraceWithChildren(t *testing.T) {
 func TestTraceServiceResolveSymbolVectorFallback(t *testing.T) {
 	store := newStubGraphStore()
 	// No entry in nodesByQ → direct lookup fails
-	// Vector search returns a result
-	vectorIdx := &stubVectorIndex{
-		results: []types.ScoredNode{
-			{Node: types.CodeNode{ID: "f1", Qualified: "pkg.Handler"}, VectorScore: 0.9},
-		},
+	// VectorSearch returns a result via stubGraphStore.vectorResults
+	store.vectorResults = []types.ScoredNode{
+		{Node: types.CodeNode{ID: "f1", Qualified: "pkg.Handler"}, VectorScore: 0.9},
 	}
 	embedder := &stubEmbedder{queryVec: []float32{0.1, 0.2, 0.3}}
 
 	store.traceHops = []types.TraceHop{}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, embedder, vectorIdx, nil, cfg)
+	svc := NewTraceService(store, embedder, nil, cfg)
 
 	result, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "Handler",
@@ -364,14 +362,11 @@ func TestTraceServiceResolveSymbolVectorFallback(t *testing.T) {
 
 func TestTraceServiceResolveSymbolVectorFallbackEmbedFails(t *testing.T) {
 	store := newStubGraphStore()
-	// No entry in nodesByQ → direct lookup fails
 	embedder := &stubEmbedder{
 		queryErr: domain.RateLimit("embed rate limited"),
 	}
-	vectorIdx := &stubVectorIndex{}
-
 	cfg := &config.Config{}
-	svc := NewTraceService(store, embedder, vectorIdx, nil, cfg)
+	svc := NewTraceService(store, embedder, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "Handler",
@@ -387,12 +382,9 @@ func TestTraceServiceResolveSymbolVectorFallbackEmbedFails(t *testing.T) {
 func TestTraceServiceResolveSymbolVectorFallbackSearchFails(t *testing.T) {
 	store := newStubGraphStore()
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	vectorIdx := &stubVectorIndex{
-		err: domain.Timeout("vector timeout", nil),
-	}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, embedder, vectorIdx, nil, cfg)
+	svc := NewTraceService(store, embedder, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "Handler",
@@ -408,11 +400,8 @@ func TestTraceServiceResolveSymbolVectorFallbackSearchFails(t *testing.T) {
 func TestTraceServiceResolveSymbolVectorFallbackEmpty(t *testing.T) {
 	store := newStubGraphStore()
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	// Vector search returns no results
-	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
-
 	cfg := &config.Config{}
-	svc := NewTraceService(store, embedder, vectorIdx, nil, cfg)
+	svc := NewTraceService(store, embedder, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "Handler",
@@ -436,7 +425,7 @@ func TestTraceServiceResolveSymbolNoVectorIdx(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
 
 	cfg := &config.Config{}
-	svc := NewTraceService(store, embedder, nil, nil, cfg)
+	svc := NewTraceService(store, embedder, nil, cfg)
 
 	_, err := svc.Trace(context.Background(), TraceRequest{
 		Symbol:    "Handler",

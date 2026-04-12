@@ -13,7 +13,7 @@ import (
 
 // BuildScratchpadTools creates the scratchpad interaction tools.
 // memMgr can be nil — persistence features degrade gracefully.
-func BuildScratchpadTools(pad *Scratchpad, store domain.GraphStore, memMgr *memory.Manager) ([]tool.Tool, error) {
+func BuildScratchpadTools(pad *Scratchpad, graph domain.OpenCodeGraph, memMgr *memory.Manager) ([]tool.Tool, error) {
 	var tools []tool.Tool
 
 	t, err := newUpdateScratchpadTool(pad)
@@ -34,7 +34,7 @@ func BuildScratchpadTools(pad *Scratchpad, store domain.GraphStore, memMgr *memo
 	}
 	tools = append(tools, t)
 
-	t, err = newPlanAnalysisTool(pad, store, memMgr)
+	t, err = newPlanAnalysisTool(pad, graph, memMgr)
 	if err != nil {
 		return nil, fmt.Errorf("plan_analysis: %w", err)
 	}
@@ -261,7 +261,7 @@ type planAnalysisOutput struct {
 	Suggestion     string   `json:"suggestion"`
 }
 
-func newPlanAnalysisTool(pad *Scratchpad, store domain.GraphStore, memMgr *memory.Manager) (tool.Tool, error) {
+func newPlanAnalysisTool(pad *Scratchpad, graph domain.OpenCodeGraph, memMgr *memory.Manager) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: "plan_analysis",
 		Description: "Get repo context before starting investigation. " +
@@ -278,10 +278,10 @@ func newPlanAnalysisTool(pad *Scratchpad, store domain.GraphStore, memMgr *memor
 			Suggestion: "Start with delegate(search, ...) to discover relevant entities, then delegate(trace, ...) to map structure.",
 		}
 
-		if store != nil && repoSlug != "" {
+		if graph != nil && repoSlug != "" {
 			bgCtx := context.Background()
 
-			if repos, err := store.ListRepos(bgCtx); err == nil {
+			if repos, err := graph.ListRepos(bgCtx); err == nil {
 				for _, r := range repos {
 					if r.Slug == repoSlug {
 						out.Path = r.Path
@@ -291,11 +291,11 @@ func newPlanAnalysisTool(pad *Scratchpad, store domain.GraphStore, memMgr *memor
 				}
 			}
 
-			if ids, err := store.ListNodeIDs(bgCtx, repoSlug); err == nil {
+			if ids, err := graph.ListNodes(bgCtx, repoSlug, domain.ListOpts{IDsOnly: true}); err == nil {
 				out.NodeCount = len(ids)
 			}
 
-			if routes, err := store.ListRoutes(bgCtx, repoSlug); err == nil {
+			if routes, err := graph.ListEdges(bgCtx, repoSlug, []string{"route"}); err == nil {
 				out.EndpointCount = len(routes)
 			}
 		}

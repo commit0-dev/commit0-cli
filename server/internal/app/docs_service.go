@@ -34,7 +34,7 @@ type DocsResult struct {
 
 // DocsService generates project documentation from the code graph + LLM.
 type DocsService struct {
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	querySvc  *QueryService
 	explainer domain.LLMExplainer
 	log       *slog.Logger
@@ -42,12 +42,12 @@ type DocsService struct {
 
 // NewDocsService creates a documentation generator.
 func NewDocsService(
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	querySvc *QueryService,
 	explainer domain.LLMExplainer,
 ) *DocsService {
 	return &DocsService{
-		store:     store,
+		graph:     graph,
 		querySvc:  querySvc,
 		explainer: explainer,
 		log:       slog.Default().With("service", "docs"),
@@ -105,13 +105,13 @@ func (s *DocsService) Generate(ctx context.Context, req DocsRequest) (*DocsResul
 // generateREADME creates a project overview.
 func (s *DocsService) generateREADME(ctx context.Context, repoSlug string) (*GeneratedDoc, error) {
 	// Get repo info
-	repo, err := s.store.GetRepo(ctx, repoSlug)
+	repo, err := s.graph.GetRepo(ctx, repoSlug)
 	if err != nil {
 		return nil, err
 	}
 
 	// Count nodes by type
-	nodeIDs, _ := s.store.ListNodeIDs(ctx, repoSlug)
+	nodeIDs, _ := s.graph.ListNodes(ctx, repoSlug, domain.ListOpts{IDsOnly: true})
 
 	// Get top functions by centrality (via query)
 	topFunctions, _ := s.querySvc.Query(ctx, QueryRequest{
@@ -173,7 +173,7 @@ func (s *DocsService) generateREADME(ctx context.Context, repoSlug string) (*Gen
 // generateArchitecture creates an architecture overview with module dependency diagram.
 func (s *DocsService) generateArchitecture(ctx context.Context, repoSlug string) (*GeneratedDoc, error) {
 	// Get all file nodes to understand module structure
-	nodeIDs, err := s.store.ListNodeIDs(ctx, repoSlug)
+	nodeIDs, err := s.graph.ListNodes(ctx, repoSlug, domain.ListOpts{IDsOnly: true})
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (s *DocsService) generateArchitecture(ctx context.Context, repoSlug string)
 	// Group files by directory (module)
 	modules := make(map[string]int) // dir → function count
 	for _, id := range nodeIDs {
-		node, err := s.store.GetNode(ctx, id)
+		node, err := s.graph.GetNode(ctx, id.ID)
 		if err != nil || node == nil {
 			continue
 		}
@@ -226,7 +226,7 @@ func (s *DocsService) generateArchitecture(ctx context.Context, repoSlug string)
 
 // generateAPI creates an API reference from exported functions.
 func (s *DocsService) generateAPI(ctx context.Context, repoSlug string) (*GeneratedDoc, error) {
-	nodeIDs, err := s.store.ListNodeIDs(ctx, repoSlug)
+	nodeIDs, err := s.graph.ListNodes(ctx, repoSlug, domain.ListOpts{IDsOnly: true})
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func (s *DocsService) generateAPI(ctx context.Context, repoSlug string) (*Genera
 	// Group by file
 	fileGroups := make(map[string][]types.CodeNode)
 	for _, id := range nodeIDs {
-		node, err := s.store.GetNode(ctx, id)
+		node, err := s.graph.GetNode(ctx, id.ID)
 		if err != nil || node == nil {
 			continue
 		}

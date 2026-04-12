@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // StartIndexRequest is the request body for starting an index operation.
@@ -14,20 +16,12 @@ type StartIndexRequest struct {
 	Exclude   []string `json:"exclude,omitempty"`
 	Force     bool     `json:"force,omitempty"`
 	Reparse   bool     `json:"reparse,omitempty"`
+	Fast      bool     `json:"fast,omitempty"`
 }
 
-// IndexProgress represents the current state of an index job.
-type IndexProgress struct {
-	ID           string     `json:"id"`
-	Status       string     `json:"status"` // indexing, completed, failed
-	RepoSlug     string     `json:"repo_slug"`
-	FilesIndexed int        `json:"files_indexed"`
-	NodesCreated int        `json:"nodes_created"`
-	Errors       int        `json:"errors"`
-	Error        string     `json:"error,omitempty"`
-	StartedAt    time.Time  `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
-}
+// IndexProgress is an alias for the comprehensive progress type.
+// The server returns the full types.IndexProgress with stage-level detail.
+type IndexProgress = types.IndexProgress
 
 // ReEmbed triggers background re-embedding for a repo (after provider switch).
 func (c *Client) ReEmbed(ctx context.Context, repoSlug string) error {

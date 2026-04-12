@@ -12,8 +12,8 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// Compile-time checks — FieldFlowStore methods are on SurrealAdapter.
-var _ domain.FieldFlowStore = (*SurrealAdapter)(nil)
+// Field-level data flow traversal methods on SurrealAdapter.
+// Used by openCodeGraphAdapter for OpenCodeGraph.TraverseGraph with data_flow labels.
 
 // TraceFieldFlow follows field-level data_flow edges from a start node,
 // optionally filtering by field_path. Returns FieldFlowHop entries with

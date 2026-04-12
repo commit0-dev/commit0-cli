@@ -81,6 +81,10 @@ type ParsedFile struct {
 	Edges       []types.CodeEdge
 	LineCount   int
 	SizeBytes   int
+
+	// Resolver stats (for coverage tracking)
+	CallEdgesTotal    int
+	CallEdgesResolved int
 }
 
 // WalkOpts configures file system walking.
@@ -128,60 +132,6 @@ func (nb *Neighborhood) IsEmpty() bool {
 		len(nb.Reads) == 0 && len(nb.Writes) == 0
 }
 
-// GraphStore provides CRUD operations and graph traversal.
-type GraphStore interface {
-	UpsertNode(ctx context.Context, node *types.CodeNode) error
-	GetNode(ctx context.Context, id string) (*types.CodeNode, error)
-	GetNodeByQualified(ctx context.Context, repo, qualified string) (*types.CodeNode, error)
-	DeleteNode(ctx context.Context, id string) error
-	DeleteNodesByRepo(ctx context.Context, repo string) error
-	DeleteNodesByFile(ctx context.Context, repoSlug, filePath string) error
-	UpsertEdge(ctx context.Context, edge *types.CodeEdge) error
-	DeleteEdgesForNode(ctx context.Context, nodeID string) error
-	TraceForward(ctx context.Context, startID string, depth int) ([]types.TraceHop, error)
-	TraceReverse(ctx context.Context, startID string, depth int) ([]types.TraceHop, error)
-	BlastRadius(ctx context.Context, targetID string, maxDepth int) ([]types.AffectedNode, error)
-	// GetNeighborhood returns the immediate graph context for nodeID: callers,
-	// callees (with signatures), and data-flow sources/sinks.
-	GetNeighborhood(ctx context.Context, nodeID string) (*Neighborhood, error)
-	// TraceDataFlow follows data_flow edges from startID.
-	// direction must be "forward" (sinks), "reverse" (sources), or "both".
-	TraceDataFlow(ctx context.Context, startID string, depth int, direction string) ([]types.TraceHop, error)
-	// ListNodeIDs returns the record IDs of all indexable nodes for a repo.
-	// Used by the neighborhood re-embedding pass.
-	ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error)
-	// ListAllNodes returns all nodes for a repo with full data (for graph export).
-	ListAllNodes(ctx context.Context, repoSlug string) ([]types.CodeNode, error)
-	// ListAllEdges returns all edges for a repo (for graph export).
-	ListAllEdges(ctx context.Context, repoSlug string) ([]types.CodeEdge, error)
-	// ListNodesByFile returns all nodes (functions, classes) defined in a file.
-	ListNodesByFile(ctx context.Context, repoSlug, filePath string) ([]types.CodeNode, error)
-	// ListNodesByConcepts returns nodes whose concepts overlap with the given tags.
-	ListNodesByConcepts(ctx context.Context, repoSlug string, concepts []string, limit int) ([]types.CodeNode, error)
-	// ListRoutes returns all route edges for a repo (HTTP route registrations).
-	ListRoutes(ctx context.Context, repoSlug string) ([]types.CodeEdge, error)
-	// UpdateRepoIndexedAt sets the last_indexed_at timestamp using MERGE (not CONTENT)
-	// so it doesn't wipe other fields on the repo record.
-	UpdateRepoIndexedAt(ctx context.Context, slug string, t time.Time) error
-	// FindRepoByRemoteURL finds a repo by its normalized remote URL for deduplication.
-	FindRepoByRemoteURL(ctx context.Context, remoteURL string) (*types.Repo, error)
-	UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
-	UpsertRepo(ctx context.Context, repo *types.Repo) error
-	GetRepo(ctx context.Context, slug string) (*types.Repo, error)
-	ListRepos(ctx context.Context) ([]types.Repo, error)
-	ApplySchema(ctx context.Context) error
-	GetSchemaVersion(ctx context.Context) (int, error)
-}
-
-// VectorIndex provides approximate nearest neighbor search over embeddings.
-type VectorIndex interface {
-	Search(ctx context.Context, query []float32, opts VectorSearchOpts) ([]types.ScoredNode, error)
-}
-
-// TextIndex provides full-text search capabilities.
-type TextIndex interface {
-	Search(ctx context.Context, query string, opts TextSearchOpts) ([]types.ScoredNode, error)
-}
 
 // Embedder converts text and images to embeddings.
 type Embedder interface {
@@ -229,15 +179,6 @@ type TemporalStore interface {
 	EdgesIntroducedAt(ctx context.Context, repoSlug, commitHash string) ([]types.CodeEdge, error)
 }
 
-// ---------------------------------------------------------------------------
-// Field-Level Data Flow Store
-// ---------------------------------------------------------------------------
-
-// FieldFlowStore provides field-level data flow queries.
-type FieldFlowStore interface {
-	TraceFieldFlow(ctx context.Context, startID string, fieldPath string, depth int, direction string) ([]types.FieldFlowHop, error)
-	FindMutations(ctx context.Context, repoSlug string, fieldPath string) ([]types.FieldFlowHop, error)
-}
 
 // ---------------------------------------------------------------------------
 // Memory Store — three-tier persistent memory

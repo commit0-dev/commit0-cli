@@ -28,11 +28,6 @@ type vecRow struct {
 	VecDist    float64          `json:"vec_dist"` // raw cosine distance from vector::distance::knn()
 }
 
-// Search implements domain.VectorIndex on the VectorAdapter wrapper.
-func (v *VectorAdapter) Search(ctx context.Context, query []float32, opts domain.VectorSearchOpts) ([]types.ScoredNode, error) {
-	return v.SurrealAdapter.VectorSearch(ctx, query, opts)
-}
-
 // VectorSearch performs HNSW approximate nearest-neighbor vector search across
 // the relevant node tables. Results are filtered by MinScore and ranked by
 // VectorScore = 1 - vec_dist (cosine similarity, higher is better).

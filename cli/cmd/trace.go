@@ -19,14 +19,26 @@ var traceCmd = &cobra.Command{
 		direction, _ := cmd.Flags().GetString("direction")
 		depth, _ := cmd.Flags().GetInt("depth")
 		noExplain, _ := cmd.Flags().GetBool("no-explain")
+		edgesRaw, _ := cmd.Flags().GetString("edges")
+
+		var edgeLabels []string
+		if edgesRaw != "" {
+			for _, e := range strings.Split(edgesRaw, ",") {
+				e = strings.TrimSpace(e)
+				if e != "" {
+					edgeLabels = append(edgeLabels, e)
+				}
+			}
+		}
 
 		c := sdk.New(serverURL(cmd))
 		result, err := c.Trace(cmd.Context(), sdk.TraceRequest{
-			Symbol:    args[0],
-			RepoSlug:  repoSlug,
-			Direction: direction,
-			Depth:     depth,
-			NoExplain: noExplain,
+			Symbol:     args[0],
+			RepoSlug:   repoSlug,
+			Direction:  direction,
+			Depth:      depth,
+			NoExplain:  noExplain,
+			EdgeLabels: edgeLabels,
 		})
 		if err != nil {
 			return fmt.Errorf("trace: %w", err)
@@ -66,4 +78,5 @@ func init() {
 	traceCmd.Flags().String("direction", "forward", "Trace direction: forward or reverse")
 	traceCmd.Flags().Int("depth", 5, "Maximum trace depth")
 	traceCmd.Flags().Bool("no-explain", false, "Skip LLM explanation (faster)")
+	traceCmd.Flags().String("edges", "", "Edge types to follow (comma-separated: calls,data_flow,reads,writes)")
 }

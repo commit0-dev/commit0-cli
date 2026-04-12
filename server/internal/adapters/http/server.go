@@ -25,7 +25,7 @@ type Server struct {
 	traceSvc     *app.TraceService
 	blastSvc     *app.BlastService
 	repoSvc      *app.RepoService
-	db           domain.GraphStore
+	graph        domain.OpenCodeGraph
 	agentRunner  domain.AgentRunner
 	flowSvc      *app.FieldFlowService
 	tempSvc      *app.TemporalService
@@ -35,8 +35,9 @@ type Server struct {
 	peerStore    domain.PeerStore
 	scopeStore   domain.ScopeStore
 	cfg          *config.ServerConfig
+	fullCfg      *config.Config
 	log          *slog.Logger
-	jobs         *indexJobStore
+	trackers     *indexTrackerStore
 }
 
 // NewServer constructs the HTTP server, registers middleware and routes.
@@ -46,13 +47,14 @@ func NewServer(
 	traceSvc *app.TraceService,
 	blastSvc *app.BlastService,
 	repoSvc *app.RepoService,
-	db domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	agentRunner domain.AgentRunner,
 	flowSvc *app.FieldFlowService,
 	tempSvc *app.TemporalService,
 	rootCauseSvc *app.RootCauseAnalysisService,
 	apiSurfSvc *app.APISurfaceService,
 	cfg *config.ServerConfig,
+	fullCfg ...*config.Config,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -64,7 +66,7 @@ func NewServer(
 		traceSvc:     traceSvc,
 		blastSvc:     blastSvc,
 		repoSvc:      repoSvc,
-		db:           db,
+		graph:        graph,
 		agentRunner:  agentRunner,
 		flowSvc:      flowSvc,
 		tempSvc:      tempSvc,
@@ -72,7 +74,10 @@ func NewServer(
 		apiSurfSvc:   apiSurfSvc,
 		cfg:          cfg,
 		log:          slog.Default(),
-		jobs:         newIndexJobStore(),
+		trackers:     newIndexTrackerStore(),
+	}
+	if len(fullCfg) > 0 && fullCfg[0] != nil {
+		s.fullCfg = fullCfg[0]
 	}
 	s.registerMiddleware()
 	s.registerRoutes()
@@ -97,8 +102,8 @@ func (s *Server) registerRoutes() {
 	// Repos
 	v1.GET("/repos", s.handleListRepos)
 	v1.POST("/repos", s.handleCreateRepo)
-	v1.GET("/repos/:slug", s.handleGetRepo)
-	v1.DELETE("/repos/:slug", s.handleDeleteRepo)
+	v1.GET("/repos/*slug", s.handleGetRepo)
+	v1.DELETE("/repos/*slug", s.handleDeleteRepo)
 
 	// Indexing
 	v1.POST("/index", s.handleStartIndex)

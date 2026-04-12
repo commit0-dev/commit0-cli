@@ -6,62 +6,34 @@ import (
 	"encoding/hex"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/commit0-dev/commit0/server/internal/app"
+	"github.com/commit0-dev/commit0/pkg/types"
 )
 
-// IndexJob represents the state of an asynchronous index operation.
-type IndexJob struct {
-	StartedAt    time.Time  `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
-	ID           string     `json:"id"`
-	Status       string     `json:"status"`
-	RepoSlug     string     `json:"repo_slug"`
-	Error        string     `json:"error,omitempty"`
-	FilesIndexed int        `json:"files_indexed"`
-	NodesCreated int        `json:"nodes_created"`
-	Errors       int        `json:"errors"`
+// indexTrackerStore holds active and completed IndexTrackers for polling.
+type indexTrackerStore struct {
+	trackers map[string]*app.IndexTracker
+	mu       sync.RWMutex
 }
 
-// indexJobStore is an in-memory store for async index jobs.
-type indexJobStore struct {
-	jobs map[string]*IndexJob
-	mu   sync.RWMutex
+func newIndexTrackerStore() *indexTrackerStore {
+	return &indexTrackerStore{trackers: make(map[string]*app.IndexTracker)}
 }
 
-func newIndexJobStore() *indexJobStore {
-	return &indexJobStore{jobs: make(map[string]*IndexJob)}
-}
-
-func (s *indexJobStore) set(job *IndexJob) {
+func (s *indexTrackerStore) set(jobID string, t *app.IndexTracker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.jobs[job.ID] = job
+	s.trackers[jobID] = t
 }
 
-func (s *indexJobStore) get(id string) (*IndexJob, bool) {
+func (s *indexTrackerStore) get(jobID string) (*app.IndexTracker, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	job, ok := s.jobs[id]
-	if !ok {
-		return nil, false
-	}
-	copy := *job
-	return &copy, true
-}
-
-func (s *indexJobStore) update(id string, fn func(*IndexJob)) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	job, ok := s.jobs[id]
-	if !ok {
-		return false
-	}
-	fn(job)
-	return true
+	t, ok := s.trackers[jobID]
+	return t, ok
 }
 
 // newJobID generates a random hex job ID using crypto/rand.
@@ -80,6 +52,7 @@ type startIndexRequest struct {
 	Exclude   []string `json:"exclude"`
 	Force     bool     `json:"force"`
 	Reparse   bool     `json:"reparse"`
+	Fast      bool     `json:"fast"`
 }
 
 // handleStartIndex handles POST /api/v1/index.
@@ -104,43 +77,52 @@ func (s *Server) handleStartIndex(c *gin.Context) {
 		return
 	}
 
-	job := &IndexJob{
-		ID:        jobID,
-		Status:    "indexing",
-		RepoSlug:  req.RepoSlug,
-		StartedAt: time.Now(),
+	// Build config snapshot for debugging.
+	indexCfg := types.IndexConfig{
+		Fast:    req.Fast,
+		Reparse: req.Reparse,
+		Force:   req.Force,
 	}
-	s.jobs.set(job)
+	if s.fullCfg != nil {
+		indexCfg.EmbedProvider = s.fullCfg.EmbedProvider
+		indexCfg.LLMProvider = s.fullCfg.LLMProvider
+		indexCfg.EmbedDim = s.fullCfg.EmbedDim
+		indexCfg.BatchSize = s.fullCfg.BatchSize
+		switch s.fullCfg.EmbedProvider {
+		case "gemini":
+			indexCfg.EmbedModel = s.fullCfg.Gemini.EmbedModel
+		case "voyage":
+			indexCfg.EmbedModel = s.fullCfg.Voyage.Model
+		case "ollama":
+			indexCfg.EmbedModel = s.fullCfg.Ollama.EmbedModel
+		}
+		switch s.fullCfg.LLMProvider {
+		case "gemini":
+			indexCfg.LLMModel = s.fullCfg.Gemini.ExplainModel
+		case "openrouter":
+			indexCfg.LLMModel = s.fullCfg.OpenRouter.Model
+		case "ollama":
+			indexCfg.LLMModel = s.fullCfg.Ollama.Model
+		}
+	}
+
+	tracker := app.NewIndexTracker(jobID, req.RepoSlug, indexCfg)
+	s.trackers.set(jobID, tracker)
 
 	go func() {
-		onProgress := func(filesIndexed, nodesCreated int) {
-			s.jobs.update(jobID, func(j *IndexJob) {
-				j.FilesIndexed = filesIndexed
-				j.NodesCreated = nodesCreated
-			})
-		}
+		// Legacy progress callback (for backward compat with indexRun counters).
+		onProgress := func(filesIndexed, nodesCreated int) {}
 
-		result, indexErr := s.indexSvc.IndexWithProgress(context.Background(), app.IndexRequest{
+		_, indexErr := s.indexSvc.IndexWithProgress(context.Background(), app.IndexRequest{
 			RepoPath:  req.RepoPath,
 			RepoSlug:  req.RepoSlug,
 			Languages: req.Languages,
 			Force:     req.Force,
 			Reparse:   req.Reparse,
-		}, onProgress)
+			Fast:      req.Fast,
+		}, onProgress, tracker)
 
-		s.jobs.update(jobID, func(j *IndexJob) {
-			now := time.Now()
-			j.FinishedAt = &now
-			if indexErr != nil {
-				j.Status = "failed"
-				j.Error = indexErr.Error()
-			} else {
-				j.Status = "completed"
-				j.FilesIndexed = result.FilesIndexed
-				j.NodesCreated = result.NodesCreated
-				j.Errors = 0
-			}
-		})
+		tracker.Finish(indexErr)
 	}()
 
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
@@ -149,10 +131,10 @@ func (s *Server) handleStartIndex(c *gin.Context) {
 // handleIndexStatus handles GET /api/v1/index/:job_id.
 func (s *Server) handleIndexStatus(c *gin.Context) {
 	jobID := c.Param("job_id")
-	job, ok := s.jobs.get(jobID)
+	tracker, ok := s.trackers.get(jobID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"message": "job not found"})
 		return
 	}
-	c.JSON(http.StatusOK, job)
+	c.JSON(http.StatusOK, tracker.Snapshot())
 }

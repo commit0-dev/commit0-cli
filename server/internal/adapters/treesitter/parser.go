@@ -28,7 +28,6 @@ type Extractor interface {
 // TreeSitterParser implements domain.Parser using tree-sitter grammars.
 type TreeSitterParser struct {
 	extractors map[string]Extractor // keyed by language name
-	resolver   *Resolver
 	log        *slog.Logger
 }
 
@@ -43,7 +42,6 @@ func NewParser(log *slog.Logger) *TreeSitterParser {
 	}
 	p := &TreeSitterParser{
 		extractors: make(map[string]Extractor, 4),
-		resolver:   &Resolver{},
 		log:        log,
 	}
 	p.extractors["go"] = &lang.GoExtractor{}
@@ -116,8 +114,10 @@ func (p *TreeSitterParser) Parse(ctx context.Context, file domain.FileEntry) (*d
 	fileNode := makeFileNode(file, contentHash)
 	nodes = append([]types.CodeNode{fileNode}, nodes...)
 
-	// Resolver pass: add EdgeDefines + attempt to resolve call targets.
-	nodes, edges = p.resolver.Resolve(nodes, edges)
+	// NOTE: Per-file resolution is no longer done here. The global EdgeLinker
+	// chain in IndexService handles cross-file resolution after ALL files are parsed.
+	// The per-file Resolver only ran within one file's scope and could not resolve
+	// cross-file calls (which was 100% of interesting edges).
 
 	return &domain.ParsedFile{
 		Path:        file.Path,

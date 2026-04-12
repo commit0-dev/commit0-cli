@@ -16,26 +16,8 @@ import (
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
-// Compile-time interface checks — fail fast at build time if we drift.
-var (
-	_ domain.GraphStore  = (*SurrealAdapter)(nil)
-	_ domain.VectorIndex = (*VectorAdapter)(nil)
-	_ domain.TextIndex   = (*TextAdapter)(nil)
-)
-
-// VectorAdapter wraps SurrealAdapter to implement domain.VectorIndex.
-// Go does not allow two methods with the same name but different signatures
-// on the same type, so we use thin delegate wrappers.
-type VectorAdapter struct{ *SurrealAdapter }
-
-// TextAdapter wraps SurrealAdapter to implement domain.TextIndex.
-type TextAdapter struct{ *SurrealAdapter }
-
-// AsVectorIndex returns a domain.VectorIndex view of this adapter.
-func (a *SurrealAdapter) AsVectorIndex() domain.VectorIndex { return &VectorAdapter{a} }
-
-// AsTextIndex returns a domain.TextIndex view of this adapter.
-func (a *SurrealAdapter) AsTextIndex() domain.TextIndex { return &TextAdapter{a} }
+// Compile-time interface check: openCodeGraphAdapter (see open_code_graph.go)
+// is the single graph interface. SurrealAdapter methods are implementation details.
 
 // SurrealAdapter implements GraphStore, VectorIndex, and TextIndex
 // using SurrealDB 3.0 via WebSocket with dual connection pools.

@@ -33,7 +33,7 @@ type delegateConfig struct {
 	flowSvc      *app.FieldFlowService
 	tempSvc      *app.TemporalService
 	rootCauseSvc *app.RootCauseAnalysisService
-	store        domain.GraphStore
+	graph        domain.OpenCodeGraph
 	gitWalker    domain.GitWalker
 	explainer    domain.LLMExplainer
 	cfg          *config.Config
@@ -50,7 +50,7 @@ func BuildDelegateTool(
 	flowSvc *app.FieldFlowService,
 	tempSvc *app.TemporalService,
 	rootCauseSvc *app.RootCauseAnalysisService,
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	gitWalker domain.GitWalker,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
@@ -60,7 +60,7 @@ func BuildDelegateTool(
 	dc := &delegateConfig{
 		querySvc: querySvc, traceSvc: traceSvc, blastSvc: blastSvc,
 		flowSvc: flowSvc, tempSvc: tempSvc, rootCauseSvc: rootCauseSvc,
-		store: store, gitWalker: gitWalker, explainer: explainer,
+		graph: graph, gitWalker: gitWalker, explainer: explainer,
 		cfg: cfg, pad: pad, modelFactory: modelFactory,
 		log: slog.Default().With("component", "delegate"),
 	}
@@ -297,7 +297,7 @@ func (dc *delegateConfig) toolsForType(agentType string) ([]tool.Tool, error) {
 	allTools, err := BuildTools(
 		dc.querySvc, dc.traceSvc, dc.blastSvc,
 		dc.flowSvc, dc.tempSvc, dc.rootCauseSvc,
-		dc.store, dc.gitWalker, dc.explainer,
+		dc.graph, dc.gitWalker, dc.explainer,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build tools: %w", err)

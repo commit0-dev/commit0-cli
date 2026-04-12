@@ -9,11 +9,12 @@ import (
 
 // TraceRequest is the request body for trace operations.
 type TraceRequest struct {
-	Symbol    string `json:"symbol"`
-	RepoSlug  string `json:"repo_slug"`
-	Direction string `json:"direction"`
-	Depth     int    `json:"depth"`
-	NoExplain bool   `json:"no_explain,omitempty"`
+	Symbol     string   `json:"symbol"`
+	RepoSlug   string   `json:"repo_slug"`
+	Direction  string   `json:"direction"`
+	Depth      int      `json:"depth"`
+	NoExplain  bool     `json:"no_explain,omitempty"`
+	EdgeLabels []string `json:"edge_labels,omitempty"`
 }
 
 // Trace performs a call graph trace and returns the full result as JSON.

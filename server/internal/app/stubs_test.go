@@ -29,6 +29,9 @@ type stubGraphStore struct {
 	dataFlowHops   []types.TraceHop
 	nodeIDs        []string
 	routeEdges     []types.CodeEdge
+	vectorResults  []types.ScoredNode // for VectorSearch
+	vectorErr      error              // for VectorSearch error
+	textErr        error              // for TextSearch error
 }
 
 func newStubGraphStore() *stubGraphStore {
@@ -103,35 +106,6 @@ func (s *stubGraphStore) DeleteEdgesForNode(ctx context.Context, nodeID string) 
 	return nil
 }
 
-func (s *stubGraphStore) TraceForward(ctx context.Context, startID string, depth int) ([]types.TraceHop, error) {
-	if s.traceErr != nil {
-		return nil, s.traceErr
-	}
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.traceHops, nil
-}
-
-func (s *stubGraphStore) TraceReverse(ctx context.Context, startID string, depth int) ([]types.TraceHop, error) {
-	if s.traceErr != nil {
-		return nil, s.traceErr
-	}
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.traceHops, nil
-}
-
-func (s *stubGraphStore) BlastRadius(ctx context.Context, targetID string, maxDepth int) ([]types.AffectedNode, error) {
-	if s.blastRadiusErr != nil {
-		return nil, s.blastRadiusErr
-	}
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.affected, nil
-}
 
 func (s *stubGraphStore) UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error {
 	if s.upsertBatchFn != nil {
@@ -195,6 +169,34 @@ func (s *stubGraphStore) GetNeighborhood(ctx context.Context, nodeID string) (*d
 	return &domain.Neighborhood{}, nil
 }
 
+func (s *stubGraphStore) TraverseGraph(_ context.Context, _ string, _ []string, direction string, _ int) ([]types.TraceHop, error) {
+	if s.blastRadiusErr != nil {
+		return nil, s.blastRadiusErr
+	}
+	if s.traceErr != nil {
+		return nil, s.traceErr
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	// For reverse (blast), convert affected to hops
+	if direction == "reverse" && len(s.affected) > 0 {
+		hops := make([]types.TraceHop, len(s.affected))
+		for i, a := range s.affected {
+			hops[i] = types.TraceHop{Node: a.Node, Depth: a.HopCount}
+		}
+		return hops, nil
+	}
+	// For forward (trace), return traceHops
+	if s.traceHops != nil {
+		return s.traceHops, nil
+	}
+	if s.traceErr != nil {
+		return nil, s.traceErr
+	}
+	return nil, s.err
+}
+
 func (s *stubGraphStore) TraceDataFlow(ctx context.Context, startID string, depth int, direction string) ([]types.TraceHop, error) {
 	if s.traceErr != nil {
 		return nil, s.traceErr
@@ -213,6 +215,10 @@ func (s *stubGraphStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 }
 
 func (s *stubGraphStore) ListAllNodes(_ context.Context, _ string) ([]types.CodeNode, error) {
+	return nil, nil
+}
+
+func (s *stubGraphStore) ListFilePaths(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
 
@@ -259,33 +265,74 @@ func (s *stubGraphStore) GetSchemaVersion(ctx context.Context) (int, error) {
 	return 1, nil
 }
 
-// ----- vector index -----
+// ── OpenCodeGraph adapter methods ──────────────────────────────────────
+// These delegate to the existing stubGraphStore methods so the stub satisfies
+// both GraphStore and OpenCodeGraph interfaces.
 
-type stubVectorIndex struct {
-	err     error
-	results []types.ScoredNode
+func (s *stubGraphStore) PutNode(ctx context.Context, node *types.CodeNode) error {
+	return s.UpsertNode(ctx, node)
 }
-
-func (s *stubVectorIndex) Search(ctx context.Context, query []float32, opts domain.VectorSearchOpts) ([]types.ScoredNode, error) {
-	if s.err != nil {
-		return nil, s.err
+func (s *stubGraphStore) FindNode(ctx context.Context, repo, qualified string) (*types.CodeNode, error) {
+	return s.GetNodeByQualified(ctx, repo, qualified)
+}
+func (s *stubGraphStore) PutEdge(ctx context.Context, edge *types.CodeEdge) error {
+	return s.UpsertEdge(ctx, edge)
+}
+func (s *stubGraphStore) DeleteEdgesFrom(ctx context.Context, nodeID string) error {
+	return s.DeleteEdgesForNode(ctx, nodeID)
+}
+func (s *stubGraphStore) PutBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error {
+	return s.UpsertFileBatch(ctx, nodes, edges)
+}
+func (s *stubGraphStore) DeleteByRepo(ctx context.Context, repo string) error {
+	return s.DeleteNodesByRepo(ctx, repo)
+}
+func (s *stubGraphStore) DeleteByFile(ctx context.Context, repo, filePath string) error {
+	return s.DeleteNodesByFile(ctx, repo, filePath)
+}
+func (s *stubGraphStore) Neighbors(ctx context.Context, nodeID string) (*domain.Neighborhood, error) {
+	return s.GetNeighborhood(ctx, nodeID)
+}
+func (s *stubGraphStore) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
+	if s.vectorErr != nil {
+		return nil, s.vectorErr
 	}
-	return s.results, nil
+	return s.vectorResults, nil
 }
-
-// ----- text index -----
-
-type stubTextIndex struct {
-	err     error
-	results []types.ScoredNode
-}
-
-func (s *stubTextIndex) Search(ctx context.Context, query string, opts domain.TextSearchOpts) ([]types.ScoredNode, error) {
-	if s.err != nil {
-		return nil, s.err
+func (s *stubGraphStore) TextSearch(_ context.Context, _ string, _ domain.TextSearchOpts) ([]types.ScoredNode, error) {
+	if s.textErr != nil {
+		return nil, s.textErr
 	}
-	return s.results, nil
+	return nil, nil
 }
+func (s *stubGraphStore) ListNodes(_ context.Context, _ string, opts domain.ListOpts) ([]types.CodeNode, error) {
+	if opts.IDsOnly && len(s.nodeIDs) > 0 {
+		nodes := make([]types.CodeNode, len(s.nodeIDs))
+		for i, id := range s.nodeIDs {
+			nodes[i] = types.CodeNode{ID: id}
+		}
+		return nodes, nil
+	}
+	return nil, s.err
+}
+func (s *stubGraphStore) ListEdges(_ context.Context, _ string, labels []string) ([]types.CodeEdge, error) {
+	// Return routeEdges when requesting route label (for APISurface tests)
+	for _, l := range labels {
+		if l == "route" && len(s.routeEdges) > 0 {
+			return s.routeEdges, nil
+		}
+	}
+	return nil, nil
+}
+func (s *stubGraphStore) PutRepo(ctx context.Context, repo *types.Repo) error {
+	return s.UpsertRepo(ctx, repo)
+}
+func (s *stubGraphStore) DeleteRepo(ctx context.Context, slug string) error {
+	return s.DeleteNodesByRepo(ctx, slug)
+}
+
+// Compile-time check: stubGraphStore implements OpenCodeGraph.
+var _ domain.OpenCodeGraph = (*stubGraphStore)(nil)
 
 // ----- embedder -----
 

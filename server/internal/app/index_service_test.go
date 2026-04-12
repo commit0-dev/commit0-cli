@@ -651,6 +651,10 @@ func (u *upsertFailStore) UpsertNode(ctx context.Context, node *types.CodeNode) 
 	return domain.Validation("upsert failed")
 }
 
+func (u *upsertFailStore) PutNode(ctx context.Context, node *types.CodeNode) error {
+	return domain.Validation("upsert failed")
+}
+
 func (u *upsertFailStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]string, error) {
 	return u.stubGraphStore.nodeIDs, nil
 }

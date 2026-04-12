@@ -63,10 +63,6 @@ Streamable HTTP (POST + SSE), aligned with MCP specification patterns. The serve
 | SSE streaming | POST → `text/event-stream` | agent chat, trace (hop-by-hop), find-root |
 | Async polling | POST (start) → GET (poll) | index (long-running) |
 
-### Why Not gRPC
-
-Claude Code, MCP, and the AI tooling ecosystem standardized on HTTP + SSE. Browser-native, curl-debuggable, no proxy needed. See CLAUDE.md for full rationale.
-
 ---
 
 ## 3. Hexagonal Architecture
@@ -85,14 +81,17 @@ Ports-and-adapters pattern. Domain logic has zero knowledge of SurrealDB, Gemini
 
 | Port | Implementations |
 |------|----------------|
-| `GraphStore` + `VectorIndex` + `TextIndex` | SurrealDB 3.0 (unified) |
+| `OpenCodeGraph` | SurrealDB 3.0 (graph + HNSW vector + BM25 FTS — unified) |
 | `Embedder` | Gemini, Voyage AI, Ollama |
 | `LLMExplainer` | Gemini, Ollama |
 | `AgentRunner` | Google ADK (Gemini or OpenRouter via ModelFactory) |
 | `Parser` | tree-sitter (CGO) — Go, Python, TypeScript, JavaScript |
 | `FileWalker` | OS filesystem (.gitignore-aware) |
+| `TemporalStore` | SurrealDB |
 | `SessionStore` + `MemoryStore` | SurrealDB |
 | `GitWalker` | git CLI adapter |
+
+`OpenCodeGraph` is the single graph port replacing the previous GraphStore, VectorIndex, TextIndex, and FieldFlowStore interfaces. See [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) for the full design.
 
 ---
 
@@ -115,17 +114,15 @@ Ports-and-adapters pattern. Domain logic has zero knowledge of SurrealDB, Gemini
 
 ## 5. Embedding Strategy
 
-Three providers, selected by `EMBED_PROVIDER` env var. Gemini Embedding 2 is the default — the only production model placing text, code, and images in one vector space.
+Three providers, selected by `EMBED_PROVIDER` env var:
 
 | Provider | Model | Dimensions | Cost/1M tokens |
 |----------|-------|-----------|----------------|
 | gemini | `gemini-embedding-2-preview` | 3072 | $0.15 |
 | voyage | `voyage-code-3` | 1024 | $0.06 |
-| ollama | `nomic-embed-text` | 768 | Free (local) |
+| ollama | configurable | configurable | Free (local) |
 
-**Task prefix format** (Gemini Embedding 2 uses instruction-based, not enum):
-- Index: `"task: search result | query: {embedding_text}"`
-- Query: `"task: search query | query: {user_question}"`
+All providers output at a normalized dimension configured by `EMBED_DIM`. HNSW indexes are created at this dimension.
 
 See [EMBEDDING_RESEARCH.md](EMBEDDING_RESEARCH.md) for model comparison and benchmarks.
 
@@ -133,34 +130,28 @@ See [EMBEDDING_RESEARCH.md](EMBEDDING_RESEARCH.md) for model comparison and benc
 
 ## 6. Graph Data Model
 
-4 node tables (function, class, file, module) + 11 edge types (calls, imports, defines, inherits, uses, data_flow, reads, writes, route, control_flow, data_dep). Every node carries a dense embedding vector indexed with HNSW. Centrality computed on read via `COMPUTED` fields.
+The graph uses string labels (not Go enums) and extensible property maps. Node tables (`function`, `class`, `file`, `module`) are SCHEMAFULL for HNSW vector indexes and COMPUTED fields. Edge tables are SCHEMALESS — new edge types are created automatically via `RELATE`.
 
-See [DATABASE.md](DATABASE.md) for complete schema, index tuning, and query patterns.
+13 edge types: `calls`, `imports`, `defines`, `inherits`, `uses`, `data_flow`, `reads`, `writes`, `route`, `control_flow`, `data_dep`, plus system edges.
+
+Every traversal is label-parameterized: the caller specifies which edge labels to follow. Trace, blast, flow, and security analysis are all the same `TraverseGraph` API with different label sets.
+
+See [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) for the unified graph abstraction and [DATABASE.md](DATABASE.md) for schema details.
 
 ---
 
 ## 7. Key Design Decisions
 
-**Single binary** — `curl | sh` installs it in seconds. No version conflicts. Works offline. Easy to ship in Docker, CI, dev containers.
+**Single binary** — `curl | sh` installs it in seconds. No version conflicts. Works offline.
 
-**Ports and adapters** — Three complex external systems (SurrealDB, Gemini, tree-sitter) each with their own failure modes. Isolating domain logic means every service is unit-testable without infrastructure, and adapters are independently replaceable.
+**Ports and adapters** — Three complex external systems (SurrealDB, Gemini, tree-sitter) each with their own failure modes. Isolating domain logic means every service is unit-testable without infrastructure.
 
-**SurrealDB over Neo4j + Pinecone** — Graph traversal + HNSW vector ANN + BM25 full-text in a single SurrealQL query. Eliminates three separate databases. COMPUTED fields, REFERENCE constraints, client-side transactions, and changefeeds.
+**SurrealDB over Neo4j + Pinecone** — Graph traversal + HNSW vector ANN + BM25 full-text in a single SurrealQL query. Eliminates three separate databases.
 
-**Streamable HTTP over gRPC** — Industry standard for AI tools (Claude Code, MCP, Continue.dev). Browser-native. curl-debuggable. No proxy needed.
+**OpenCodeGraph** — One port interface for all graph operations. Traversal is label-parameterized, not method-per-technique. Adding a new analysis technique means registering an EdgeLinker — zero changes to the port, adapter, or services.
+
+**Streamable HTTP over gRPC** — Industry standard for AI tools (Claude Code, MCP, Continue.dev). Browser-native, curl-debuggable.
 
 **Multi-provider** — Embeddings and LLM are separate choices. Use Gemini for embeddings + OpenRouter for LLM, or Ollama for both locally. Agent uses ModelFactory injection so delegate.go never imports concrete adapters.
 
----
-
-## 8. Delivery Status
-
-| Phase | Scope | Status |
-|-------|-------|--------|
-| 1 | Core indexer: walk→parse→embed→store, query, repo CRUD | Done |
-| 2 | Graph traversal: trace, blast, TypeScript/JS, HTTP server | Done |
-| 3 | Sessions, SSE streaming, incremental re-indexing | Done |
-| 4 | Multi-repo, VSCode extension, watch mode | Done |
-| 5 | Find commit zero: data flow, temporal graph, agent, memory | Done |
-| 6 | Multi-provider (Voyage, OpenRouter, Ollama), Streamable HTTP | Done |
-| Next | TUI redesign, thin CLI binary (no CGO), web UI | Planned |
+**Two-phase indexing** — Extract per-file (parallel) → Link globally (sequential with SymbolTable) → Process per-batch (parallel). This architecture enables cross-file edge resolution without requiring a full database round-trip during parsing.

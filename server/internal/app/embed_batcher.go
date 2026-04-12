@@ -92,6 +92,11 @@ func (eb *EmbedBatcher) Process(ctx context.Context, nodes []types.CodeNode, bui
 	// Build inputs from nodes (use ForNodeCtx for graph-neighborhood enrichment
 	// when a GraphStore is attached to the builder; falls back to ForNode otherwise)
 	for _, node := range nodes {
+		// Skip nodes that already have embeddings (e.g., preserved from DB during --reparse).
+		if len(node.Embedding) > 0 {
+			continue
+		}
+
 		text := builder.ForNodeCtx(ctx, &node)
 		hash := sha256.Sum256([]byte(text))
 

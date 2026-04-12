@@ -298,13 +298,13 @@ func TestNodeParams_FullNode(t *testing.T) {
 	if params["start_line"] != 10 {
 		t.Errorf("params[start_line] = %v; want 10", params["start_line"])
 	}
-	repoRef, _ := params["repo_ref"].(models.RecordID)
+	repoRef, _ := params["repo"].(models.RecordID)
 	if repoRef.Table != "repo" || repoRef.ID != "myrepo" {
-		t.Errorf("params[repo_ref] = %v; want repo:myrepo", repoRef)
+		t.Errorf("params[repo] = %v; want repo:myrepo", repoRef)
 	}
-	fileRef, _ := params["file_ref"].(models.RecordID)
+	fileRef, _ := params["file"].(models.RecordID)
 	if fileRef.Table != "file" || fileRef.ID != "pkg/handler.go" {
-		t.Errorf("params[file_ref] = %v; want file:pkg/handler.go", fileRef)
+		t.Errorf("params[file] = %v; want file:pkg/handler.go", fileRef)
 	}
 }
 
@@ -338,57 +338,35 @@ func TestNodeParams_EmptyIDFallsBackToQualified(t *testing.T) {
 
 // ── upsertNodeQuery ───────────────────────────────────────────────────────────
 
-func TestUpsertNodeQuery_AllTables(t *testing.T) {
-	tables := []string{"function", "class", "file", "module"}
-	for _, tbl := range tables {
-		q := upsertNodeQuery(tbl)
-		if q == "" {
-			t.Errorf("upsertNodeQuery(%q) returned empty string", tbl)
-		}
-		if !strings.Contains(q, "UPSERT") {
-			t.Errorf("upsertNodeQuery(%q) missing UPSERT: %s", tbl, q)
-		}
+// ── genericUpsertNodeQuery ───────────────────────────────────────────────────
+
+func TestGenericUpsertNodeQuery(t *testing.T) {
+	q := genericUpsertNodeQuery()
+	if !strings.Contains(q, "UPSERT") {
+		t.Errorf("genericUpsertNodeQuery missing UPSERT: %s", q)
+	}
+	if !strings.Contains(q, "$props") {
+		t.Errorf("genericUpsertNodeQuery missing $props: %s", q)
 	}
 }
 
-func TestUpsertNodeQuery_UnknownTableEmpty(t *testing.T) {
-	q := upsertNodeQuery("nonexistent")
-	if q != "" {
-		t.Errorf("upsertNodeQuery(unknown) = %q; want empty", q)
-	}
-}
+// ── genericRelateQuery ──────────────────────────────────────────────────────
 
-// ── relateEdgeQuery ───────────────────────────────────────────────────────────
-
-func TestRelateEdgeQuery_AllKinds(t *testing.T) {
-	kinds := []types.EdgeKind{
-		types.EdgeCalls,
-		types.EdgeImports,
-		types.EdgeDefines,
-		types.EdgeInherits,
-		types.EdgeUses,
-	}
-	for _, k := range kinds {
-		q := relateEdgeQuery(k)
-		if q == "" {
-			t.Errorf("relateEdgeQuery(%v) returned empty string", k)
-		}
+func TestGenericRelateQuery(t *testing.T) {
+	for _, label := range []string{"calls", "data_flow", "my_custom_edge"} {
+		q := genericRelateQuery(label)
 		if !strings.Contains(q, "RELATE") {
-			t.Errorf("relateEdgeQuery(%v) missing RELATE keyword: %s", k, q)
+			t.Errorf("genericRelateQuery(%q) missing RELATE: %s", label, q)
+		}
+		if !strings.Contains(q, label) {
+			t.Errorf("genericRelateQuery(%q) missing label: %s", label, q)
 		}
 	}
 }
 
-func TestRelateEdgeQuery_UnknownKindEmpty(t *testing.T) {
-	q := relateEdgeQuery(types.EdgeKind("unknown_edge"))
-	if q != "" {
-		t.Errorf("relateEdgeQuery(unknown) = %q; want empty", q)
-	}
-}
+// ── genericEdgeParams ───────────────────────────────────────────────────────
 
-// ── edgeParams ────────────────────────────────────────────────────────────────
-
-func TestEdgeParams_Basic(t *testing.T) {
+func TestGenericEdgeParams_Basic(t *testing.T) {
 	edge := &types.CodeEdge{
 		Kind:     types.EdgeCalls,
 		FromID:   "function:pkg⋅Caller",
@@ -396,55 +374,41 @@ func TestEdgeParams_Basic(t *testing.T) {
 		CallSite: "pkg/main.go:42",
 		CallType: "direct",
 	}
-	params := edgeParams(edge, "myrepo")
+	params := genericEdgeParams(edge, "myrepo")
 
-	if params["call_site"] != "pkg/main.go:42" {
-		t.Errorf("params[call_site] = %v; want %q", params["call_site"], "pkg/main.go:42")
+	props, _ := params["props"].(map[string]any)
+	if props["call_site"] != "pkg/main.go:42" {
+		t.Errorf("props[call_site] = %v; want %q", props["call_site"], "pkg/main.go:42")
 	}
-	if params["call_type"] != "direct" {
-		t.Errorf("params[call_type] = %v; want 'direct'", params["call_type"])
-	}
-	repoRef, _ := params["repo_ref"].(models.RecordID)
-	if repoRef.Table != "repo" || repoRef.ID != "myrepo" {
-		t.Errorf("params[repo_ref] = %v; want repo:myrepo", repoRef)
+	if props["call_type"] != "direct" {
+		t.Errorf("props[call_type] = %v; want 'direct'", props["call_type"])
 	}
 }
 
-func TestEdgeParams_EmptyCallTypeDefaultsDirect(t *testing.T) {
-	edge := &types.CodeEdge{
-		Kind:   types.EdgeCalls,
-		FromID: "function:pkg⋅A",
-		ToID:   "function:pkg⋅B",
-	}
-	params := edgeParams(edge, "r")
-	if params["call_type"] != "direct" {
-		t.Errorf("params[call_type] = %v; want 'direct' for empty CallType", params["call_type"])
-	}
-}
-
-func TestEdgeParams_MetadataInheritKind(t *testing.T) {
+func TestGenericEdgeParams_MetadataCopied(t *testing.T) {
 	edge := &types.CodeEdge{
 		Kind:     types.EdgeInherits,
 		FromID:   "class:Dog",
 		ToID:     "class:Animal",
 		Metadata: map[string]string{"kind": "implements"},
 	}
-	params := edgeParams(edge, "r")
-	if params["inherit_kind"] != "implements" {
-		t.Errorf("params[inherit_kind] = %v; want 'implements'", params["inherit_kind"])
+	params := genericEdgeParams(edge, "r")
+	props, _ := params["props"].(map[string]any)
+	if props["kind"] != "implements" {
+		t.Errorf("props[kind] = %v; want 'implements'", props["kind"])
 	}
 }
 
-func TestEdgeParams_MetadataUsageType(t *testing.T) {
+func TestGenericEdgeParams_DefaultCallType(t *testing.T) {
 	edge := &types.CodeEdge{
-		Kind:     types.EdgeUses,
-		FromID:   "function:pkg⋅F",
-		ToID:     "class:pkg⋅Svc",
-		Metadata: map[string]string{"usage_type": "injection"},
+		Kind:   types.EdgeCalls,
+		FromID: "function:pkg⋅A",
+		ToID:   "function:pkg⋅B",
 	}
-	params := edgeParams(edge, "r")
-	if params["usage_type"] != "injection" {
-		t.Errorf("params[usage_type] = %v; want 'injection'", params["usage_type"])
+	params := genericEdgeParams(edge, "r")
+	props, _ := params["props"].(map[string]any)
+	if props["call_type"] != "direct" {
+		t.Errorf("props[call_type] = %v; want 'direct'", props["call_type"])
 	}
 }
 

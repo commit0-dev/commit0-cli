@@ -2,8 +2,9 @@ package types
 
 import "time"
 
-// NodeKind represents the type of a code node.
-type NodeKind string
+// NodeKind classifies code nodes. Type alias (= string) so plain strings
+// are interchangeable — new labels don't need constants (OpenCodeGraph §2.1).
+type NodeKind = string
 
 const (
 	NodeFile     NodeKind = "file"
@@ -12,8 +13,9 @@ const (
 	NodeModule   NodeKind = "module"
 )
 
-// EdgeKind represents the type of a relationship between nodes.
-type EdgeKind string
+// EdgeKind classifies edge relationships. Type alias (= string) so plain strings
+// are interchangeable — new labels don't need constants (OpenCodeGraph §2.2).
+type EdgeKind = string
 
 const (
 	EdgeCalls    EdgeKind = "calls"

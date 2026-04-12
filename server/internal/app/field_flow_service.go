@@ -23,9 +23,8 @@ type FieldFlowRequest struct {
 // Unlike the existing DataFlowService (which builds context strings for the LLM),
 // this service returns structured FieldFlowResult for interactive tracing.
 type FieldFlowService struct {
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	embedder  domain.Embedder
-	vectorIdx domain.VectorIndex
 	explainer domain.LLMExplainer
 	cfg       *config.Config
 	log       *slog.Logger
@@ -33,16 +32,14 @@ type FieldFlowService struct {
 
 // NewFieldFlowService creates a new field flow tracing service.
 func NewFieldFlowService(
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	embedder domain.Embedder,
-	vectorIdx domain.VectorIndex,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
 ) *FieldFlowService {
 	return &FieldFlowService{
-		store:     store,
+		graph:     graph,
 		embedder:  embedder,
-		vectorIdx: vectorIdx,
 		explainer: explainer,
 		cfg:       cfg,
 		log:       slog.Default().With("service", "field_flow"),
@@ -72,8 +69,11 @@ func (s *FieldFlowService) TraceFieldFlow(ctx context.Context, req FieldFlowRequ
 		return nil, err
 	}
 
-	// Trace data flow edges with field_path filtering
-	hops, err := s.store.TraceDataFlow(ctx, node.ID, req.Depth, req.Direction)
+	// Trace data flow edges via label-parameterized traversal (OpenCodeGraph §3).
+	// Uses TraverseGraph instead of the old recursive TraceDataFlow which
+	// times out on dangling edge references.
+	edgeLabels := []string{"data_flow", "reads", "writes"}
+	hops, err := s.graph.TraverseGraph(ctx, node.ID, edgeLabels, req.Direction, req.Depth)
 	if err != nil {
 		return nil, err
 	}
@@ -109,16 +109,16 @@ func (s *FieldFlowService) TraceFieldFlow(ctx context.Context, req FieldFlowRequ
 // resolveSymbol finds a node by qualified name, falling back to vector search.
 func (s *FieldFlowService) resolveSymbol(ctx context.Context, repoSlug, symbol string) (*types.CodeNode, error) {
 	// Direct lookup
-	node, err := s.store.GetNodeByQualified(ctx, repoSlug, symbol)
+	node, err := s.graph.FindNode(ctx, repoSlug, symbol)
 	if err == nil && node != nil {
 		return node, nil
 	}
 
 	// Vector search fallback
-	if s.embedder != nil && s.vectorIdx != nil {
+	if s.embedder != nil && s.graph != nil {
 		vec, err := s.embedder.EmbedQuery(ctx, symbol)
 		if err == nil {
-			hits, err := s.vectorIdx.Search(ctx, vec, domain.VectorSearchOpts{
+			hits, err := s.graph.VectorSearch(ctx, vec, domain.VectorSearchOpts{
 				RepoSlug: repoSlug,
 				TopK:     1,
 				MinScore: 0.5,

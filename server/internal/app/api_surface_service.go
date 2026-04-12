@@ -16,7 +16,7 @@ import (
 // APISurfaceService discovers HTTP API endpoints from the code graph and
 // builds exposure maps by tracing data flow from entry points through handlers.
 type APISurfaceService struct {
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	flowSvc   *FieldFlowService
 	explainer domain.LLMExplainer
 	cfg       *config.Config
@@ -25,13 +25,13 @@ type APISurfaceService struct {
 
 // NewAPISurfaceService creates the API surface discovery service.
 func NewAPISurfaceService(
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	flowSvc *FieldFlowService,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
 ) *APISurfaceService {
 	return &APISurfaceService{
-		store:     store,
+		graph:     graph,
 		flowSvc:   flowSvc,
 		explainer: explainer,
 		cfg:       cfg,
@@ -45,7 +45,7 @@ func (s *APISurfaceService) Discover(ctx context.Context, repoSlug string) (*typ
 	start := time.Now()
 
 	// 1. Get all route edges from the graph.
-	routeEdges, err := s.store.ListRoutes(ctx, repoSlug)
+	routeEdges, err := s.graph.ListEdges(ctx, repoSlug, []string{"route"})
 	if err != nil {
 		return nil, fmt.Errorf("list routes: %w", err)
 	}
@@ -215,17 +215,17 @@ func (s *APISurfaceService) extractBindingsFromGraph(ctx context.Context, repoSl
 	var binding types.APIBinding
 
 	// Try to get the handler node to find its data_flow edges.
-	node, err := s.store.GetNode(ctx, handlerID)
+	node, err := s.graph.GetNode(ctx, handlerID)
 	if err != nil || node == nil {
 		// Try by qualified name as fallback.
-		node, err = s.store.GetNodeByQualified(ctx, repoSlug, handlerID)
+		node, err = s.graph.FindNode(ctx, repoSlug, handlerID)
 		if err != nil || node == nil {
 			return binding
 		}
 	}
 
 	// Get the handler's neighborhood to find data_flow edges with source_type metadata.
-	neighborhood, err := s.store.GetNeighborhood(ctx, node.ID)
+	neighborhood, err := s.graph.Neighbors(ctx, node.ID)
 	if err != nil || neighborhood == nil {
 		return binding
 	}

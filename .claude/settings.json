@@ -18,6 +18,8 @@
       "Bash(sed *)",
       "Bash(tail *)",
       "Bash(wc *)",
+      "Bash(awk *)",
+      "Bash(sed *)",
       "Edit(/.claude/skills/commit0-go/**)",
       "Read(//private/tmp/**)",
       "Read(//Users/thomas.nguyen/go/**/pkg/mod/**)",

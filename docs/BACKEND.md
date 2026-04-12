@@ -1,166 +1,170 @@
-# commit0 — Core Backend Architecture
+# commit0 — Backend Architecture
 
-> Detailed architecture, service design, concurrency model, and implementation patterns.
+> Services, adapters, HTTP API, agent orchestration, and concurrency patterns.
 
 **Companion documents:**
-- `ARCHITECTURE.md` — High-level vision, tech stack, directory layout
-- `DATABASE.md` — SurrealDB 3.0 schema, indexes, query patterns
-- `LAYOUT.md` — Full annotated file tree
+- [ARCHITECTURE.md](ARCHITECTURE.md) — High-level design, tech stack
+- [DATABASE.md](DATABASE.md) — SurrealDB schema, indexes, query patterns
+- [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) — Unified graph abstraction
+- [LAYOUT.md](LAYOUT.md) — Annotated file tree
 
 ---
 
-## 1. Architectural Philosophy
-
-| Principle | Implementation |
-|---|---|
-| Zero friction install | Single binary, no runtime deps, `curl \| sh` or `brew install` |
-| Offline-capable | All graph queries work without network; only embedding/LLM need API |
-| Fast incremental updates | SHA-256 cache, git-diff aware re-indexing |
-| Hybrid retrieval | Vector ANN + graph traversal + full-text in one SurrealQL statement |
-| Streaming-first | SSE for long operations; async polling for indexing |
-| Extensible by interface | Every subsystem behind a Go interface; swap any adapter |
-| Client-server separation | CLI is thin HTTP client; server owns all adapters |
-
-### Prior Art
-
-- **DeepWiki** — LLM-generated docs from code structure. commit0 adds interactive query + persistent knowledge graph.
-- **Neo4j Codebase Knowledge Graphs** — Call graphs in graph DB. commit0 adds vector embeddings for semantic queries.
-- **GraphGen4Code** — tree-sitter extraction at scale. commit0 adds real-time incremental indexing + multimodal embeddings.
-- **Hybrid RAG** — Vector + keyword + graph retrieval. commit0 implements natively via SurrealDB.
-
----
-
-## 2. Layered Architecture
+## 1. Layered Architecture
 
 Ports-and-adapters (hexagonal) with Streamable HTTP client-server separation.
-
-### Layers
 
 | Layer | Location | Responsibility |
 |-------|----------|---------------|
 | **Domain Core** | `internal/domain/`, `pkg/types/` | Port interfaces, domain errors, types. Zero external imports. |
 | **Application Services** | `internal/app/` | Orchestrate ports. Only layer composing multiple interfaces. |
 | **Driven Adapters** | `internal/adapters/surreal/`, `gemini/`, `openrouter/`, etc. | Implement port interfaces against external systems. |
-| **Driving Adapters** | `internal/adapters/http/` (server), `internal/adapters/client/` (CLI HTTP client) | Translate HTTP ↔ service calls. |
+| **Driving Adapters** | `internal/adapters/http/` (server), `internal/adapters/client/` (CLI HTTP client) | Translate HTTP <> service calls. |
 | **CLI** | `cmd/` | Thin HTTP client. `serve.go` starts server; others call it via HTTP. |
 
-### Port Interfaces (`internal/domain/ports.go`)
+---
+
+## 2. Port Interfaces
+
+### OpenCodeGraph (`internal/domain/open_code_graph.go`)
+
+The single graph port for all node/edge CRUD, traversal, search, and repo operations. All services depend on this one interface.
+
+| Method Group | Methods |
+|-------------|---------|
+| Node CRUD | `PutNode`, `GetNode`, `FindNode`, `DeleteNode` |
+| Edge CRUD | `PutEdge`, `DeleteEdgesFrom` |
+| Batch | `PutBatch`, `DeleteByRepo`, `DeleteByFile` |
+| Traversal | `TraverseGraph` (label-parameterized), `Neighbors` |
+| Search | `VectorSearch` (HNSW ANN), `TextSearch` (BM25 FTS) |
+| Listing | `ListNodes` (with filter opts), `ListEdges` (by label), `ListFilePaths` |
+| Repo | `PutRepo`, `GetRepo`, `ListRepos`, `DeleteRepo`, `FindRepoByRemoteURL`, `UpdateRepoIndexedAt` |
+| Schema | `ApplySchema` |
+
+### Other Ports (`internal/domain/ports.go`)
 
 | Port | Methods | Implementations |
 |------|---------|----------------|
-| `GraphStore` | UpsertNode, GetNode, TraceForward/Reverse, BlastRadius, UpsertFileBatch, Repo CRUD | SurrealDB |
-| `VectorIndex` | Search (ANN over embeddings) | SurrealDB (HNSW) |
-| `TextIndex` | Search (BM25 full-text) | SurrealDB |
-| `Embedder` | EmbedBatch (≤100 inputs), EmbedQuery | Gemini, Voyage AI, Ollama |
-| `LLMExplainer` | Explain (streaming), ExplainStructured (JSON) | Gemini, Ollama |
-| `Parser` | Parse (file → AST nodes + edges), SupportedLanguages | tree-sitter (CGO) |
-| `FileWalker` | Walk (repo → file entries, .gitignore-aware) | OS filesystem |
-| `AgentRunner` | Chat (streaming events channel) | Google ADK |
-| `GitWalker` | Diff, Blame, Log | git CLI adapter |
-| `SessionStore` | Create/Get/List/Append sessions | SurrealDB |
+| `Embedder` | `EmbedBatch` (<=100 inputs), `EmbedQuery` | Gemini, Voyage AI, Ollama |
+| `LLMExplainer` | `Explain` (streaming), `ExplainStructured` (JSON) | Gemini, Ollama |
+| `Parser` | `Parse` (file -> AST nodes + edges), `SupportedLanguages` | tree-sitter (CGO) |
+| `FileWalker` | `Walk` (repo -> file entries, .gitignore-aware) | OS filesystem |
+| `AgentRunner` | `Chat` (streaming events channel) | Google ADK |
+| `TemporalStore` | Commit-aware upsert, mark removed, query ranges, node history | SurrealDB |
 | `MemoryStore` | Store/Retrieve/List memories (vector-indexed) | SurrealDB |
+| `GitWalker` | `ListCommits`, `DiffCommit`, `ReadFileAtCommit`, `CommitInfo` | git CLI adapter |
 
 ### Key Domain Types (`pkg/types/`)
 
-| Type | File | Fields |
-|------|------|--------|
-| `CodeNode` | `ast.go` | ID, Kind, Name, Qualified, FilePath, RepoSlug, Language, Signature, Body, Embedding, ContentHash |
-| `CodeEdge` | `ast.go` | Kind, FromID, ToID, CallSite, IsDynamic, CallType, Metadata |
-| `QueryResult` | `result.go` | Nodes ([]ScoredNode), Explanation, Timing |
-| `TraceResult` | `result.go` | Root, Tree ([]TraceHop), Direction, Explanation, Timing |
-| `BlastResult` | `result.go` | Target, Affected ([]AffectedNode), Summary, Timing |
-| `APISurface` | `api.go` | Endpoints ([]APIEndpointDetail), Timing |
+| Type | File | Purpose |
+|------|------|---------|
+| `CodeNode` | `ast.go` | Function/class/file/module with embedding, signature, body |
+| `CodeEdge` | `ast.go` | Typed relationship with call site, metadata, dynamic flag |
+| `QueryResult` | `result.go` | Scored nodes + explanation + timing |
+| `TraceResult` | `result.go` | Hop tree + direction + explanation |
+| `BlastResult` | `result.go` | Affected nodes + hop count + summary |
+| `FieldFlowResult` | `result.go` | Data flow chains + mutation points |
+| `RootCauseReport` | `result.go` | Suspect commits + causal chain + fix suggestion |
+| `APISurface` | `api.go` | Discovered endpoints + taint flows |
 
 ---
 
 ## 3. Application Services
 
-### 3.1 IndexService — Walk → Parse → Embed → Store
+### IndexService — Walk -> Parse -> Link -> Embed -> Store
 
-Staged concurrent pipeline with bounded channels:
+Two-phase pipeline with bounded concurrency:
 
 ```
-Walk (1 goroutine) → Parse (N=GOMAXPROCS workers) → Embed (M=4 workers) → Store (P=4 workers)
-     FileEntry           ParsedFile                   EmbeddedFile          SurrealDB
+Phase 1: EXTRACT (per-file, parallel)
+  Walk -> Parse (N=GOMAXPROCS workers) -> accumulate all nodes + edges
+
+Phase 2: LINK (global, sequential)
+  Build SymbolTable from ALL nodes -> run EdgeLinker chain
+
+Phase 3: PROCESS (per-batch, parallel)
+  Summarize (optional) -> Embed (M=4 workers) -> Store (P=4 workers)
 ```
 
+- **EdgeLinker chain**: `CallLinker`, `DataFlowLinker`, `DefinesLinker`, `FieldAccessLinker`, `RouteLinker` — resolves cross-file edges against the complete SymbolTable
 - **SHA-256 dedup**: Content hash skips re-embedding unchanged nodes
-- **Batch embedding**: Up to 100 inputs per EmbedBatch call
-- **Non-fatal errors**: Parse/embed failures skip + log + continue
-- **Transactional upsert**: `UpsertFileBatch` atomically writes all nodes + edges for a file
-- **Location**: `internal/app/index_service.go`
+- **`--fast` flag**: Skips LLM summarization and neighborhood re-embedding
+- **`--reparse` flag**: Forces re-parsing while preserving existing summaries/embeddings
+- **Location**: `internal/app/index_service.go`, `internal/app/linkers/`
 
-### 3.2 QueryService — Embed → Search → Fuse → Explain
+### QueryService — Embed -> Search -> Fuse -> Explain
 
-1. **Embed** user question via `EmbedQuery`
-2. **Parallel search**: Vector ANN + BM25 FTS via `errgroup`
-3. **Reciprocal Rank Fusion** (`fusion.go`): Combines ranked lists with `score = Σ 1/(k + rank)`, optional centrality boost
-4. **Top-K selection** and LLM explanation (streaming, non-fatal if fails)
+1. Embed user question via `EmbedQuery`
+2. Parallel search: Vector ANN + BM25 FTS via `errgroup`
+3. Reciprocal Rank Fusion (`fusion.go`): `score = sum(1/(k + rank))`, centrality boost
+4. Top-K selection and LLM explanation (streaming, non-fatal if fails)
 - **Location**: `internal/app/query_service.go`, `fusion.go`
 
-### 3.3 TraceService — Symbol → Graph Walk → Explain
+### TraceService — Symbol -> Graph Walk -> Explain
 
-1. **Resolve symbol**: Exact qualified match → fallback vector search (min score 0.8)
-2. **Graph traversal**: `TraceForward` or `TraceReverse` on GraphStore
-3. **LLM explanation** of call chain
+1. Resolve symbol: exact qualified match -> fallback vector search (min score 0.8)
+2. Label-parameterized traversal via `OpenCodeGraph.TraverseGraph`
+3. LLM explanation of call chain
 - **Location**: `internal/app/trace_service.go`
 
-### 3.4 BlastService — Reverse Transitive Impact
+### BlastService — Reverse Transitive Impact
 
-1. **Resolve target** symbol
-2. **Reverse traversal** via `BlastRadius` (all transitive callers)
-3. **Dedup + group** by module, sort by hop distance
-4. **LLM summary** of impact
+1. Resolve target symbol
+2. Reverse traversal via `TraverseGraph` with `direction: "reverse"`
+3. Dedup + group by module, sort by hop distance
+4. LLM summary of impact
 - **Location**: `internal/app/blast_service.go`
 
-### 3.5 Additional Services
+### Additional Services
 
 | Service | Location | Purpose |
 |---------|----------|---------|
 | `RepoService` | `repo_service.go` | Repository CRUD + lifecycle |
-| `AgentService` | `agent/service.go` | ADK runner with model.LLM injection, streaming ChatEvents |
-| `FieldFlowService` | `field_flow_service.go` | Field-level data flow tracing |
-| `TemporalService` | `temporal_service.go` | Git history + temporal queries |
+| `AgentService` | `agent/service.go` | ADK runner with `model.LLM` injection, streaming ChatEvents |
+| `FieldFlowService` | `field_flow_service.go` | Field-level data flow tracing via `TraverseGraph` with data_flow/reads/writes labels |
+| `TemporalService` | `temporal_service.go` | Git history + temporal graph queries |
 | `RootCauseAnalysisService` | `rootcause_analysis_service.go` | End-to-end root cause analysis |
 | `APISurfaceService` | `api_surface_service.go` | API endpoint discovery + OpenAPI generation |
-| `MemoryManager` | `memory/manager.go` | 3-tier memory: working → session → persistent |
+| `MemoryManager` | `memory/manager.go` | 3-tier memory: working -> session -> persistent |
 
 ---
 
 ## 4. Driven Adapters
 
-### 4.1 SurrealDB Adapter (`internal/adapters/surreal/`)
+### SurrealDB Adapter (`internal/adapters/surreal/`)
 
-Unified adapter implementing `GraphStore`, `VectorIndex`, `TextIndex`, `SessionStore`, `MemoryStore`. Single WebSocket connection shared across all services via `wireServeServices()`.
+Unified adapter implementing `OpenCodeGraph`, `TemporalStore`, `MemoryStore`, `SessionStore`, and sync interfaces. Dual WebSocket connection pools (read + write) shared across all services.
 
-- **Connection**: WebSocket with retry (exponential backoff, configurable retries)
-- **Schema**: Embedded `schema.surql` applied via `ApplySchema()` with version tracking
-- **Batch upsert**: Client-side transactions for atomic file ingestion
-- **Hybrid search**: Vector ANN (HNSW) + BM25 FTS in single SurrealQL query with RRF
+| File | Responsibility |
+|------|---------------|
+| `client.go` | Connection, auth, pools, helpers |
+| `open_code_graph.go` | `OpenCodeGraph` interface adapter (delegates to implementation files) |
+| `graph_store.go` | Node/edge CRUD, traversal, batch upsert, neighborhood |
+| `vector_index.go` | HNSW ANN search across node tables |
+| `text_index.go` | BM25 full-text search |
+| `field_flow_store.go` | Data flow traversal with field/mutation metadata |
+| `schema.go` | Schema DDL with version tracking |
+| `session_store.go` | Chat session persistence |
 
-### 4.2 Embedding Adapters
+### Embedding Adapters
 
 | Adapter | Location | Transport | Features |
 |---------|----------|-----------|----------|
-| Gemini | `gemini/embedder.go` | genai SDK | Batch ≤100, multimodal (text+image), retry via `infra/retry` |
-| Voyage AI | `voyage/embedder.go` | Resty v3 | Batch ≤128, code-optimized model, auto-retry |
+| Gemini | `gemini/embedder.go` | genai SDK | Batch <=100, multimodal (text+image), retry |
+| Voyage AI | `voyage/embedder.go` | Resty v3 | Batch <=128, code-optimized model |
 | Ollama | `local/embedder.go` | Resty v3 | Local inference, model-specific prefixes |
 
-### 4.3 LLM Adapters
+### LLM Adapters
 
 | Adapter | Location | Transport | Features |
 |---------|----------|-----------|----------|
 | Gemini | `gemini/explainer.go` | genai SDK | Streaming, structured JSON output |
-| OpenRouter | `openrouter/` | Resty v3 + EventSource SSE | ADK `model.LLM` interface, 200+ models, cost tracking |
+| OpenRouter | `openrouter/` | Resty v3 + EventSource SSE | ADK `model.LLM` interface, 200+ models |
 | Ollama | `local/ollama.go` | Resty v3 | Local inference, /api/chat endpoint |
 
-### 4.4 tree-sitter Parser (`internal/adapters/treesitter/`)
+### Agent Orchestration (`internal/app/agent/`)
 
-CGO-linked parser with per-language extractors. Extracts nodes (functions, classes, modules) and edges (calls, imports, defines, inherits, routes, control_flow, data_dep).
-
-### 4.5 Agent Orchestration (`internal/app/agent/`)
-
-Single user prompt → autonomous comprehensive code analysis. The **Analyst Agent** plans, delegates to sub-agents, evaluates evidence quality, follows up on gaps, and converges on a report.
+Single user prompt -> autonomous comprehensive code analysis. The Analyst Agent plans, delegates to sub-agents, evaluates evidence, and converges on a report.
 
 | Component | File | Purpose |
 |-----------|------|---------|
@@ -170,22 +174,11 @@ Single user prompt → autonomous comprehensive code analysis. The **Analyst Age
 | Tools | `tools.go` | 10+ ADK tools: search, trace, blast, flow, temporal, root cause |
 | Instructions | `instructions.go` | Analyst + 4 sub-agent system prompts |
 
-**Scratchpad** — memory + ranking + feedback loop:
-- Evidence scored on 4 dimensions: Relevance, Confidence, Novelty, Actionability
-- Priority = 0.3×R + 0.3×C + 0.2×N + 0.2×A (server-side validated)
-- 5 convergence gates: min 3 delegations, min 5 evidence, no high-priority open questions, novelty decay, hypothesis confirmation
-
-**Sub-agent types**: `search` (discovery), `trace` (structure), `security` (risks), `deep_dive` (code detail) — each with restricted tool subset.
-
-**Feedback loop**: DELEGATE → RECEIVE → EXTRACT → UPDATE HYPOTHESES → GENERATE QUESTIONS → CHECK CONVERGENCE → DECIDE NEXT
-
-**Guardrails**: Token budget, score validation, circuit breaker on failure, contradiction detection, cost control, protocol enforcement (scratchpad must be updated between delegations).
+**Sub-agent types**: `search` (discovery), `trace` (structure), `security` (risks), `deep_dive` (code detail).
 
 ---
 
-## 5. HTTP API Layer (Gin)
-
-The Gin server is the central driving adapter. All clients communicate via Streamable HTTP.
+## 5. HTTP API (Gin)
 
 ### Routes
 
@@ -194,8 +187,8 @@ The Gin server is the central driving adapter. All clients communicate via Strea
 | GET | `/health` | `handleHealth` | JSON |
 | GET | `/api/v1/repos` | `handleListRepos` | JSON |
 | POST | `/api/v1/repos` | `handleCreateRepo` | JSON (201) |
-| GET | `/api/v1/repos/:slug` | `handleGetRepo` | JSON |
-| DELETE | `/api/v1/repos/:slug` | `handleDeleteRepo` | JSON |
+| GET | `/api/v1/repos/*slug` | `handleGetRepo` | JSON |
+| DELETE | `/api/v1/repos/*slug` | `handleDeleteRepo` | JSON |
 | POST | `/api/v1/index` | `handleStartIndex` | JSON (202, async) |
 | GET | `/api/v1/index/:job_id` | `handleIndexStatus` | JSON (poll) |
 | POST | `/api/v1/query` | `handleQuery` | JSON |
@@ -212,17 +205,6 @@ The Gin server is the central driving adapter. All clients communicate via Strea
 | GET | `/api/v1/nodes/by-file` | `handleNodesByFile` | JSON |
 | GET | `/api/v1/nodes/:id/neighborhood` | `handleGetNeighborhood` | JSON |
 
-### SSE Streaming Pattern
-
-```go
-c.Header("Content-Type", "text/event-stream")
-c.Header("Cache-Control", "no-cache")
-c.Status(http.StatusOK)
-
-writeSSE(c, "hop", data)       // event: hop\ndata: {...}\n\n
-writeSSE(c, "done", summary)   // event: done\ndata: {...}\n\n
-```
-
 ### Middleware Stack
 
 1. `gin.Recovery()` — panic recovery
@@ -232,7 +214,7 @@ writeSSE(c, "done", summary)   // event: done\ndata: {...}\n\n
 
 ### Error Mapping
 
-`writeError()` maps `domain.DomainError` codes to HTTP status: NotFound→404, Validation→400, Conflict→409, default→500.
+`writeError()` maps `domain.DomainError` codes to HTTP status: NotFound->404, Validation->400, Conflict->409, default->500.
 
 ---
 
@@ -242,7 +224,7 @@ CLI commands are thin HTTP clients using `internal/adapters/client/` (Resty v3).
 
 ### Server URL Resolution
 
-`--server-url` flag → `COMMIT0_SERVER_URL` env → default `http://localhost:8080`
+`--server-url` flag -> `COMMIT0_SERVER_URL` env -> default `http://localhost:8080`
 
 ### Communication Patterns
 
@@ -253,8 +235,12 @@ CLI commands are thin HTTP clients using `internal/adapters/client/` (Resty v3).
 | `index` | POST /index + GET /index/:id | Async start + exponential backoff polling |
 | `trace` | POST /trace/json | JSON request-response |
 | `blast` | POST /blast | JSON request-response |
+| `flow` | POST /flow | JSON request-response |
+| `history` | POST /history | JSON request-response |
+| `find-root` | POST /find-root | SSE stream |
 | `repo list/get/create/delete` | REST CRUD | JSON request-response |
 | `api discover/spec` | POST /api/* | JSON request-response |
+| `analyze` | POST /agent/chat | SSE stream with analysis-specific prompts |
 
 ### Commands Not Using HTTP
 
@@ -291,30 +277,22 @@ Env-var driven via Viper with `.env` auto-discovery. Key groups:
 |-------|------|---------|
 | `EMBED_PROVIDER` | gemini/voyage/ollama | Embedding model selection |
 | `LLM_PROVIDER` | gemini/openrouter/ollama | LLM selection |
+| `EMBED_DIM` | 1024 (default) | Normalized embedding dimension for HNSW |
 | `SURREAL_*` | URL, USER, PASS, NS, DB | Database connection |
 | `GEMINI_*` | API_KEY, EMBED_MODEL, EXPLAIN_MODEL | Gemini config |
 | `OPENROUTER_*` | API_KEY, MODEL, MAX_TOKENS | OpenRouter config |
-| `VOYAGE_*` | API_KEY, MODEL, EMBED_DIM | Voyage config |
+| `VOYAGE_*` | API_KEY, MODEL | Voyage config |
 | `OLLAMA_*` | URL, MODEL, EMBED_MODEL | Local model config |
 | `SERVER_*` | PORT, CORS_ORIGINS, TIMEOUTS | HTTP server |
 
 ---
 
-## 9. Testing Strategy
+## 9. Testing
 
 | Level | Location | Approach |
 |-------|----------|----------|
-| **Unit** | `internal/app/*_test.go` | In-memory stubs (`stubs_test.go`). 98% coverage threshold. |
+| **Unit** | `internal/app/*_test.go` | In-memory stubs (`stubs_test.go`) |
 | **HTTP handlers** | `internal/adapters/http/handlers_test.go` | `gin.CreateTestContext` + `httptest.NewRecorder` |
 | **HTTP clients** | `internal/adapters/openrouter/client_test.go` | `httptest.NewServer` + Resty |
 | **Adapters** | `internal/adapters/*/` | Live SurrealDB + API keys (integration) |
-| **Compile-time** | All adapter files | `var _ domain.X = (*Adapter)(nil)` |
-
----
-
-## 10. Observability
-
-- **Structured logging**: `log/slog` with consistent field names (service, method, duration_ms, err)
-- **Timing breakdown**: Every operation returns `TimingInfo` (embed_ms, search_ms, graph_ms, explain_ms, total_ms)
-- **Cost tracking**: OpenRouter client accumulates input/output tokens per generation
-- **Index progress**: Job store with polling endpoint, reports files_indexed + nodes_created
+| **Compile-time** | Adapter files | `var _ domain.OpenCodeGraph = (*adapter)(nil)` |

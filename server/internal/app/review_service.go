@@ -42,7 +42,7 @@ type ReviewResult struct {
 // ReviewService analyzes git diffs using the code graph + LLM.
 type ReviewService struct {
 	blastSvc  *BlastService
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	gitWalker domain.GitWalker
 	explainer domain.LLMExplainer
 	log       *slog.Logger
@@ -51,13 +51,13 @@ type ReviewService struct {
 // NewReviewService creates a code review service.
 func NewReviewService(
 	blastSvc *BlastService,
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	gitWalker domain.GitWalker,
 	explainer domain.LLMExplainer,
 ) *ReviewService {
 	return &ReviewService{
 		blastSvc:  blastSvc,
-		store:     store,
+		graph:     graph,
 		gitWalker: gitWalker,
 		explainer: explainer,
 		log:       slog.Default().With("service", "review"),
@@ -100,7 +100,7 @@ func (s *ReviewService) Review(ctx context.Context, req ReviewRequest) (*ReviewR
 		if diff.Status == "deleted" {
 			continue
 		}
-		nodes, err := s.store.ListNodesByFile(ctx, req.RepoSlug, diff.Path)
+		nodes, err := s.graph.ListNodes(ctx, req.RepoSlug, domain.ListOpts{FilePath: diff.Path})
 		if err != nil {
 			continue
 		}
@@ -121,7 +121,7 @@ func (s *ReviewService) Review(ctx context.Context, req ReviewRequest) (*ReviewR
 			}
 
 			// Check if function has tests (naive: look for Test* in callers)
-			nb, err := s.store.GetNeighborhood(ctx, node.ID)
+			nb, err := s.graph.Neighbors(ctx, node.ID)
 			if err == nil && nb != nil {
 				hasTest := false
 				for _, caller := range nb.Callers {

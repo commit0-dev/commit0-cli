@@ -117,7 +117,7 @@ func NewAgentService(
 	flowSvc *app.FieldFlowService,
 	tempSvc *app.TemporalService,
 	rootCauseSvc *app.RootCauseAnalysisService,
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	gitWalker domain.GitWalker,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
@@ -143,7 +143,7 @@ func NewAgentService(
 	}
 
 	// Build all analysis tools (shared by orchestrator and sub-agents).
-	tools, err := BuildTools(querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc, store, gitWalker, explainer)
+	tools, err := BuildTools(querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc, graph, gitWalker, explainer)
 	if err != nil {
 		return nil, fmt.Errorf("build tools: %w", err)
 	}
@@ -152,7 +152,7 @@ func NewAgentService(
 	pad := NewScratchpad("")
 
 	// Build scratchpad tools (update, read, check_redundancy, plan_analysis).
-	scratchpadTools, err := BuildScratchpadTools(pad, store, memMgr)
+	scratchpadTools, err := BuildScratchpadTools(pad, graph, memMgr)
 	if err != nil {
 		return nil, fmt.Errorf("build scratchpad tools: %w", err)
 	}
@@ -163,7 +163,7 @@ func NewAgentService(
 	modelFactory := func() (adkmodel.LLM, error) { return model, nil }
 	delegateTool, err := BuildDelegateTool(
 		querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc,
-		store, gitWalker, explainer, cfg, pad, modelFactory,
+		graph, gitWalker, explainer, cfg, pad, modelFactory,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build delegate tool: %w", err)

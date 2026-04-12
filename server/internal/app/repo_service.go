@@ -12,12 +12,12 @@ import (
 
 // RepoService manages repository operations.
 type RepoService struct {
-	store domain.GraphStore
+	graph domain.OpenCodeGraph
 }
 
 // NewRepoService creates a new repository service.
-func NewRepoService(store domain.GraphStore) *RepoService {
-	return &RepoService{store: store}
+func NewRepoService(graph domain.OpenCodeGraph) *RepoService {
+	return &RepoService{graph: graph}
 }
 
 // CreateRepoRequest represents a request to create a repository.
@@ -39,7 +39,7 @@ func (rs *RepoService) CreateRepo(ctx context.Context, req CreateRepoRequest) (*
 	}
 
 	// Check if repo already exists
-	existing, err := rs.store.GetRepo(ctx, req.Slug)
+	existing, err := rs.graph.GetRepo(ctx, req.Slug)
 	if err == nil && existing != nil {
 		return nil, domain.Conflict(fmt.Sprintf("repository %s already exists", req.Slug))
 	}
@@ -55,7 +55,7 @@ func (rs *RepoService) CreateRepo(ctx context.Context, req CreateRepoRequest) (*
 	}
 
 	// Persist
-	if err := rs.store.UpsertRepo(ctx, repo); err != nil {
+	if err := rs.graph.PutRepo(ctx, repo); err != nil {
 		return nil, fmt.Errorf("upsert repo: %w", err)
 	}
 
@@ -64,7 +64,7 @@ func (rs *RepoService) CreateRepo(ctx context.Context, req CreateRepoRequest) (*
 
 // GetRepo retrieves a repository by slug.
 func (rs *RepoService) GetRepo(ctx context.Context, slug string) (*types.Repo, error) {
-	repo, err := rs.store.GetRepo(ctx, slug)
+	repo, err := rs.graph.GetRepo(ctx, slug)
 	if err != nil {
 		var domainErr *domain.DomainError
 		if errors.As(err, &domainErr) && domainErr.Code == domain.ErrNotFound {
@@ -77,7 +77,7 @@ func (rs *RepoService) GetRepo(ctx context.Context, slug string) (*types.Repo, e
 
 // ListRepos lists all repositories.
 func (rs *RepoService) ListRepos(ctx context.Context) ([]types.Repo, error) {
-	repos, err := rs.store.ListRepos(ctx)
+	repos, err := rs.graph.ListRepos(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list repos: %w", err)
 	}
@@ -93,7 +93,7 @@ func (rs *RepoService) DeleteRepo(ctx context.Context, slug string) (*types.Repo
 	}
 
 	// Delete all nodes in repo
-	if err := rs.store.DeleteNodesByRepo(ctx, slug); err != nil {
+	if err := rs.graph.DeleteByRepo(ctx, slug); err != nil {
 		return nil, fmt.Errorf("delete repo nodes: %w", err)
 	}
 
@@ -125,7 +125,7 @@ func (rs *RepoService) UpdateRepo(ctx context.Context, req UpdateRepoRequest) (*
 	}
 
 	// Persist
-	if err := rs.store.UpsertRepo(ctx, repo); err != nil {
+	if err := rs.graph.PutRepo(ctx, repo); err != nil {
 		return nil, fmt.Errorf("update repo: %w", err)
 	}
 

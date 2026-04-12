@@ -73,6 +73,12 @@ func parseDotEnv(path string) error {
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
 
+		// Strip inline comments: "value # comment" → "value"
+		// Only strip if '#' is preceded by whitespace (avoids breaking values like URLs with #).
+		if ci := strings.Index(val, " #"); ci >= 0 {
+			val = strings.TrimSpace(val[:ci])
+		}
+
 		// Strip surrounding quotes (" or ').
 		if len(val) >= 2 {
 			if (val[0] == '"' && val[len(val)-1] == '"') ||

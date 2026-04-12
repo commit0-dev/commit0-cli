@@ -28,11 +28,6 @@ type ftsRow struct {
 	FTSScore   float64          `json:"fts_score"` // from search::score()
 }
 
-// Search implements domain.TextIndex on the TextAdapter wrapper.
-func (t *TextAdapter) Search(ctx context.Context, query string, opts domain.TextSearchOpts) ([]types.ScoredNode, error) {
-	return t.SurrealAdapter.TextSearch(ctx, query, opts)
-}
-
 // TextSearch performs BM25 full-text search across the relevant node tables.
 // opts.Fields selects which fields to search (name, qualified, docstring).
 // If Fields is empty, all three are searched.

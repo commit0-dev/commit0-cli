@@ -14,18 +14,18 @@ import (
 
 // TraceRequest represents a code trace request.
 type TraceRequest struct {
-	Symbol    string
-	RepoSlug  string
-	Direction string
-	Depth     int
-	NoExplain bool
+	Symbol     string
+	RepoSlug   string
+	Direction  string
+	Depth      int
+	NoExplain  bool
+	EdgeLabels []string // which edge types to follow. Empty = ["calls"].
 }
 
 // TraceService traces code flow paths.
 type TraceService struct {
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	embedder  domain.Embedder
-	vectorIdx domain.VectorIndex
 	explainer domain.LLMExplainer
 	cfg       *config.Config
 	log       *slog.Logger
@@ -33,16 +33,14 @@ type TraceService struct {
 
 // NewTraceService creates a new trace service.
 func NewTraceService(
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	embedder domain.Embedder,
-	vectorIdx domain.VectorIndex,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
 ) *TraceService {
 	return &TraceService{
-		store:     store,
+		graph:     graph,
 		embedder:  embedder,
-		vectorIdx: vectorIdx,
 		explainer: explainer,
 		cfg:       cfg,
 		log:       slog.Default().With("service", "trace"),
@@ -75,13 +73,12 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 		return nil, err
 	}
 
-	// Trace
-	var hops []types.TraceHop
-	if req.Direction == "forward" {
-		hops, err = ts.store.TraceForward(ctx, node.ID, req.Depth)
-	} else {
-		hops, err = ts.store.TraceReverse(ctx, node.ID, req.Depth)
+	// Trace — label-parameterized traversal (OpenCodeGraph §3)
+	labels := req.EdgeLabels
+	if len(labels) == 0 {
+		labels = []string{"calls"} // backward compat default
 	}
+	hops, err := ts.graph.TraverseGraph(ctx, node.ID, labels, req.Direction, req.Depth)
 	if err != nil {
 		return nil, fmt.Errorf("trace %s: %w", req.Direction, err)
 	}
@@ -150,14 +147,14 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 // resolveSymbol resolves a symbol to a code node.
 func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) (*types.CodeNode, error) {
 	// Try direct lookup
-	node, err := ts.store.GetNodeByQualified(ctx, repo, symbol)
+	node, err := ts.graph.FindNode(ctx, repo, symbol)
 	if err == nil && node != nil {
 		return node, nil
 	}
 
 	// Fallback: suffix match — try all nodes ending with ".Symbol"
 	// This handles partial names like "ImportBundle" → "app.SyncService.ImportBundle"
-	allNodes, listErr := ts.store.ListAllNodes(ctx, repo)
+	allNodes, listErr := ts.graph.ListNodes(ctx, repo, domain.ListOpts{})
 	if listErr == nil {
 		suffix := "." + symbol
 		for i := range allNodes {
@@ -168,14 +165,14 @@ func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) 
 		}
 	}
 
-	// Fallback: vector search
-	if ts.embedder != nil && ts.vectorIdx != nil {
+	// Fallback: vector search via OpenCodeGraph
+	if ts.embedder != nil && ts.graph != nil {
 		query, err := ts.embedder.EmbedQuery(ctx, symbol)
 		if err != nil {
 			return nil, fmt.Errorf("embed symbol: %w", err)
 		}
 
-		results, err := ts.vectorIdx.Search(ctx, query, domain.VectorSearchOpts{
+		results, err := ts.graph.VectorSearch(ctx, query, domain.VectorSearchOpts{
 			RepoSlug: repo,
 			TopK:     1,
 			MinScore: 0.5,

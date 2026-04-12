@@ -1,13 +1,25 @@
--- commit0 SurrealDB 3.0 Schema
+-- commit0 SurrealDB 3.0 Schema — OpenCodeGraph + RepositoryGraph
 -- Applied via ApplySchema() on first run (embedded via go:embed)
+--
+-- Design: docs/OPEN_CODE_GRAPH.md + docs/REPOSITORY_GRAPH.md
+-- Node tables: SCHEMAFULL (HNSW, COMPUTED, FTS)
+-- Edge tables: SCHEMALESS (generic RELATE CONTENT $props)
+-- Repo: graph node with cascade delete to all code entities
 
 DEFINE NAMESPACE IF NOT EXISTS commit0;
 USE NS commit0;
-DEFINE DATABASE IF NOT EXISTS codebase STRICT;
+DEFINE DATABASE IF NOT EXISTS codebase;
 USE DB codebase;
 
 -- ─────────────────────────────────────────
--- Node Tables
+-- 1. Full-Text Search Analyzers (MUST be defined before tables that use them)
+-- ─────────────────────────────────────────
+
+DEFINE ANALYZER OVERWRITE code_analyzer TOKENIZERS class, blank FILTERS lowercase, ascii;
+DEFINE ANALYZER OVERWRITE nl_analyzer   TOKENIZERS blank FILTERS lowercase, ascii, snowball(english);
+
+-- ─────────────────────────────────────────
+-- 2. Repository Node (root of the RepositoryGraph)
 -- ─────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE repo SCHEMAFULL;
@@ -20,15 +32,13 @@ DEFINE FIELD OVERWRITE languages       ON repo TYPE array<string>;
 DEFINE FIELD OVERWRITE last_commit     ON repo TYPE option<string>;
 DEFINE FIELD OVERWRITE last_indexed_at ON repo TYPE option<datetime>;
 
--- Remove legacy stats object (OVERWRITE does not drop old field definitions).
-REMOVE FIELD IF EXISTS stats ON repo;
-UPDATE repo UNSET stats;
-
 DEFINE FIELD OVERWRITE is_stale ON repo COMPUTED
     last_indexed_at IS NONE OR time::now() - last_indexed_at > 24h;
 
 DEFINE INDEX OVERWRITE repo_slug_idx ON repo FIELDS slug UNIQUE;
 
+-- ─────────────────────────────────────────
+-- 3. Code Node Tables (SCHEMAFULL — HNSW + COMPUTED + FTS)
 -- ─────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE file SCHEMAFULL CHANGEFEED 7d;
@@ -89,6 +99,13 @@ DEFINE FIELD OVERWRITE is_entry_point ON `function` COMPUTED
 DEFINE INDEX OVERWRITE fn_qualified_idx   ON `function` FIELDS repo, qualified UNIQUE;
 DEFINE INDEX OVERWRITE fn_repo_lang_idx   ON `function` FIELDS repo, language;
 
+-- Temporal fields
+DEFINE FIELD IF NOT EXISTS introduced_commit    ON `function` TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at        ON `function` TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_modified_commit ON `function` TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_modified_at     ON `function` TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS removed_commit       ON `function` TYPE option<string>;
+
 -- ─────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE class SCHEMAFULL CHANGEFEED 7d;
@@ -102,6 +119,7 @@ DEFINE FIELD OVERWRITE repo         ON class TYPE record<repo> REFERENCE ON DELE
 DEFINE FIELD OVERWRITE start_line   ON class TYPE int;
 DEFINE FIELD OVERWRITE end_line     ON class TYPE int;
 DEFINE FIELD OVERWRITE docstring    ON class TYPE option<string>;
+DEFINE FIELD OVERWRITE body         ON class TYPE option<string>;
 DEFINE FIELD OVERWRITE language     ON class TYPE string;
 DEFINE FIELD OVERWRITE kind         ON class TYPE string VALUE "class"
     ASSERT $value IN ["class", "struct", "interface", "enum", "trait", "protocol"];
@@ -117,6 +135,12 @@ DEFINE FIELD OVERWRITE depth        ON class COMPUTED count(->inherits->class);
 
 DEFINE INDEX OVERWRITE cls_qualified_idx  ON class FIELDS repo, qualified UNIQUE;
 DEFINE INDEX OVERWRITE cls_repo_lang_idx  ON class FIELDS repo, language;
+
+-- Temporal fields
+DEFINE FIELD IF NOT EXISTS introduced_commit    ON class TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at        ON class TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_modified_commit ON class TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_modified_at     ON class TYPE option<datetime>;
 
 -- ─────────────────────────────────────────
 
@@ -139,129 +163,14 @@ DEFINE FIELD OVERWRITE file_count ON module COMPUTED count(<-imports<-file);
 
 DEFINE INDEX OVERWRITE mod_repo_path_idx ON module FIELDS repo, path UNIQUE;
 
--- ─────────────────────────────────────────
--- Edge Tables
--- ─────────────────────────────────────────
-
-DEFINE TABLE OVERWRITE calls TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE call_site  ON calls TYPE string;
-DEFINE FIELD OVERWRITE is_dynamic ON calls TYPE bool VALUE false;
-DEFINE FIELD OVERWRITE call_type  ON calls TYPE string VALUE "direct"
-    ASSERT $value IN ["direct", "interface", "callback", "goroutine", "deferred"];
-DEFINE FIELD OVERWRITE repo       ON calls TYPE record<repo>;
-
-DEFINE INDEX OVERWRITE calls_in_idx   ON calls FIELDS in;
-DEFINE INDEX OVERWRITE calls_out_idx  ON calls FIELDS out;
-DEFINE INDEX OVERWRITE calls_repo_idx ON calls FIELDS repo;
+-- Temporal fields
+DEFINE FIELD IF NOT EXISTS introduced_commit    ON file TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS introduced_at        ON file TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_modified_commit ON file TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_modified_at     ON file TYPE option<datetime>;
 
 -- ─────────────────────────────────────────
-
-DEFINE TABLE OVERWRITE imports TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE alias       ON imports TYPE option<string>;
-DEFINE FIELD OVERWRITE is_wildcard ON imports TYPE bool VALUE false;
-
-DEFINE INDEX OVERWRITE imports_in_idx  ON imports FIELDS in;
-DEFINE INDEX OVERWRITE imports_out_idx ON imports FIELDS out;
-
--- ─────────────────────────────────────────
-
-DEFINE TABLE OVERWRITE defines TYPE RELATION SCHEMAFULL;
-
-DEFINE INDEX OVERWRITE defines_in_idx  ON defines FIELDS in;
-DEFINE INDEX OVERWRITE defines_out_idx ON defines FIELDS out;
-
--- ─────────────────────────────────────────
-
-DEFINE TABLE OVERWRITE inherits TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE kind ON inherits TYPE string VALUE "extends"
-    ASSERT $value IN ["extends", "implements", "embeds", "mixes"];
-
-DEFINE INDEX OVERWRITE inherits_in_idx  ON inherits FIELDS in;
-DEFINE INDEX OVERWRITE inherits_out_idx ON inherits FIELDS out;
-
--- ─────────────────────────────────────────
-
-DEFINE TABLE OVERWRITE uses TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE usage_type ON uses TYPE string VALUE "reference"
-    ASSERT $value IN ["instantiation", "type_annotation", "struct_literal",
-                       "cast", "reference", "return_type"];
-
-DEFINE INDEX OVERWRITE uses_in_idx  ON uses FIELDS in;
-DEFINE INDEX OVERWRITE uses_out_idx ON uses FIELDS out;
-
--- ─────────────────────────────────────────
--- Data-Flow Edge Tables
--- ─────────────────────────────────────────
-
--- data_flow: function A passes a specific argument to a named parameter of function B.
--- Richer than `calls` — carries what data moves, not just that a call occurred.
-DEFINE TABLE OVERWRITE data_flow TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE call_site  ON data_flow TYPE string;
-DEFINE FIELD OVERWRITE param_name ON data_flow TYPE option<string>; -- callee parameter name
-DEFINE FIELD OVERWRITE arg_expr   ON data_flow TYPE option<string>; -- argument expression at call site
-DEFINE FIELD OVERWRITE arg_type   ON data_flow TYPE option<string>; -- resolved type (if available)
-DEFINE FIELD OVERWRITE repo       ON data_flow TYPE record<repo>;
-
-DEFINE INDEX OVERWRITE df_in_idx   ON data_flow FIELDS in;
-DEFINE INDEX OVERWRITE df_out_idx  ON data_flow FIELDS out;
-DEFINE INDEX OVERWRITE df_repo_idx ON data_flow FIELDS repo;
-
--- ─────────────────────────────────────────
-
--- reads: function reads a field or global variable of a class/struct.
-DEFINE TABLE OVERWRITE reads TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE field_name ON reads TYPE option<string>; -- qualified field, e.g. "User.Email"
-DEFINE FIELD OVERWRITE repo       ON reads TYPE record<repo>;
-
-DEFINE INDEX OVERWRITE reads_in_idx  ON reads FIELDS in;
-DEFINE INDEX OVERWRITE reads_out_idx ON reads FIELDS out;
-
--- ─────────────────────────────────────────
-
--- writes: function writes a field or global variable of a class/struct.
-DEFINE TABLE OVERWRITE writes TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE field_name ON writes TYPE option<string>;
-DEFINE FIELD OVERWRITE repo       ON writes TYPE record<repo>;
-
-DEFINE INDEX OVERWRITE writes_in_idx  ON writes FIELDS in;
-DEFINE INDEX OVERWRITE writes_out_idx ON writes FIELDS out;
-
--- route: HTTP route registration (file registers handler at path)
-DEFINE TABLE OVERWRITE route TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE http_method   ON route TYPE string;
-DEFINE FIELD OVERWRITE http_path     ON route TYPE string;
-DEFINE FIELD OVERWRITE middleware     ON route TYPE option<array<string>>;
-DEFINE FIELD OVERWRITE group_prefix   ON route TYPE option<string>;
-DEFINE FIELD OVERWRITE repo           ON route TYPE option<string>;
-
-DEFINE INDEX OVERWRITE route_in_idx        ON route FIELDS in;
-DEFINE INDEX OVERWRITE route_out_idx       ON route FIELDS out;
-DEFINE INDEX OVERWRITE route_repo_path_idx ON route FIELDS repo, http_path;
-
--- control_flow: intra-procedural control flow edges (basic block → basic block)
-DEFINE TABLE OVERWRITE control_flow TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE branch_type ON control_flow TYPE string;
-DEFINE FIELD OVERWRITE condition   ON control_flow TYPE option<string>;
-DEFINE FIELD OVERWRITE from_line   ON control_flow TYPE option<int>;
-DEFINE FIELD OVERWRITE to_line     ON control_flow TYPE option<int>;
-DEFINE FIELD OVERWRITE repo        ON control_flow TYPE option<string>;
-
-DEFINE INDEX OVERWRITE cf_in_idx  ON control_flow FIELDS in;
-DEFINE INDEX OVERWRITE cf_out_idx ON control_flow FIELDS out;
-
--- data_dep: intra-procedural data dependence (variable def → variable use)
-DEFINE TABLE OVERWRITE data_dep TYPE RELATION SCHEMAFULL;
-DEFINE FIELD OVERWRITE var_name ON data_dep TYPE string;
-DEFINE FIELD OVERWRITE def_line ON data_dep TYPE option<int>;
-DEFINE FIELD OVERWRITE use_line ON data_dep TYPE option<int>;
-DEFINE FIELD OVERWRITE def_type ON data_dep TYPE option<string>;
-DEFINE FIELD OVERWRITE repo     ON data_dep TYPE option<string>;
-
-DEFINE INDEX OVERWRITE dd_in_idx  ON data_dep FIELDS in;
-DEFINE INDEX OVERWRITE dd_out_idx ON data_dep FIELDS out;
-
--- ─────────────────────────────────────────
--- Vector Indexes (HNSW — dimension set by EMBED_DIM config)
+-- 4. Vector Indexes (HNSW)
 -- ─────────────────────────────────────────
 
 DEFINE INDEX OVERWRITE fn_vec_idx   ON `function` FIELDS embedding
@@ -277,11 +186,8 @@ DEFINE INDEX OVERWRITE mod_vec_idx  ON module FIELDS embedding
     HNSW DIMENSION {{EMBED_DIM}} DIST COSINE TYPE F32 EFC 150 M 12;
 
 -- ─────────────────────────────────────────
--- Full-Text Search Indexes (BM25)
+-- 5. Full-Text Search Indexes (BM25)
 -- ─────────────────────────────────────────
-
-DEFINE ANALYZER OVERWRITE code_analyzer TOKENIZERS class, blank FILTERS lowercase, ascii;
-DEFINE ANALYZER OVERWRITE nl_analyzer   TOKENIZERS blank FILTERS lowercase, ascii, snowball(english);
 
 DEFINE INDEX OVERWRITE fn_name_fts      ON `function` FIELDS name
     FULLTEXT ANALYZER code_analyzer BM25;
@@ -311,51 +217,64 @@ DEFINE INDEX OVERWRITE mod_path_fts ON module FIELDS path
 DEFINE INDEX OVERWRITE mod_doc_fts  ON module FIELDS docstring
     FULLTEXT ANALYZER nl_analyzer BM25;
 
--- ─────────────────────────────────────────
--- Temporal Fields on Nodes
--- ─────────────────────────────────────────
-
-DEFINE FIELD IF NOT EXISTS introduced_commit    ON `function` TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS introduced_at        ON `function` TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS last_modified_commit ON `function` TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS last_modified_at     ON `function` TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS removed_commit       ON `function` TYPE option<string>;
-
-DEFINE FIELD IF NOT EXISTS introduced_commit    ON class TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS introduced_at        ON class TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS last_modified_commit ON class TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS last_modified_at     ON class TYPE option<datetime>;
-
-DEFINE FIELD IF NOT EXISTS introduced_commit    ON file TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS introduced_at        ON file TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS last_modified_commit ON file TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS last_modified_at     ON file TYPE option<datetime>;
-
--- ─────────────────────────────────────────
--- Temporal + Enhanced Fields on Edges
--- ─────────────────────────────────────────
-
-DEFINE FIELD IF NOT EXISTS introduced_commit ON calls TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS introduced_at     ON calls TYPE option<datetime>;
-
-DEFINE FIELD IF NOT EXISTS introduced_commit ON data_flow TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS introduced_at     ON data_flow TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS field_path        ON data_flow TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS mutation_type     ON data_flow TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS mutation_expr     ON data_flow TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS mutation_line     ON data_flow TYPE option<int>;
-
-DEFINE FIELD IF NOT EXISTS introduced_commit ON reads TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS introduced_commit ON writes TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS introduced_commit ON inherits TYPE option<string>;
-
--- Temporal indexes
+-- Temporal indexes on nodes
 DEFINE INDEX IF NOT EXISTS fn_introduced_idx ON `function` FIELDS introduced_commit;
 DEFINE INDEX IF NOT EXISTS fn_modified_idx   ON `function` FIELDS last_modified_commit;
-DEFINE INDEX IF NOT EXISTS df_field_path_idx ON data_flow FIELDS field_path;
 
 -- ─────────────────────────────────────────
--- Memory Table (three-tier context storage)
+-- 6. Edge Tables (SCHEMALESS — OpenCodeGraph generic RELATE)
+--
+-- NO DEFINE FIELD. Properties stored via CONTENT $props.
+-- New edge labels auto-create tables via RELATE (SurrealDB 3.0).
+-- Only in/out indexes for traversal performance.
+-- ─────────────────────────────────────────
+
+DEFINE TABLE calls TYPE RELATION SCHEMALESS;
+DEFINE INDEX calls_in_idx   ON calls FIELDS in;
+DEFINE INDEX calls_out_idx  ON calls FIELDS out;
+
+DEFINE TABLE imports TYPE RELATION SCHEMALESS;
+DEFINE INDEX imports_in_idx  ON imports FIELDS in;
+DEFINE INDEX imports_out_idx ON imports FIELDS out;
+
+DEFINE TABLE defines TYPE RELATION SCHEMALESS;
+DEFINE INDEX defines_in_idx  ON defines FIELDS in;
+DEFINE INDEX defines_out_idx ON defines FIELDS out;
+
+DEFINE TABLE inherits TYPE RELATION SCHEMALESS;
+DEFINE INDEX inherits_in_idx  ON inherits FIELDS in;
+DEFINE INDEX inherits_out_idx ON inherits FIELDS out;
+
+DEFINE TABLE uses TYPE RELATION SCHEMALESS;
+DEFINE INDEX uses_in_idx  ON uses FIELDS in;
+DEFINE INDEX uses_out_idx ON uses FIELDS out;
+
+DEFINE TABLE data_flow TYPE RELATION SCHEMALESS;
+DEFINE INDEX df_in_idx   ON data_flow FIELDS in;
+DEFINE INDEX df_out_idx  ON data_flow FIELDS out;
+
+DEFINE TABLE reads TYPE RELATION SCHEMALESS;
+DEFINE INDEX reads_in_idx  ON reads FIELDS in;
+DEFINE INDEX reads_out_idx ON reads FIELDS out;
+
+DEFINE TABLE writes TYPE RELATION SCHEMALESS;
+DEFINE INDEX writes_in_idx  ON writes FIELDS in;
+DEFINE INDEX writes_out_idx ON writes FIELDS out;
+
+DEFINE TABLE route TYPE RELATION SCHEMALESS;
+DEFINE INDEX route_in_idx   ON route FIELDS in;
+DEFINE INDEX route_out_idx  ON route FIELDS out;
+
+DEFINE TABLE control_flow TYPE RELATION SCHEMALESS;
+DEFINE INDEX cf_in_idx  ON control_flow FIELDS in;
+DEFINE INDEX cf_out_idx ON control_flow FIELDS out;
+
+DEFINE TABLE data_dep TYPE RELATION SCHEMALESS;
+DEFINE INDEX dd_in_idx  ON data_dep FIELDS in;
+DEFINE INDEX dd_out_idx ON data_dep FIELDS out;
+
+-- ─────────────────────────────────────────
+-- 7. System Tables
 -- ─────────────────────────────────────────
 
 DEFINE TABLE IF NOT EXISTS memory SCHEMAFULL;
@@ -373,10 +292,6 @@ DEFINE FIELD OVERWRITE created_at  ON memory TYPE datetime VALUE time::now();
 DEFINE INDEX IF NOT EXISTS mem_session_idx ON memory FIELDS session_id;
 DEFINE INDEX IF NOT EXISTS mem_tier_idx    ON memory FIELDS tier;
 
--- ─────────────────────────────────────────
--- Commit History Cache
--- ─────────────────────────────────────────
-
 DEFINE TABLE IF NOT EXISTS commit_history SCHEMAFULL;
 
 DEFINE FIELD OVERWRITE hash       ON commit_history TYPE string;
@@ -389,10 +304,6 @@ DEFINE FIELD OVERWRITE indexed    ON commit_history TYPE bool VALUE false;
 
 DEFINE INDEX IF NOT EXISTS ch_hash_idx ON commit_history FIELDS repo_slug, hash UNIQUE;
 DEFINE INDEX IF NOT EXISTS ch_ts_idx   ON commit_history FIELDS repo_slug, timestamp;
-
--- ─────────────────────────────────────────
--- Chat Sessions (TUI conversation persistence)
--- ─────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE chat_session SCHEMAFULL;
 DEFINE FIELD OVERWRITE repo_slug  ON chat_session TYPE string;
@@ -410,12 +321,25 @@ DEFINE FIELD OVERWRITE created_at ON chat_message TYPE datetime VALUE time::now(
 
 DEFINE INDEX IF NOT EXISTS chat_msg_sess_idx ON chat_message FIELDS session_id;
 
+-- P2P sync tables
+DEFINE TABLE IF NOT EXISTS peer SCHEMAFULL;
+DEFINE FIELD OVERWRITE name       ON peer TYPE string;
+DEFINE FIELD OVERWRITE address    ON peer TYPE string;
+DEFINE FIELD OVERWRITE last_seen  ON peer TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS peer_name_idx ON peer FIELDS name UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS sync_scope SCHEMAFULL;
+DEFINE FIELD OVERWRITE repo_slug  ON sync_scope TYPE string;
+DEFINE FIELD OVERWRITE peer_name  ON sync_scope TYPE string;
+DEFINE INDEX IF NOT EXISTS scope_repo_idx ON sync_scope FIELDS repo_slug;
+
 -- ─────────────────────────────────────────
--- Schema Version (for migration tracking)
+-- 8. Schema Version
 -- ─────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE schema_version SCHEMAFULL;
 DEFINE FIELD OVERWRITE version    ON schema_version TYPE int;
 DEFINE FIELD OVERWRITE applied_at ON schema_version TYPE datetime VALUE time::now();
 
+-- Initial version stamp (actual version set by Go ApplySchema after DDL success)
 INSERT INTO schema_version (version) VALUES (1) ON DUPLICATE KEY UPDATE version = 1;

@@ -20,7 +20,7 @@ func BuildTools(
 	flowSvc *app.FieldFlowService,
 	tempSvc *app.TemporalService,
 	rootCauseSvc *app.RootCauseAnalysisService,
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	gitWalker domain.GitWalker,
 	explainer domain.LLMExplainer,
 ) ([]tool.Tool, error) {
@@ -48,13 +48,13 @@ func BuildTools(
 	}
 	tools = append(tools, t)
 
-	t, err = newLookupTool(store)
+	t, err = newLookupTool(graph)
 	if err != nil {
 		return nil, fmt.Errorf("lookup: %w", err)
 	}
 	tools = append(tools, t)
 
-	t, err = newNeighborhoodTool(store)
+	t, err = newNeighborhoodTool(graph)
 	if err != nil {
 		return nil, fmt.Errorf("neighborhood: %w", err)
 	}
@@ -194,9 +194,10 @@ func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
 }
 
 type traceInput struct {
-	Symbol    string `json:"symbol"`
-	Direction string `json:"direction"`
-	Depth     int    `json:"depth"`
+	Symbol     string   `json:"symbol"`
+	Direction  string   `json:"direction"`
+	Depth      int      `json:"depth"`
+	EdgeLabels []string `json:"edge_labels"` // which edge types: calls, data_flow, reads, writes. Empty = calls.
 }
 type traceHop struct {
 	Qualified string `json:"qualified"`
@@ -215,7 +216,7 @@ type traceOutput struct {
 func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name:        "trace_calls",
-		Description: "Follow call chains forward (callees) or reverse (callers) from a function.",
+		Description: "Follow edges forward (callees/sinks) or reverse (callers/sources) from a function. Set edge_labels to choose which edges: calls, data_flow, reads, writes. Default: calls only.",
 	}, func(ctx tool.Context, input traceInput) (traceOutput, error) {
 		dir := input.Direction
 		if dir == "" {
@@ -227,6 +228,7 @@ func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
 		}
 		result, err := svc.Trace(context.Background(), app.TraceRequest{
 			Symbol: input.Symbol, RepoSlug: getRepoSlug(ctx), Direction: dir, Depth: depth,
+			EdgeLabels: input.EdgeLabels,
 		})
 		if err != nil {
 			return traceOutput{}, err
@@ -247,8 +249,9 @@ func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
 }
 
 type blastInput struct {
-	Symbol   string `json:"symbol"`
-	MaxDepth int    `json:"max_depth"`
+	Symbol     string   `json:"symbol"`
+	MaxDepth   int      `json:"max_depth"`
+	EdgeLabels []string `json:"edge_labels"` // which edge types. Empty = calls.
 }
 type blastOutput struct {
 	AffectedCount int      `json:"affected_count"`
@@ -259,7 +262,7 @@ type blastOutput struct {
 func newBlastTool(svc *app.BlastService) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name:        "blast_radius",
-		Description: "Analyze what would break if a given function changes.",
+		Description: "Analyze what would break if a given function changes. Set edge_labels to include data_flow for broader impact. Default: calls only.",
 	}, func(ctx tool.Context, input blastInput) (blastOutput, error) {
 		maxDepth := input.MaxDepth
 		if maxDepth <= 0 {
@@ -267,6 +270,7 @@ func newBlastTool(svc *app.BlastService) (tool.Tool, error) {
 		}
 		result, err := svc.Blast(context.Background(), app.BlastRequest{
 			Symbol: input.Symbol, RepoSlug: getRepoSlug(ctx), MaxDepth: maxDepth,
+			EdgeLabels: input.EdgeLabels,
 		})
 		if err != nil {
 			return blastOutput{}, err
@@ -283,12 +287,12 @@ type lookupInput struct {
 	Qualified string `json:"qualified"`
 }
 
-func newLookupTool(store domain.GraphStore) (tool.Tool, error) {
+func newLookupTool(graph domain.OpenCodeGraph) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name:        "lookup_node",
 		Description: "Look up a specific function or class by its qualified name.",
 	}, func(ctx tool.Context, input lookupInput) (json.RawMessage, error) {
-		node, err := store.GetNodeByQualified(context.Background(), getRepoSlug(ctx), input.Qualified)
+		node, err := graph.FindNode(context.Background(), getRepoSlug(ctx), input.Qualified)
 		if err != nil {
 			return nil, err
 		}
@@ -301,12 +305,12 @@ type neighborhoodInput struct {
 	NodeID string `json:"node_id"`
 }
 
-func newNeighborhoodTool(store domain.GraphStore) (tool.Tool, error) {
+func newNeighborhoodTool(graph domain.OpenCodeGraph) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name:        "get_neighborhood",
 		Description: "Get callers, callees, and data flow for a code node by its ID.",
 	}, func(ctx tool.Context, input neighborhoodInput) (json.RawMessage, error) {
-		nb, err := store.GetNeighborhood(context.Background(), input.NodeID)
+		nb, err := graph.Neighbors(context.Background(), input.NodeID)
 		if err != nil {
 			return nil, err
 		}

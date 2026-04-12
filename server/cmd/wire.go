@@ -24,6 +24,7 @@ import (
 	"github.com/commit0-dev/commit0/server/internal/adapters/walker"
 	"github.com/commit0-dev/commit0/server/internal/app"
 	agentpkg "github.com/commit0-dev/commit0/server/internal/app/agent"
+	"github.com/commit0-dev/commit0/server/internal/app/linkers"
 	"github.com/commit0-dev/commit0/server/internal/app/memory"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
@@ -183,7 +184,7 @@ type serveServices struct {
 	trace      *app.TraceService
 	blast      *app.BlastService
 	repo       *app.RepoService
-	db         domain.GraphStore
+	graph      domain.OpenCodeGraph
 	agent      domain.AgentRunner
 	flow       *app.FieldFlowService
 	temporal   *app.TemporalService
@@ -207,15 +208,18 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	if err != nil {
 		return nil, err
 	}
-	querySvc := app.NewQueryService(d.embedder, d.db.AsVectorIndex(), d.db.AsTextIndex(), d.db, d.explainer, cfg)
-	traceSvc := app.NewTraceService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg)
-	blastSvc := app.NewBlastService(d.db, d.explainer, cfg)
+	// OpenCodeGraph: single graph interface for all services (OpenCodeGraph §3).
+	graph := d.db.AsOpenCodeGraph()
+
+	querySvc := app.NewQueryService(d.embedder, graph, d.explainer, cfg)
+	traceSvc := app.NewTraceService(graph, d.embedder, d.explainer, cfg)
+	blastSvc := app.NewBlastService(graph, d.explainer, cfg)
 
 	// Field flow + temporal services (for root cause analysis)
-	flowSvc := app.NewFieldFlowService(d.db, d.embedder, d.db.AsVectorIndex(), d.explainer, cfg)
+	flowSvc := app.NewFieldFlowService(graph, d.embedder, d.explainer, cfg)
 	gitW := gitadapter.NewWalker(log)
-	tempSvc := app.NewTemporalService(d.db, nil, gitW, d.parser)
-	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, tempSvc, d.db, gitW, d.explainer, cfg)
+	tempSvc := app.NewTemporalService(graph, d.db, gitW, d.parser)
+	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, tempSvc, graph, gitW, d.explainer, cfg)
 
 	// Memory management (3-tier: working → session → persistent).
 	memMgr := memory.NewManager(d.db.AsMemoryStore(), d.embedder, nil, memory.DefaultBudgets())
@@ -233,7 +237,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	var agentRunner domain.AgentRunner
 	agentSvc, err := agentpkg.NewAgentService(
 		querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc,
-		d.db, gitW, d.explainer, cfg, memMgr, llmModel,
+		graph, gitW, d.explainer, cfg, memMgr, llmModel,
 	)
 	if err != nil {
 		log.Warn("agent service unavailable", "err", err)
@@ -241,13 +245,20 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		agentRunner = agentSvc
 	}
 
-	indexSvc := app.NewIndexService(d.walker, d.parser, d.embedder, d.db, d.explainer, cfg)
+	indexSvc := app.NewIndexService(d.walker, d.parser, d.embedder, graph, d.explainer, cfg)
 	if cfg.EmbedProvider == "ollama" {
 		indexSvc.SetDocPrefix(localadapter.DocPrefixForModel(cfg.Ollama.EmbedModel))
 	}
 	indexSvc.SetTemporalService(tempSvc)
+	indexSvc.SetLinkers([]domain.EdgeLinker{
+		&linkers.DefinesLinker{},
+		&linkers.CallLinker{},
+		&linkers.DataFlowLinker{},
+		&linkers.FieldAccessLinker{},
+		&linkers.RouteLinker{},
+	})
 
-	apiSurfaceSvc := app.NewAPISurfaceService(d.db, flowSvc, d.explainer, cfg)
+	apiSurfaceSvc := app.NewAPISurfaceService(graph, flowSvc, d.explainer, cfg)
 
 	// Sync service (P2P graph sync).
 	var syncSvc *app.SyncService
@@ -295,8 +306,8 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		query:      querySvc,
 		trace:      traceSvc,
 		blast:      blastSvc,
-		repo:       app.NewRepoService(d.db),
-		db:         d.db,
+		repo:       app.NewRepoService(graph),
+		graph:       graph,
 		agent:      agentRunner,
 		flow:       flowSvc,
 		temporal:   tempSvc,

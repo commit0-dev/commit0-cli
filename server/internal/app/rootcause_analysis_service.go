@@ -35,7 +35,7 @@ type RootCauseAnalysisService struct {
 	querySvc  *QueryService
 	flowSvc   *FieldFlowService
 	tempSvc   *TemporalService
-	store     domain.GraphStore
+	graph     domain.OpenCodeGraph
 	gitWalker domain.GitWalker
 	explainer domain.LLMExplainer
 	cfg       *config.Config
@@ -47,7 +47,7 @@ func NewRootCauseAnalysisService(
 	querySvc *QueryService,
 	flowSvc *FieldFlowService,
 	tempSvc *TemporalService,
-	store domain.GraphStore,
+	graph domain.OpenCodeGraph,
 	gitWalker domain.GitWalker,
 	explainer domain.LLMExplainer,
 	cfg *config.Config,
@@ -56,7 +56,7 @@ func NewRootCauseAnalysisService(
 		querySvc:  querySvc,
 		flowSvc:   flowSvc,
 		tempSvc:   tempSvc,
-		store:     store,
+		graph:     graph,
 		gitWalker: gitWalker,
 		explainer: explainer,
 		cfg:       cfg,

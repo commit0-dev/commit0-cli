@@ -48,6 +48,7 @@ Examples:
 
 		force, _ := cmd.Flags().GetBool("force")
 		reparse, _ := cmd.Flags().GetBool("reparse")
+		fast, _ := cmd.Flags().GetBool("fast")
 		fmt.Printf("Indexing %s as %q...\n", repoPath, repoSlug)
 
 		c := sdk.New(serverURL(cmd))
@@ -57,8 +58,22 @@ Examples:
 			Languages: languages,
 			Force:     force,
 			Reparse:   reparse,
+			Fast:      fast,
 		}, func(p sdk.IndexProgress) {
-			fmt.Printf("\r  %d files, %d nodes...", p.FilesIndexed, p.NodesCreated)
+			stage := string(p.CurrentStage)
+			if stage == "" {
+				stage = "init"
+			}
+			detail := ""
+			if sp, ok := p.Stages[p.CurrentStage]; ok && sp != nil {
+				if sp.ItemsTotal > 0 {
+					detail = fmt.Sprintf(" %d/%d", sp.ItemsDone, sp.ItemsTotal)
+				} else if sp.ItemsDone > 0 {
+					detail = fmt.Sprintf(" %d", sp.ItemsDone)
+				}
+			}
+			fmt.Printf("\r  [%s%s] %d files, %d nodes, %d errors  %ds",
+				stage, detail, p.FilesIndexed, p.NodesCreated, p.TotalErrors, p.ElapsedMS/1000)
 		})
 		if err != nil {
 			return fmt.Errorf("index: %w", err)
@@ -74,4 +89,5 @@ func init() {
 	indexCmd.Flags().String("languages", "", "Comma-separated list of languages to index (e.g. go,python)")
 	indexCmd.Flags().Bool("force", false, "Delete existing nodes before indexing (removes stale data)")
 	indexCmd.Flags().Bool("reparse", false, "Re-parse all files with current resolver (no delete, no ContentHash skip)")
+	indexCmd.Flags().Bool("fast", false, "Skip LLM summarization and neighborhood re-embedding (10x faster)")
 }

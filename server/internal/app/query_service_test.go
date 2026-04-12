@@ -12,7 +12,7 @@ import (
 
 func TestQueryServiceQueryEmptyQuestion(t *testing.T) {
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(nil, nil, nil, nil, nil, cfg)
+	svc := NewQueryService(nil, nil, nil, cfg)
 
 	_, err := svc.Query(context.Background(), QueryRequest{
 		Question: "",
@@ -28,18 +28,13 @@ func TestQueryServiceQuerySuccess(t *testing.T) {
 		queryVec: []float32{0.1, 0.2, 0.3},
 	}
 
-	vectorIdx := &stubVectorIndex{
-		results: []types.ScoredNode{
-			{
-				Node:        types.CodeNode{ID: "n1", Qualified: "pkg.Func1"},
-				VectorScore: 0.9,
-				FusedScore:  0.9,
-			},
+	store := newStubGraphStore()
+	store.vectorResults = []types.ScoredNode{
+		{
+			Node:        types.CodeNode{ID: "n1", Qualified: "pkg.Func1"},
+			VectorScore: 0.9,
+			FusedScore:  0.9,
 		},
-	}
-
-	textIdx := &stubTextIndex{
-		results: []types.ScoredNode{},
 	}
 
 	cfg := &config.Config{
@@ -50,7 +45,7 @@ func TestQueryServiceQuerySuccess(t *testing.T) {
 		},
 	}
 
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+	svc := NewQueryService(embedder, store, nil, cfg)
 
 	result, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find the handler",
@@ -75,11 +70,8 @@ func TestQueryServiceQueryEmbedFails(t *testing.T) {
 		err: domain.RateLimit("too fast"),
 	}
 
-	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
-
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+	svc := NewQueryService(embedder, newStubGraphStore(), nil, cfg)
 
 	_, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find",
@@ -96,14 +88,11 @@ func TestQueryServiceQueryVectorSearchFails(t *testing.T) {
 		queryVec: []float32{0.1},
 	}
 
-	vectorIdx := &stubVectorIndex{
-		err: domain.Timeout("timeout", nil),
-	}
-
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+	store := newStubGraphStore()
+	store.vectorErr = domain.Timeout("timeout", nil)
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+	svc := NewQueryService(embedder, store, nil, cfg)
 
 	_, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find",
@@ -117,13 +106,11 @@ func TestQueryServiceQueryVectorSearchFails(t *testing.T) {
 
 func TestQueryServiceQueryFTSFails(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
-	textIdx := &stubTextIndex{
-		err: domain.Timeout("fts timeout", nil),
-	}
+	store := newStubGraphStore()
+	store.textErr = domain.Timeout("fts timeout", nil)
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+	svc := NewQueryService(embedder, store, nil, cfg)
 
 	_, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find",
@@ -137,11 +124,9 @@ func TestQueryServiceQueryFTSFails(t *testing.T) {
 
 func TestQueryServiceQueryDefaultTopK(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 5}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+	svc := NewQueryService(embedder, newStubGraphStore(), nil, cfg)
 
 	result, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find",
@@ -159,11 +144,9 @@ func TestQueryServiceQueryDefaultTopK(t *testing.T) {
 
 func TestQueryServiceQueryMinScoreDefault(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 5, MinScore: 0.7}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+	svc := NewQueryService(embedder, newStubGraphStore(), nil, cfg)
 
 	// MinScore=0 in request → should use cfg.Query.MinScore=0.7
 	result, err := svc.Query(context.Background(), QueryRequest{
@@ -182,20 +165,9 @@ func TestQueryServiceQueryMinScoreDefault(t *testing.T) {
 
 func TestQueryServiceQueryTopKTruncation(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	// Vector returns 5 results but TopK=2 → should be truncated to 2
-	vectorIdx := &stubVectorIndex{
-		results: []types.ScoredNode{
-			{Node: types.CodeNode{ID: "n1"}, FusedScore: 0.9},
-			{Node: types.CodeNode{ID: "n2"}, FusedScore: 0.8},
-			{Node: types.CodeNode{ID: "n3"}, FusedScore: 0.7},
-			{Node: types.CodeNode{ID: "n4"}, FusedScore: 0.6},
-			{Node: types.CodeNode{ID: "n5"}, FusedScore: 0.5},
-		},
-	}
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, nil, cfg)
+	svc := NewQueryService(embedder, newStubGraphStore(), nil, cfg)
 
 	result, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find",
@@ -213,12 +185,6 @@ func TestQueryServiceQueryTopKTruncation(t *testing.T) {
 
 func TestQueryServiceQueryWithExplainerSuccess(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	vectorIdx := &stubVectorIndex{
-		results: []types.ScoredNode{
-			{Node: types.CodeNode{ID: "n1", Qualified: "pkg.Func"}, FusedScore: 0.9},
-		},
-	}
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
 
 	explainer := &stubExplainer{
 		chunks: []domain.ExplainChunk{
@@ -228,7 +194,7 @@ func TestQueryServiceQueryWithExplainerSuccess(t *testing.T) {
 	}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, explainer, cfg)
+	svc := NewQueryService(embedder, newStubGraphStore(), explainer, cfg)
 
 	result, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find auth",
@@ -245,14 +211,14 @@ func TestQueryServiceQueryWithExplainerSuccess(t *testing.T) {
 
 func TestQueryServiceQueryWithExplainerFails(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+
+
 	explainer := &stubExplainer{
 		err: errors.New("llm unavailable"),
 	}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, explainer, cfg)
+	svc := NewQueryService(embedder, newStubGraphStore(), explainer, cfg)
 
 	// Explainer failure is non-fatal
 	result, err := svc.Query(context.Background(), QueryRequest{
@@ -268,21 +234,13 @@ func TestQueryServiceQueryWithExplainerFails(t *testing.T) {
 	}
 }
 
-func TestNewQueryServiceWithNonNilStore(t *testing.T) {
-	// When store != nil, NewQueryService creates an internal DataFlowService.
-	// This covers the `if store != nil { qs.flowSvc = ... }` branch.
-	store := newStubGraphStore()
-	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(nil, nil, nil, store, nil, cfg)
-	if svc.flowSvc == nil {
-		t.Error("flowSvc should be set when store is non-nil")
-	}
-}
+// TestNewQueryServiceWithNonNilStore was removed — flowSvc creation was removed
+// from the QueryService constructor in the OpenCodeGraph migration.
 
 func TestQueryServiceQueryWithExplainerChunkError(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-	vectorIdx := &stubVectorIndex{results: []types.ScoredNode{}}
-	textIdx := &stubTextIndex{results: []types.ScoredNode{}}
+
+
 	explainer := &stubExplainer{
 		chunks: []domain.ExplainChunk{
 			{Error: errors.New("stream interrupted")},
@@ -290,7 +248,7 @@ func TestQueryServiceQueryWithExplainerChunkError(t *testing.T) {
 	}
 
 	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10}}
-	svc := NewQueryService(embedder, vectorIdx, textIdx, nil, explainer, cfg)
+	svc := NewQueryService(embedder, newStubGraphStore(), explainer, cfg)
 
 	result, err := svc.Query(context.Background(), QueryRequest{
 		Question: "find",

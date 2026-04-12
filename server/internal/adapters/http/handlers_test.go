@@ -59,15 +59,7 @@ func (s *httpTestGraphStore) DeleteNodesByRepo(_ context.Context, _ string) erro
 func (s *httpTestGraphStore) DeleteNodesByFile(_ context.Context, _, _ string) error { return nil }
 func (s *httpTestGraphStore) UpsertEdge(_ context.Context, _ *types.CodeEdge) error { return nil }
 func (s *httpTestGraphStore) DeleteEdgesForNode(_ context.Context, _ string) error  { return nil }
-func (s *httpTestGraphStore) TraceForward(_ context.Context, _ string, _ int) ([]types.TraceHop, error) {
-	return s.traceHops, nil
-}
-func (s *httpTestGraphStore) TraceReverse(_ context.Context, _ string, _ int) ([]types.TraceHop, error) {
-	return s.traceHops, nil
-}
-func (s *httpTestGraphStore) BlastRadius(_ context.Context, _ string, _ int) ([]types.AffectedNode, error) {
-	return s.affected, s.blastErr
-}
+
 func (s *httpTestGraphStore) UpsertFileBatch(_ context.Context, _ []types.CodeNode, _ []types.CodeEdge) error {
 	return nil
 }
@@ -88,6 +80,12 @@ func (s *httpTestGraphStore) GetSchemaVersion(_ context.Context) (int, error) { 
 func (s *httpTestGraphStore) GetNeighborhood(_ context.Context, _ string) (*domain.Neighborhood, error) {
 	return &domain.Neighborhood{}, nil
 }
+func (s *httpTestGraphStore) TraverseGraph(_ context.Context, _ string, _ []string, _ string, _ int) ([]types.TraceHop, error) {
+	if s.blastErr != nil {
+		return nil, s.blastErr
+	}
+	return s.traceHops, nil
+}
 func (s *httpTestGraphStore) TraceDataFlow(_ context.Context, _ string, _ int, _ string) ([]types.TraceHop, error) {
 	return nil, nil
 }
@@ -95,6 +93,9 @@ func (s *httpTestGraphStore) ListNodeIDs(_ context.Context, _ string) ([]string,
 	return nil, nil
 }
 func (s *httpTestGraphStore) ListAllNodes(_ context.Context, _ string) ([]types.CodeNode, error) {
+	return nil, nil
+}
+func (s *httpTestGraphStore) ListFilePaths(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
 func (s *httpTestGraphStore) ListAllEdges(_ context.Context, _ string) ([]types.CodeEdge, error) {
@@ -122,23 +123,39 @@ func (s *httpTestGraphStore) FindMutations(_ context.Context, _ string, _ string
 	return nil, nil
 }
 
-type httpTestVectorIndex struct {
-	err     error
-	results []types.ScoredNode
+// ── OpenCodeGraph adapter methods ──
+func (s *httpTestGraphStore) PutNode(ctx context.Context, node *types.CodeNode) error {
+	return nil
 }
-
-func (s *httpTestVectorIndex) Search(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
-	return s.results, s.err
+func (s *httpTestGraphStore) FindNode(ctx context.Context, repo, q string) (*types.CodeNode, error) {
+	return s.GetNodeByQualified(ctx, repo, q)
 }
-
-type httpTestTextIndex struct {
-	err     error
-	results []types.ScoredNode
+func (s *httpTestGraphStore) PutEdge(_ context.Context, _ *types.CodeEdge) error   { return nil }
+func (s *httpTestGraphStore) DeleteEdgesFrom(_ context.Context, _ string) error     { return nil }
+func (s *httpTestGraphStore) PutBatch(_ context.Context, _ []types.CodeNode, _ []types.CodeEdge) error {
+	return nil
 }
-
-func (s *httpTestTextIndex) Search(_ context.Context, _ string, _ domain.TextSearchOpts) ([]types.ScoredNode, error) {
-	return s.results, s.err
+func (s *httpTestGraphStore) DeleteByRepo(_ context.Context, _ string) error        { return nil }
+func (s *httpTestGraphStore) DeleteByFile(_ context.Context, _, _ string) error     { return nil }
+func (s *httpTestGraphStore) Neighbors(_ context.Context, _ string) (*domain.Neighborhood, error) {
+	return &domain.Neighborhood{}, nil
 }
+func (s *httpTestGraphStore) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
+	return nil, nil
+}
+func (s *httpTestGraphStore) TextSearch(_ context.Context, _ string, _ domain.TextSearchOpts) ([]types.ScoredNode, error) {
+	return nil, nil
+}
+func (s *httpTestGraphStore) ListNodes(_ context.Context, _ string, _ domain.ListOpts) ([]types.CodeNode, error) {
+	return nil, nil
+}
+func (s *httpTestGraphStore) ListEdges(_ context.Context, _ string, _ []string) ([]types.CodeEdge, error) {
+	return nil, nil
+}
+func (s *httpTestGraphStore) PutRepo(ctx context.Context, repo *types.Repo) error {
+	return s.UpsertRepo(ctx, repo)
+}
+func (s *httpTestGraphStore) DeleteRepo(_ context.Context, _ string) error          { return nil }
 
 type httpTestEmbedder struct {
 	err error
@@ -204,12 +221,9 @@ func newTestServer(store *httpTestGraphStore, embedder *httpTestEmbedder, explai
 		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
 		BatchSize: 10,
 	}
-	vi := &httpTestVectorIndex{}
-	ti := &httpTestTextIndex{}
-
 	indexSvc := app.NewIndexService(&httpTestWalker{}, &httpTestParser{}, embedder, store, nil, cfg)
-	querySvc := app.NewQueryService(embedder, vi, ti, store, explainer, cfg)
-	traceSvc := app.NewTraceService(store, embedder, vi, explainer, cfg)
+	querySvc := app.NewQueryService(embedder, store, explainer, cfg)
+	traceSvc := app.NewTraceService(store, embedder, explainer, cfg)
 	blastSvc := app.NewBlastService(store, explainer, cfg)
 	repoSvc := app.NewRepoService(store)
 
@@ -588,8 +602,8 @@ func TestNewServer_RegistersRoutes(t *testing.T) {
 	if srv.router == nil {
 		t.Fatal("router is nil")
 	}
-	if srv.jobs == nil {
-		t.Fatal("jobs store is nil")
+	if srv.trackers == nil {
+		t.Fatal("trackers store is nil")
 	}
 }
 
@@ -686,47 +700,33 @@ func TestHandleIndexStatus_Found(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// indexJobStore
+// indexTrackerStore
 // ---------------------------------------------------------------------------
 
-func TestIndexJobStore_SetGetUpdate(t *testing.T) {
-	store := newIndexJobStore()
+func TestIndexTrackerStore_SetGet(t *testing.T) {
+	store := newIndexTrackerStore()
 
-	job := &IndexJob{ID: "j1", Status: "indexing", RepoSlug: "r", StartedAt: time.Now()}
-	store.set(job)
+	tracker := app.NewIndexTracker("j1", "repo/test", types.IndexConfig{EmbedProvider: "ollama"})
+	store.set("j1", tracker)
 
 	got, ok := store.get("j1")
 	if !ok {
-		t.Fatal("job not found")
+		t.Fatal("tracker not found")
 	}
-	if got.Status != "indexing" {
-		t.Errorf("status = %q, want indexing", got.Status)
+	snap := got.Snapshot()
+	if snap.Status != "indexing" {
+		t.Errorf("status = %q, want indexing", snap.Status)
 	}
-
-	ok = store.update("j1", func(j *IndexJob) { j.Status = "completed" })
-	if !ok {
-		t.Fatal("update returned false")
-	}
-
-	got, _ = store.get("j1")
-	if got.Status != "completed" {
-		t.Errorf("status = %q, want completed", got.Status)
+	if snap.Config.EmbedProvider != "ollama" {
+		t.Errorf("embed_provider = %q, want ollama", snap.Config.EmbedProvider)
 	}
 }
 
-func TestIndexJobStore_UpdateMissing(t *testing.T) {
-	store := newIndexJobStore()
-	ok := store.update("nonexistent", func(j *IndexJob) { j.Status = "x" })
-	if ok {
-		t.Error("update should return false for missing job")
-	}
-}
-
-func TestIndexJobStore_GetMissing(t *testing.T) {
-	store := newIndexJobStore()
+func TestIndexTrackerStore_GetMissing(t *testing.T) {
+	store := newIndexTrackerStore()
 	_, ok := store.get("missing")
 	if ok {
-		t.Error("get should return false for missing job")
+		t.Error("get should return false for missing tracker")
 	}
 }
 

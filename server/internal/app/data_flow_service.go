@@ -16,14 +16,14 @@ import (
 // a structured GraphContext string that the LLM explainer uses to understand
 // how data flows through the codebase.
 type DataFlowService struct {
-	store domain.GraphStore
+	graph domain.OpenCodeGraph
 	log   *slog.Logger
 }
 
 // NewDataFlowService creates a new DataFlowService.
-func NewDataFlowService(store domain.GraphStore) *DataFlowService {
+func NewDataFlowService(graph domain.OpenCodeGraph) *DataFlowService {
 	return &DataFlowService{
-		store: store,
+		graph: graph,
 		log:   slog.Default().With("service", "dataflow"),
 	}
 }
@@ -47,7 +47,7 @@ func (df *DataFlowService) BuildFlowContext(ctx context.Context, results []types
 			continue
 		}
 
-		nb, err := df.store.GetNeighborhood(ctx, n.ID)
+		nb, err := df.graph.Neighbors(ctx, n.ID)
 		if err != nil || nb == nil || nb.IsEmpty() {
 			continue
 		}
