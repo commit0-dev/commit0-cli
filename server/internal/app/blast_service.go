@@ -64,10 +64,10 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 		req.MaxDepth = 5 // cap at 5 — deeper traversals are exponentially slower
 	}
 
-	// Resolve symbol
-	target, err := bs.graph.FindNode(ctx, req.RepoSlug, req.Symbol)
+	// Resolve symbol using shared resolver (returns AmbiguousSymbolError on multiple matches).
+	target, err := ResolveSymbol(ctx, bs.graph, nil, req.RepoSlug, req.Symbol)
 	if err != nil {
-		return nil, domain.NotFound(fmt.Sprintf("symbol %s not found", req.Symbol))
+		return nil, err
 	}
 
 	// Get blast radius — label-parameterized reverse traversal (OpenCodeGraph §3)

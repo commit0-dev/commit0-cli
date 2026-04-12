@@ -357,6 +357,13 @@ func writeSSE(c *gin.Context, event string, data interface{}) {
 
 // writeError maps domain errors to appropriate HTTP error responses.
 func writeError(c *gin.Context, err error) {
+	// Ambiguous symbol — 400 with candidates list.
+	var ambig *types.AmbiguousSymbolError
+	if errors.As(err, &ambig) {
+		c.JSON(http.StatusBadRequest, gin.H{"message": ambig.Error(), "candidates": ambig.Candidates})
+		return
+	}
+
 	var de *domain.DomainError
 	if errors.As(err, &de) {
 		switch de.Code {

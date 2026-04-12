@@ -145,49 +145,9 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 	}, nil
 }
 
-// resolveSymbol resolves a symbol to a code node.
+// resolveSymbol resolves a symbol to a code node using the shared resolver.
 func (ts *TraceService) resolveSymbol(ctx context.Context, repo, symbol string) (*types.CodeNode, error) {
-	// Try direct lookup
-	node, err := ts.graph.FindNode(ctx, repo, symbol)
-	if err == nil && node != nil {
-		return node, nil
-	}
-
-	// Fallback: suffix match — try all nodes ending with ".Symbol"
-	// This handles partial names like "ImportBundle" → "app.SyncService.ImportBundle"
-	allNodes, listErr := ts.graph.ListNodes(ctx, repo, domain.ListOpts{})
-	if listErr == nil {
-		suffix := "." + symbol
-		for i := range allNodes {
-			if len(allNodes[i].Qualified) > len(suffix) &&
-				allNodes[i].Qualified[len(allNodes[i].Qualified)-len(suffix):] == suffix {
-				return &allNodes[i], nil
-			}
-		}
-	}
-
-	// Fallback: vector search via OpenCodeGraph
-	if ts.embedder != nil && ts.graph != nil {
-		query, err := ts.embedder.EmbedQuery(ctx, symbol)
-		if err != nil {
-			return nil, fmt.Errorf("embed symbol: %w", err)
-		}
-
-		results, err := ts.graph.VectorSearch(ctx, query, domain.VectorSearchOpts{
-			RepoSlug: repo,
-			TopK:     1,
-			MinScore: 0.5,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("vector search: %w", err)
-		}
-
-		if len(results) > 0 {
-			return &results[0].Node, nil
-		}
-	}
-
-	return nil, domain.NotFound(fmt.Sprintf("symbol %s not found", symbol))
+	return ResolveSymbol(ctx, ts.graph, ts.embedder, repo, symbol)
 }
 
 // dedupHops removes duplicate nodes from trace results, keeping the first occurrence.

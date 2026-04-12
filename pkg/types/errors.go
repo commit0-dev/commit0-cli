@@ -78,3 +78,25 @@ func AuthFailed(msg string) *DomainError {
 func OutOfScope(msg string) *DomainError {
 	return &DomainError{Code: ErrOutOfScope, Message: msg}
 }
+
+// AmbiguousSymbolError is returned when a short symbol name matches
+// multiple nodes. It carries the candidates so the caller can display them.
+type AmbiguousSymbolError struct {
+	Symbol     string
+	Candidates []SymbolCandidate
+}
+
+// SymbolCandidate is one match for an ambiguous symbol lookup.
+type SymbolCandidate struct {
+	Qualified string
+	FilePath  string
+	StartLine int
+}
+
+func (e *AmbiguousSymbolError) Error() string {
+	msg := fmt.Sprintf("%q matches %d symbols. Use the full qualified name:\n", e.Symbol, len(e.Candidates))
+	for _, c := range e.Candidates {
+		msg += fmt.Sprintf("  %s  %s:%d\n", c.Qualified, c.FilePath, c.StartLine)
+	}
+	return msg
+}

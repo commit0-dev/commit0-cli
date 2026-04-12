@@ -91,6 +91,13 @@ DEFINE ANALYZER IF NOT EXISTS nl_analyzer TOKENIZERS blank FILTERS lowercase, as
 		}
 	}
 
+	// Verify HNSW indexes are operational on this connection.
+	// SurrealDB WebSocket connections may not see indexes created in the
+	// same session until a query forces a refresh.
+	if err := a.verifyHNSWIndexes(ctx, embedDim); err != nil {
+		a.log.Warn("HNSW index verification failed", "err", err)
+	}
+
 	// Stamp the actual code version into the DB so the next startup skips DDL.
 	versionQ := fmt.Sprintf("INSERT INTO schema_version (version) VALUES (%d) ON DUPLICATE KEY UPDATE version = %d;", schemaVersion, schemaVersion)
 	if _, err := surrealdb.Query[any](ctx, a.db, versionQ, nil); err != nil {
@@ -98,6 +105,43 @@ DEFINE ANALYZER IF NOT EXISTS nl_analyzer TOKENIZERS blank FILTERS lowercase, as
 	}
 
 	a.log.Info("schema applied", "version", schemaVersion, "statements", len(stmts))
+	return nil
+}
+
+// verifyHNSWIndexes confirms each HNSW vector index is operational by
+// running a probe ANN query. If a probe fails, the index is recreated
+// on the current connection.
+func (a *SurrealAdapter) verifyHNSWIndexes(ctx context.Context, embedDim int) error {
+	tables := []struct {
+		name string
+		idx  string
+		efc  int
+	}{
+		{"function", "fn_vec_idx", 200},
+		{"class", "cls_vec_idx", 200},
+		{"file", "file_vec_idx", 150},
+		{"module", "mod_vec_idx", 150},
+	}
+
+	zeroVec := make([]float32, embedDim)
+
+	for _, t := range tables {
+		probe := fmt.Sprintf("SELECT id FROM `%s` WHERE embedding <|1,40|> $q LIMIT 1;", t.name)
+		_, err := surrealdb.Query[any](ctx, a.db, probe, map[string]any{"q": zeroVec})
+		if err == nil {
+			continue
+		}
+
+		a.log.Warn("HNSW index not operational, recreating", "table", t.name, "err", err)
+		recreate := fmt.Sprintf(
+			"DEFINE INDEX OVERWRITE %s ON `%s` FIELDS embedding HNSW DIMENSION %d DIST COSINE TYPE F32 EFC %d M 16;",
+			t.idx, t.name, embedDim, t.efc)
+		if _, rErr := surrealdb.Query[any](ctx, a.db, recreate, nil); rErr != nil {
+			return fmt.Errorf("recreate HNSW %s: %w", t.name, rErr)
+		}
+	}
+
+	a.log.Info("HNSW indexes verified", "tables", len(tables))
 	return nil
 }
 

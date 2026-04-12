@@ -24,6 +24,17 @@ const (
 	EdgeInherits EdgeKind = "inherits"
 	EdgeUses     EdgeKind = "uses"
 
+	// EdgeConstructs records a construction/initialization call — A creates or
+	// configures B during init. Distinguished from runtime calls because changing
+	// B's internals does not require changing A's wiring.
+	// Classified by CallLinker when caller is a constructor (New*), init, main, or wire*.
+	EdgeConstructs EdgeKind = "constructs"
+
+	// EdgeTests records a test invocation — A verifies B. Not a production
+	// dependency. Classified by CallLinker when caller is in a _test.go file
+	// or named Test*/Benchmark*.
+	EdgeTests EdgeKind = "tests"
+
 	// EdgeDataFlow records that a function passes a specific argument to a named
 	// parameter of another function. Metadata keys: "param_name", "arg_expr", "arg_type".
 	// Enhanced with: "field_path", "mutation_type", "mutation_expr", "mutation_line".

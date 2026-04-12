@@ -19,6 +19,9 @@ const (
 	ErrOutOfScope    = types.ErrOutOfScope
 )
 
+type AmbiguousSymbolError = types.AmbiguousSymbolError
+type SymbolCandidate = types.SymbolCandidate
+
 var (
 	NotFound      = types.NotFound
 	RateLimit     = types.RateLimit

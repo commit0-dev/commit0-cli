@@ -106,30 +106,9 @@ func (s *FieldFlowService) TraceFieldFlow(ctx context.Context, req FieldFlowRequ
 	}, nil
 }
 
-// resolveSymbol finds a node by qualified name, falling back to vector search.
+// resolveSymbol finds a node using the shared resolver.
 func (s *FieldFlowService) resolveSymbol(ctx context.Context, repoSlug, symbol string) (*types.CodeNode, error) {
-	// Direct lookup
-	node, err := s.graph.FindNode(ctx, repoSlug, symbol)
-	if err == nil && node != nil {
-		return node, nil
-	}
-
-	// Vector search fallback
-	if s.embedder != nil && s.graph != nil {
-		vec, err := s.embedder.EmbedQuery(ctx, symbol)
-		if err == nil {
-			hits, err := s.graph.VectorSearch(ctx, vec, domain.VectorSearchOpts{
-				RepoSlug: repoSlug,
-				TopK:     1,
-				MinScore: 0.5,
-			})
-			if err == nil && len(hits) > 0 {
-				return &hits[0].Node, nil
-			}
-		}
-	}
-
-	return nil, domain.NotFound("symbol not found: " + symbol)
+	return ResolveSymbol(ctx, s.graph, s.embedder, repoSlug, symbol)
 }
 
 // buildFieldFlowChains converts TraceHops into FieldFlowChains,
