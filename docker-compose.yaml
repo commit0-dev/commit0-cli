@@ -49,7 +49,7 @@ services:
       SURREAL_USER: ${SURREAL_USER:-root}
       SURREAL_PASS: ${SURREAL_PASS:-root}
       OLLAMA_URL: http://host.docker.internal:11434
-      OLLAMA_EMBED_MODEL: nomic-embed-text  # temp: switch back until qwen3-embedding:4b finishes downloading
+      OLLAMA_EMBED_MODEL: qwen3-embedding:4b  # temp: switch back until qwen3-embedding:4b finishes downloading
     ports:
       - "${SERVER_PORT:-8080}:8080"
     depends_on:
@@ -63,6 +63,29 @@ services:
       start_period: 15s
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # ── Unsloth via vLLM (optional, GPU required) ──────────────────────────────
+  # Usage: docker compose --profile unsloth up -d
+  # Then set LLM_PROVIDER=unsloth and UNSLOTH_URL=http://unsloth:8000/v1
+  unsloth:
+    image: vllm/vllm-openai:latest
+    restart: unless-stopped
+    command: >
+      --model ${UNSLOTH_MODEL:-unsloth/gemma-3-4b}
+      --max-model-len ${UNSLOTH_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization 0.90
+      --dtype auto
+    ports:
+      - "${UNSLOTH_PORT:-8000}:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - unsloth
 
 volumes:
   surreal_data:
