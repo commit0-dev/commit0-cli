@@ -525,7 +525,7 @@ func TestReembedNeighborhoodHappyPath(t *testing.T) {
 	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
-	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo", nil)
 	if err != nil {
 		t.Fatalf("ReembedNeighborhood failed: %v", err)
 	}
@@ -541,7 +541,7 @@ func TestReembedNeighborhoodListIDsError(t *testing.T) {
 	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, nil, store, nil, cfg)
 
-	_, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	_, err := svc.ReembedNeighborhood(context.Background(), "my-repo", nil)
 	if err == nil {
 		t.Fatal("expected error from ListNodeIDs failure")
 	}
@@ -560,7 +560,7 @@ func TestReembedNeighborhoodGetNodeError(t *testing.T) {
 	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
-	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo", nil)
 	if err != nil {
 		t.Fatalf("ReembedNeighborhood should not return error on get-node failure: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestReembedNeighborhoodEmbedError(t *testing.T) {
 	cfg := &config.Config{Index: config.IndexConfig{}}
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
-	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo", nil)
 	if err != nil {
 		t.Fatalf("ReembedNeighborhood should not fail on embed error: %v", err)
 	}
@@ -610,7 +610,7 @@ func TestReembedNeighborhoodUpsertError(t *testing.T) {
 	failStore := &upsertFailStore{stubGraphStore: goodStore}
 	svc2 := NewIndexService(nil, nil, embedder, failStore, nil, cfg)
 
-	result, err := svc2.ReembedNeighborhood(context.Background(), "my-repo")
+	result, err := svc2.ReembedNeighborhood(context.Background(), "my-repo", nil)
 	if err != nil {
 		t.Fatalf("ReembedNeighborhood should not fail on upsert error: %v", err)
 	}
@@ -633,7 +633,7 @@ func TestReembedNeighborhoodDefaultBatchSize(t *testing.T) {
 	cfg := &config.Config{BatchSize: 0} // triggers default=100
 	svc := NewIndexService(nil, nil, embedder, store, nil, cfg)
 
-	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo")
+	result, err := svc.ReembedNeighborhood(context.Background(), "my-repo", nil)
 	if err != nil {
 		t.Fatalf("ReembedNeighborhood failed: %v", err)
 	}

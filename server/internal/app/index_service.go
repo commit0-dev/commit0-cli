@@ -447,6 +447,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 				}
 				return nil // non-fatal store error
 			}
+			run.trackChanged(embedded.Nodes, embedded.Edges)
 			if is.tracker != nil {
 				is.tracker.AddStored(len(embedded.Nodes), len(embedded.Edges))
 				is.tracker.IncrStage(types.StageStore, len(embedded.Nodes))
@@ -476,9 +477,9 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		},
 	}
 
-	// Neighborhood re-embedding pass: now that all nodes and edges are stored,
-	// re-embed every node with full graph context (callers, callees, data-flow).
-	// Skip on --reparse/--fast: reembed is expensive (re-embeds ALL nodes with graph context).
+	// Neighborhood re-embedding pass: re-embed nodes whose edges changed this run
+	// so their embeddings include up-to-date graph context (callers, callees, data-flow).
+	// Skip on --reparse/--fast.
 	if req.Reparse || req.Fast {
 		is.log.Info("skipping neighborhood re-embed (fast/reparse mode)", "repo", req.RepoSlug)
 		if is.tracker != nil {
@@ -488,7 +489,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		if is.tracker != nil {
 			is.tracker.StartStage(types.StageReembed)
 		}
-		if _, err := is.ReembedNeighborhood(ctx, req.RepoSlug); err != nil {
+		if _, err := is.ReembedNeighborhood(ctx, req.RepoSlug, run.changedNodeIDs); err != nil {
 			is.log.Warn("neighborhood reembed failed", "repo", req.RepoSlug, "err", err)
 			if is.tracker != nil {
 				is.tracker.FailStage(types.StageReembed, err.Error())
@@ -587,37 +588,50 @@ type ReembedResult struct {
 	Timing       types.TimingInfo
 }
 
-// ReembedNeighborhood re-embeds all nodes for repoSlug using graph-context
-// (callers, callees, data-flow neighbors). Safe to call after the main Index
-// pipeline completes — that is when edges are present in the store.
-func (is *IndexService) ReembedNeighborhood(ctx context.Context, repoSlug string) (*ReembedResult, error) {
+// ReembedNeighborhood re-embeds nodes whose edges changed this run, using
+// graph-context (callers, callees, data-flow neighbors). If changedIDs is nil
+// or empty, all nodes are re-embedded (full reindex behavior).
+func (is *IndexService) ReembedNeighborhood(ctx context.Context, repoSlug string, changedIDs map[string]struct{}) (*ReembedResult, error) {
 	start := time.Now()
-
-	// Builder with store so ForNodeCtx enriches context with graph neighbors.
 	builder := NewContextBuilderWithGraph(32768, is.graph)
-
-	ids, err := is.graph.ListNodes(ctx, repoSlug, domain.ListOpts{IDsOnly: true})
-	if err != nil {
-		return nil, fmt.Errorf("list node ids: %w", err)
-	}
 
 	batchSize := is.cfg.BatchSize
 	if batchSize <= 0 {
 		batchSize = 100
 	}
 
-	var updated int
+	// Determine which nodes to re-embed. If we have a changed set, use it.
+	// Otherwise fall back to all nodes (first index or forced full reembed).
+	var targetIDs []string
+	if len(changedIDs) > 0 {
+		for id := range changedIDs {
+			targetIDs = append(targetIDs, id)
+		}
+		is.log.Info("incremental reembed", "changed_nodes", len(targetIDs), "repo", repoSlug)
+	} else {
+		allNodes, err := is.graph.ListNodes(ctx, repoSlug, domain.ListOpts{IDsOnly: true})
+		if err != nil {
+			return nil, fmt.Errorf("list node ids: %w", err)
+		}
+		for _, n := range allNodes {
+			targetIDs = append(targetIDs, n.ID)
+		}
+		is.log.Info("full reembed (no change tracking)", "total_nodes", len(targetIDs), "repo", repoSlug)
+	}
 
-	// Process IDs in chunks matching the Gemini batch size.
-	for i := 0; i < len(ids); i += batchSize {
-		end := min(i+batchSize, len(ids))
-		chunk := ids[i:end]
+	if len(targetIDs) == 0 {
+		return &ReembedResult{Timing: types.TimingInfo{TotalMS: time.Since(start).Milliseconds()}}, nil
+	}
+
+	var updated int
+	for i := 0; i < len(targetIDs); i += batchSize {
+		end := min(i+batchSize, len(targetIDs))
+		chunk := targetIDs[i:end]
 
 		nodes := make([]types.CodeNode, 0, len(chunk))
 		for _, id := range chunk {
-			node, err := is.graph.GetNode(ctx, id.ID)
+			node, err := is.graph.GetNode(ctx, id)
 			if err != nil {
-				is.log.Warn("reembed: get node", "id", id, "err", err)
 				continue
 			}
 			nodes = append(nodes, *node)
@@ -633,8 +647,8 @@ func (is *IndexService) ReembedNeighborhood(ctx context.Context, repoSlug string
 			continue
 		}
 
-		for i := range enriched {
-			n := enriched[i]
+		for j := range enriched {
+			n := enriched[j]
 			if err := is.graph.PutNode(ctx, &n); err != nil {
 				is.log.Warn("reembed: upsert", "id", n.ID, "err", err)
 				continue
@@ -666,12 +680,13 @@ func (is *IndexService) IndexWithProgress(ctx context.Context, req IndexRequest,
 
 // indexRun tracks statistics during indexing.
 type indexRun struct {
-	mu           sync.Mutex
-	filesIndexed int
-	nodesCreated int
-	edgesCreated int
-	errors       int
-	onProgress   ProgressFunc
+	mu             sync.Mutex
+	filesIndexed   int
+	nodesCreated   int
+	edgesCreated   int
+	errors         int
+	onProgress     ProgressFunc
+	changedNodeIDs map[string]struct{} // node IDs stored this run (for incremental reembed)
 }
 
 func (r *indexRun) addFilesIndexed(n int) {
@@ -702,6 +717,21 @@ func (r *indexRun) addError() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.errors++
+}
+
+func (r *indexRun) trackChanged(nodes []types.CodeNode, edges []types.CodeEdge) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.changedNodeIDs == nil {
+		r.changedNodeIDs = make(map[string]struct{})
+	}
+	for _, n := range nodes {
+		r.changedNodeIDs[n.ID] = struct{}{}
+	}
+	for _, e := range edges {
+		r.changedNodeIDs[e.FromID] = struct{}{}
+		r.changedNodeIDs[e.ToID] = struct{}{}
+	}
 }
 
 // embeddedFile holds nodes with embeddings and edges.

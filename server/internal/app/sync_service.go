@@ -153,7 +153,7 @@ func (s *SyncService) ImportBundle(ctx context.Context, bundle *types.GraphBundl
 	// Trigger async re-embed for imported nodes.
 	if result.NodesImported > 0 && s.indexSvc != nil {
 		go func() {
-			reembedResult, err := s.indexSvc.ReembedNeighborhood(context.Background(), bundle.RepoSlug)
+			reembedResult, err := s.indexSvc.ReembedNeighborhood(context.Background(), bundle.RepoSlug, nil)
 			if err != nil {
 				s.log.Warn("re-embed after import failed", "repo", bundle.RepoSlug, "err", err)
 			} else {

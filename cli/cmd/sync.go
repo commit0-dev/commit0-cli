@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -36,12 +37,14 @@ var syncExportCmd = &cobra.Command{
 			bundle.RepoSlug, len(bundle.Nodes), len(bundle.Edges))
 		fmt.Fprintf(os.Stderr, "ContentHash: %s\n", bundle.ContentHash)
 
-		// For now, write the JSON response. In Sub-Phase C, this will use CBOR.
-		data, err := os.ReadFile(output)
-		_ = data
-		// The actual CBOR encoding happens server-side; here we just save the response.
-		// TODO: Use sdk.SyncExportRaw() that returns CBOR bytes directly.
-		fmt.Fprintf(os.Stderr, "Bundle info saved (use server-side export for CBOR file)\n")
+		data, err := json.Marshal(bundle)
+		if err != nil {
+			return fmt.Errorf("marshal bundle: %w", err)
+		}
+		if err := os.WriteFile(output, data, 0644); err != nil {
+			return fmt.Errorf("write bundle: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Written to %s (%d bytes)\n", output, len(data))
 		return nil
 	},
 }
