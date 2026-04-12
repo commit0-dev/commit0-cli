@@ -12,7 +12,7 @@ import (
 // Config holds all application configuration.
 type Config struct {
 	EmbedProvider string // "gemini" (default), "voyage", or "ollama"
-	LLMProvider   string // "gemini" (default), "openrouter", or "ollama"
+	LLMProvider   string // "gemini" (default), "openrouter", "ollama", or "unsloth"
 	EmbedDim      int    // Normalized HNSW dimension for all providers (default 1024, env: EMBED_DIM)
 	BatchSize     int    // Embedding batch size for all providers (default 100, env: BATCH_SIZE)
 	Surreal       SurrealConfig
@@ -20,6 +20,7 @@ type Config struct {
 	Voyage        VoyageConfig
 	Ollama        OllamaConfig
 	OpenRouter    OpenRouterConfig
+	Unsloth       UnslothConfig
 	Server     ServerConfig
 	Index      IndexConfig
 	Query      QueryConfig
@@ -45,6 +46,15 @@ type OpenRouterConfig struct {
 	BaseURL   string // env: OPENROUTER_BASE_URL (default: https://openrouter.ai/api/v1)
 	Model     string // env: OPENROUTER_MODEL (default: google/gemini-2.5-flash-preview)
 	MaxTokens int    // env: OPENROUTER_MAX_TOKENS (default: 8192)
+}
+
+// UnslothConfig holds settings for Unsloth-served models (via vLLM or llama.cpp).
+// Both serve an OpenAI-compatible /v1/chat/completions endpoint.
+type UnslothConfig struct {
+	URL        string // Server URL (env: UNSLOTH_URL, default: http://localhost:8000/v1)
+	Model      string // Model identifier (env: UNSLOTH_MODEL)
+	APIKey     string // Optional API key (env: UNSLOTH_API_KEY, default: "sk-no-key-required")
+	TimeoutSec int    // HTTP request timeout (env: UNSLOTH_TIMEOUT_SEC, default: 300)
 }
 
 // OllamaConfig holds local Ollama settings for LLM and embeddings.
@@ -154,6 +164,12 @@ func Load(cfgPath string) (*Config, error) {
 			Model:     v.GetString("openrouter.model"),
 			MaxTokens: v.GetInt("openrouter.max_tokens"),
 		},
+		Unsloth: UnslothConfig{
+			URL:        v.GetString("unsloth.url"),
+			Model:      v.GetString("unsloth.model"),
+			APIKey:     v.GetString("unsloth.api_key"),
+			TimeoutSec: v.GetInt("unsloth.timeout_sec"),
+		},
 		Ollama: OllamaConfig{
 			URL:          v.GetString("ollama.url"),
 			Model:        v.GetString("ollama.model"),
@@ -262,6 +278,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ollama.timeout_sec", 300)
 	v.SetDefault("ollama.keep_alive_sec", 600)
 
+	v.SetDefault("unsloth.url", "http://localhost:8000/v1")
+	v.SetDefault("unsloth.model", "")
+	v.SetDefault("unsloth.api_key", "sk-no-key-required")
+	v.SetDefault("unsloth.timeout_sec", 300)
+
 	v.SetDefault("voyage.model", "voyage-code-3")
 	v.SetDefault("voyage.base_url", "https://api.voyageai.com/v1")
 
@@ -314,6 +335,11 @@ func bindEnvs(v *viper.Viper) {
 		"ollama.top_k":         "OLLAMA_TOP_K",
 		"ollama.timeout_sec":   "OLLAMA_TIMEOUT_SEC",
 		"ollama.keep_alive_sec": "OLLAMA_KEEP_ALIVE_SEC",
+
+		"unsloth.url":         "UNSLOTH_URL",
+		"unsloth.model":       "UNSLOTH_MODEL",
+		"unsloth.api_key":     "UNSLOTH_API_KEY",
+		"unsloth.timeout_sec": "UNSLOTH_TIMEOUT_SEC",
 
 		"voyage.api_key": "VOYAGE_API_KEY",
 		"voyage.model":   "VOYAGE_MODEL",
