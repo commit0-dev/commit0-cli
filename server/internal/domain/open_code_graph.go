@@ -13,7 +13,6 @@ import (
 // TextIndex (1), FieldFlowStore (2) — consolidated into 23 methods.
 //
 // Design: docs/OPEN_CODE_GRAPH.md
-// Migration: docs/OPEN_CODE_GRAPH_MIGRATION.md
 //
 // Uses existing types (CodeNode, CodeEdge, Neighborhood) for zero-friction
 // service migration. GraphNode/GraphEdge types exist for SDK/future use.
