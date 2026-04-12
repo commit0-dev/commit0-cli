@@ -274,6 +274,23 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 				)
 			}
 		}
+	case "unsloth":
+		if cfg.Unsloth.Model != "" {
+			cm, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+				APIKey:  cfg.Unsloth.APIKey,
+				BaseURL: cfg.Unsloth.URL,
+				Model:   cfg.Unsloth.Model,
+			})
+			if err != nil {
+				log.Warn("failed to create Unsloth chat model", "err", err)
+			} else {
+				chatModel = cm
+				log.Info("using Unsloth LLM for agent",
+					"model", cfg.Unsloth.Model,
+					"url", cfg.Unsloth.URL,
+				)
+			}
+		}
 	default:
 		// Gemini fallback — use eino-ext openai model pointed at Gemini's OpenAI-compatible endpoint,
 		// or create via Gemini genai client. For now, use OpenAI-compatible approach if API key is set.
