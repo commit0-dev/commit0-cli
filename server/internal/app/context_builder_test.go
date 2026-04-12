@@ -10,7 +10,7 @@ import (
 )
 
 func TestContextBuilderForFunction(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	node := &types.CodeNode{
 		Kind:      types.NodeFunction,
 		Qualified: "pkg.Handler",
@@ -37,7 +37,7 @@ func TestContextBuilderForFunction(t *testing.T) {
 }
 
 func TestContextBuilderForFunctionWithSummary(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	node := &types.CodeNode{
 		Kind:      types.NodeFunction,
 		Qualified: "pkg.Handler",
@@ -60,7 +60,7 @@ func TestContextBuilderForFunctionWithSummary(t *testing.T) {
 }
 
 func TestContextBuilderForFunctionNoSignatureNoDoc(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	node := &types.CodeNode{
 		Kind:      types.NodeFunction,
 		Qualified: "pkg.Func",
@@ -84,7 +84,7 @@ func TestContextBuilderForFunctionNoSignatureNoDoc(t *testing.T) {
 }
 
 func TestContextBuilderForClass(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	node := &types.CodeNode{
 		Kind:      types.NodeClass,
 		Qualified: "pkg.User",
@@ -105,7 +105,7 @@ func TestContextBuilderForClass(t *testing.T) {
 }
 
 func TestContextBuilderForFile(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	node := &types.CodeNode{
 		Kind:     types.NodeFile,
 		FilePath: "main.go",
@@ -121,7 +121,7 @@ func TestContextBuilderForFile(t *testing.T) {
 }
 
 func TestContextBuilderForModule(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	node := &types.CodeNode{
 		Kind:      types.NodeModule,
 		Name:      "utils",
@@ -139,7 +139,7 @@ func TestContextBuilderForModule(t *testing.T) {
 }
 
 func TestContextBuilderForQuery(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	result := cb.ForQuery("where is the error handler?")
 
 	if !strings.Contains(result, "task: code retrieval | query:") {
@@ -150,53 +150,53 @@ func TestContextBuilderForQuery(t *testing.T) {
 	}
 }
 
-func TestContextBuilderTruncate(t *testing.T) {
-	cb := NewContextBuilder(10)
-	result := cb.truncate("This is a very long text", 10)
+func TestTruncate(t *testing.T) {
+	result := truncate("This is a very long text", 10)
 	if len([]rune(result)) > 10 {
 		t.Errorf("truncate(%d) returned too many runes", 10)
 	}
 }
 
-func TestContextBuilderTruncateZeroMax(t *testing.T) {
-	cb := NewContextBuilder(1000)
-	if cb.truncate("hello", 0) != "" {
+func TestTruncateZeroMax(t *testing.T) {
+	if truncate("hello", 0) != "" {
 		t.Error("truncate with maxRunes=0 should return empty")
 	}
 }
 
-func TestContextBuilderTruncateUnicode(t *testing.T) {
-	cb := NewContextBuilder(1000)
-	result := cb.truncate("Hello 世界 🌍 こんにちは", 5)
+func TestTruncateUnicode(t *testing.T) {
+	result := truncate("Hello 世界 🌍 こんにちは", 5)
 	if len([]rune(result)) > 5 {
 		t.Error("truncate should count runes, not bytes")
 	}
 }
 
 func TestContextBuilderNilNode(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	if cb.ForNode(nil) != "" {
 		t.Error("ForNode(nil) should return empty string")
 	}
 }
 
-func TestContextBuilderDefaultMaxBodyRunes(t *testing.T) {
-	cb := NewContextBuilder(0)
-	if cb.maxBodyRunes != 32768 {
-		t.Errorf("maxBodyRunes = %d, want 32768", cb.maxBodyRunes)
+func TestDefaultEmbedBudget(t *testing.T) {
+	b := domain.DefaultEmbedBudget(2048)
+	if b.Total <= 0 {
+		t.Error("DefaultEmbedBudget should have positive Total")
+	}
+	if b.Body <= 0 {
+		t.Error("DefaultEmbedBudget should allocate Body budget")
 	}
 }
 
 func TestContextBuilderWithStoreNilNode(t *testing.T) {
 	store := newStubGraphStore()
-	cb := NewContextBuilderWithGraph(1000, store)
+	cb := NewContextBuilderWithGraph(domain.DefaultEmbedBudget(500), store)
 	if cb.ForNodeCtx(context.Background(), nil) != "" {
 		t.Error("ForNodeCtx(nil) should return empty string")
 	}
 }
 
 func TestContextBuilderForNodeCtxNoStore(t *testing.T) {
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "pkg.F", Language: "go",
 		FilePath: "f.go", ID: "function:pkg⋅F", Body: "func F() {}",
@@ -210,7 +210,7 @@ func TestContextBuilderForNodeCtxNoStore(t *testing.T) {
 
 func TestContextBuilderForNodeCtxNoID(t *testing.T) {
 	store := newStubGraphStore()
-	cb := NewContextBuilderWithGraph(1000, store)
+	cb := NewContextBuilderWithGraph(domain.DefaultEmbedBudget(500), store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "pkg.F", Language: "go",
 		FilePath: "f.go", ID: "", Body: "func F() {}",
@@ -227,7 +227,7 @@ func TestContextBuilderForNodeCtxWithNeighborhood(t *testing.T) {
 		Callees: []domain.NeighborNode{{Qualified: "pkg.G", Signature: "(x int) error"}},
 		Callers: []domain.NeighborNode{{Qualified: "pkg.H"}},
 	}
-	cb := NewContextBuilderWithGraph(1000, store)
+	cb := NewContextBuilderWithGraph(domain.DefaultEmbedBudget(500), store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "pkg.F", Language: "go",
 		FilePath: "f.go", ID: "function:pkg⋅F", Body: "func F() {}",
@@ -251,7 +251,7 @@ func TestContextBuilderForNodeCtxWithNeighborhood(t *testing.T) {
 
 func TestContextBuilderForNodeCtxEmptyNeighborhood(t *testing.T) {
 	store := newStubGraphStore()
-	cb := NewContextBuilderWithGraph(1000, store)
+	cb := NewContextBuilderWithGraph(domain.DefaultEmbedBudget(500), store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "pkg.H", Language: "go",
 		FilePath: "h.go", ID: "function:pkg⋅H", Body: "func H() {}",
@@ -272,7 +272,7 @@ func TestContextBuilderForNodeCtxDataFlow(t *testing.T) {
 		Reads:       []string{"User.Email"},
 		Writes:      []string{"User.UpdatedAt"},
 	}
-	cb := NewContextBuilderWithGraph(1000, store)
+	cb := NewContextBuilderWithGraph(domain.DefaultEmbedBudget(500), store)
 	node := &types.CodeNode{
 		Kind: types.NodeFunction, Qualified: "svc.Update", Language: "go",
 		FilePath: "svc.go", ID: "function:svc⋅Update", Body: "func Update() {}",

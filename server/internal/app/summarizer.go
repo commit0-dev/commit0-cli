@@ -183,55 +183,51 @@ func (s *Summarizer) summarizeSingle(ctx context.Context, n *types.CodeNode) {
 	n.Concepts = result.Concepts
 }
 
-// buildBatchPrompt creates a prompt for summarizing multiple nodes at once.
+// summarizeBodyBudget is the max chars of code body sent to the LLM for summarization.
+// Derived from typical local model context (~8K tokens). The prompt overhead
+// (instructions + metadata) uses ~500 tokens, leaving ~7500 for code body.
+// At ~3 chars/token: 7500 * 3 ≈ 22K chars. Per-node in batch: 22K / batchSize.
+const summarizeBodyBudget = 2000
+
+// buildBatchPrompt creates a prompt for summarizing multiple nodes.
+// Designed for concise output: 2-sentence summary + 3-5 tags.
 func (s *Summarizer) buildBatchPrompt(nodes []*types.CodeNode) string {
 	var sb strings.Builder
-	sb.WriteString("For each function/class below, write a one-paragraph summary ")
-	sb.WriteString("of what it does, what problem it solves, and how it fits into the codebase. ")
-	sb.WriteString("Also list 3-5 semantic concept tags (lowercase, hyphenated).\n\n")
-	sb.WriteString("Return a JSON array with one object per function, in order.\n\n")
+	sb.WriteString("Summarize each function below. For each, write:\n")
+	sb.WriteString("- summary: 2 sentences max. What it does and why.\n")
+	sb.WriteString("- concepts: 3-5 tags (lowercase, hyphenated).\n\n")
 
+	budget := summarizeBodyBudget / max(len(nodes), 1)
 	for i, n := range nodes {
-		fmt.Fprintf(&sb, "--- Function %d ---\n", i+1)
-		fmt.Fprintf(&sb, "Name: %s\n", n.Qualified)
-		fmt.Fprintf(&sb, "File: %s:%d-%d\n", n.FilePath, n.StartLine, n.EndLine)
+		fmt.Fprintf(&sb, "--- %d: %s ---\n", i+1, n.Qualified)
 		if n.Signature != "" {
-			fmt.Fprintf(&sb, "Signature: %s\n", n.Signature)
+			fmt.Fprintf(&sb, "%s\n", n.Signature)
 		}
-		if n.Docstring != "" {
-			fmt.Fprintf(&sb, "Docstring: %s\n", n.Docstring)
-		}
-		// Include body but truncate to 2000 chars to stay within token limits
 		body := n.Body
-		if len(body) > 2000 {
-			body = body[:2000] + "\n... (truncated)"
+		if len(body) > budget {
+			body = body[:budget]
 		}
-		fmt.Fprintf(&sb, "Code:\n%s\n\n", body)
+		sb.WriteString(body)
+		sb.WriteString("\n\n")
 	}
-
 	return sb.String()
 }
 
-// buildSinglePrompt creates a prompt for summarizing a single node.
+// buildSinglePrompt creates a prompt for summarizing one node.
 func (s *Summarizer) buildSinglePrompt(n *types.CodeNode) string {
 	var sb strings.Builder
-	sb.WriteString("Write a one-paragraph summary of what this code does, ")
-	sb.WriteString("what problem it solves, and what architectural concepts it implements. ")
-	sb.WriteString("Also list 3-5 semantic concept tags (lowercase, hyphenated).\n\n")
+	sb.WriteString("Summarize this code. Write:\n")
+	sb.WriteString("- summary: 2 sentences max. What it does and why.\n")
+	sb.WriteString("- concepts: 3-5 tags (lowercase, hyphenated).\n\n")
 
-	fmt.Fprintf(&sb, "Name: %s\n", n.Qualified)
-	fmt.Fprintf(&sb, "File: %s:%d-%d\n", n.FilePath, n.StartLine, n.EndLine)
+	fmt.Fprintf(&sb, "%s\n", n.Qualified)
 	if n.Signature != "" {
-		fmt.Fprintf(&sb, "Signature: %s\n", n.Signature)
-	}
-	if n.Docstring != "" {
-		fmt.Fprintf(&sb, "Docstring: %s\n", n.Docstring)
+		fmt.Fprintf(&sb, "%s\n", n.Signature)
 	}
 	body := n.Body
-	if len(body) > 3000 {
-		body = body[:3000] + "\n... (truncated)"
+	if len(body) > summarizeBodyBudget {
+		body = body[:summarizeBodyBudget]
 	}
-	fmt.Fprintf(&sb, "Code:\n%s\n", body)
-
+	sb.WriteString(body)
 	return sb.String()
 }

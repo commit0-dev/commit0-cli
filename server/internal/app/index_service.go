@@ -68,7 +68,7 @@ func NewIndexService(
 		parser:     parser,
 		embedder:   embedder,
 		graph:      graph,
-		builder:    NewContextBuilder(32768),
+		builder:    NewContextBuilder(domain.DefaultEmbedBudget(2048)),
 		summarizer: NewSummarizer(explainer, log),
 		cfg:        cfg,
 		log:        log,
@@ -593,7 +593,7 @@ type ReembedResult struct {
 // or empty, all nodes are re-embedded (full reindex behavior).
 func (is *IndexService) ReembedNeighborhood(ctx context.Context, repoSlug string, changedIDs map[string]struct{}) (*ReembedResult, error) {
 	start := time.Now()
-	builder := NewContextBuilderWithGraph(32768, is.graph)
+	builder := NewContextBuilderWithGraph(domain.DefaultEmbedBudget(2048), is.graph)
 
 	batchSize := is.cfg.BatchSize
 	if batchSize <= 0 {

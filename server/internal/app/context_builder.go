@@ -11,46 +11,36 @@ import (
 
 // defaultDocPrefix is prepended to document embeddings so they align with query
 // embeddings in the same Gemini Embedding 2 task space.
-// Queries use: "task: code retrieval | query: ..."
-// Documents use: "task: code retrieval | document: ..."
 const defaultDocPrefix = "task: code retrieval | document: "
 
-// ContextBuilder constructs embedding-ready context text from code nodes.
-//
-// The output prioritizes semantic content (Summary, Concepts) over raw metadata,
-// ensuring the embedding captures WHAT code does, not just WHERE it is.
+// ContextBuilder constructs context text for LLM operations.
+// Each operation has a TokenBudget that controls how much text is allocated
+// to each section (summary, signature, neighbors, body).
 type ContextBuilder struct {
-	graph        domain.OpenCodeGraph
-	maxBodyRunes int
-	docPrefix    string // prepended to each document embedding text
+	graph     domain.OpenCodeGraph
+	budget    domain.TokenBudget
+	docPrefix string
 }
 
-// NewContextBuilder creates a new context builder with a max body size in runes.
-// Graph-neighborhood enrichment is disabled (no store attached).
-func NewContextBuilder(maxBodyRunes int) *ContextBuilder {
-	if maxBodyRunes <= 0 {
-		maxBodyRunes = 32768
-	}
-	return &ContextBuilder{maxBodyRunes: maxBodyRunes, docPrefix: defaultDocPrefix}
+// NewContextBuilder creates a context builder with the given token budget.
+func NewContextBuilder(budget domain.TokenBudget) *ContextBuilder {
+	return &ContextBuilder{budget: budget, docPrefix: defaultDocPrefix}
 }
 
-// SetDocPrefix overrides the document embedding prefix. Each embedding provider
-// may use a different prefix convention (e.g. "search_document: " for nomic-embed-text).
+// SetDocPrefix overrides the document embedding prefix.
 func (cb *ContextBuilder) SetDocPrefix(prefix string) {
 	cb.docPrefix = prefix
 }
 
-// NewContextBuilderWithStore creates a ContextBuilder that also injects
-// graph-neighborhood context (callers/callees) into function embeddings.
-func NewContextBuilderWithGraph(maxBodyRunes int, graph domain.OpenCodeGraph) *ContextBuilder {
-	cb := NewContextBuilder(maxBodyRunes)
+// NewContextBuilderWithGraph creates a ContextBuilder with graph-neighborhood enrichment.
+func NewContextBuilderWithGraph(budget domain.TokenBudget, graph domain.OpenCodeGraph) *ContextBuilder {
+	cb := NewContextBuilder(budget)
 	cb.graph = graph
 	return cb
 }
 
 // ForNodeCtx generates embedding input text enriched with graph-neighborhood
-// data (callers and callees) when a GraphStore is attached and node.ID is set.
-// Falls back to ForNode if the store is nil or the lookup fails.
+// data when a graph is attached. Falls back to ForNode otherwise.
 func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) string {
 	if node == nil || cb.graph == nil || node.ID == "" {
 		return cb.ForNode(node)
@@ -64,119 +54,145 @@ func (cb *ContextBuilder) ForNodeCtx(ctx context.Context, node *types.CodeNode) 
 	return cb.forNodeWithNeighborhood(node, nb)
 }
 
-// forNodeWithNeighborhood builds embedding text with semantic summary + graph context.
+// forNodeWithNeighborhood builds text with budget-allocated sections.
 func (cb *ContextBuilder) forNodeWithNeighborhood(node *types.CodeNode, nb *domain.Neighborhood) string {
 	var sb strings.Builder
+	b := cb.budget
 
-	// 1. Task prefix + Kind + Name
-	sb.WriteString(cb.docPrefix)
-	fmt.Fprintf(&sb, "[%s] %s", strings.ToUpper(string(node.Kind)), node.Qualified)
+	// 1. Prefix (highest priority)
+	prefix := fmt.Sprintf("%s[%s] %s", cb.docPrefix, strings.ToUpper(string(node.Kind)), node.Qualified)
+	sb.WriteString(truncate(prefix, b.Prefix))
 
-	// 2. Semantic summary (MOST IMPORTANT — what the code DOES)
-	if node.Summary != "" {
-		fmt.Fprintf(&sb, " — %s", node.Summary)
-	} else if node.Docstring != "" {
-		fmt.Fprintf(&sb, " — %s", node.Docstring)
+	// 2. Summary
+	if b.Summary > 0 {
+		if node.Summary != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(truncate(node.Summary, b.Summary))
+		} else if node.Docstring != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(truncate(node.Docstring, b.Summary))
+		}
 	}
 
-	// 3. Concept tags
-	if len(node.Concepts) > 0 {
-		fmt.Fprintf(&sb, " Concepts: %s.", strings.Join(node.Concepts, ", "))
+	// 3. Concepts
+	if b.Concepts > 0 && len(node.Concepts) > 0 {
+		sb.WriteString(" Concepts: ")
+		sb.WriteString(truncate(strings.Join(node.Concepts, ", "), b.Concepts))
+		sb.WriteByte('.')
 	}
 
 	sb.WriteByte('\n')
 
 	// 4. Signature
-	if node.Signature != "" {
-		fmt.Fprintf(&sb, "Signature: %s\n", node.Signature)
+	if b.Signature > 0 && node.Signature != "" {
+		fmt.Fprintf(&sb, "Signature: %s\n", truncate(node.Signature, b.Signature))
 	}
 
-	// 5. Graph context
-	if len(nb.Callers) > 0 {
-		fmt.Fprintf(&sb, "Callers: %s\n", strings.Join(neighborSigs(nb.Callers), ", "))
-	}
-	if len(nb.Callees) > 0 {
-		fmt.Fprintf(&sb, "Callees: %s\n", strings.Join(neighborSigs(nb.Callees), ", "))
-	}
-	if len(nb.DataSinks) > 0 {
-		parts := make([]string, 0, len(nb.DataSinks))
-		for _, s := range nb.DataSinks {
-			part := s.Qualified
-			if s.ParamName != "" {
-				part += fmt.Sprintf(" (param %q)", s.ParamName)
-			}
-			parts = append(parts, part)
+	// 5. Neighbors (within neighbor budget)
+	if b.Neighbors > 0 {
+		var nbText strings.Builder
+		if len(nb.Callers) > 0 {
+			fmt.Fprintf(&nbText, "Callers: %s\n", strings.Join(neighborSigs(nb.Callers), ", "))
 		}
-		fmt.Fprintf(&sb, "Data flows to: %s\n", strings.Join(parts, ", "))
-	}
-	if len(nb.DataSources) > 0 {
-		parts := make([]string, 0, len(nb.DataSources))
-		for _, s := range nb.DataSources {
-			part := s.Qualified
-			if s.ArgExpr != "" {
-				part += fmt.Sprintf(" via %q", s.ArgExpr)
-			}
-			parts = append(parts, part)
+		if len(nb.Callees) > 0 {
+			fmt.Fprintf(&nbText, "Callees: %s\n", strings.Join(neighborSigs(nb.Callees), ", "))
 		}
-		fmt.Fprintf(&sb, "Data flows from: %s\n", strings.Join(parts, ", "))
-	}
-	if len(nb.Reads) > 0 {
-		fmt.Fprintf(&sb, "Reads: %s\n", strings.Join(nb.Reads, ", "))
-	}
-	if len(nb.Writes) > 0 {
-		fmt.Fprintf(&sb, "Writes: %s\n", strings.Join(nb.Writes, ", "))
+		if len(nb.DataSinks) > 0 {
+			parts := make([]string, 0, len(nb.DataSinks))
+			for _, s := range nb.DataSinks {
+				part := s.Qualified
+				if s.ParamName != "" {
+					part += fmt.Sprintf(" (param %q)", s.ParamName)
+				}
+				parts = append(parts, part)
+			}
+			fmt.Fprintf(&nbText, "Data flows to: %s\n", strings.Join(parts, ", "))
+		}
+		if len(nb.DataSources) > 0 {
+			parts := make([]string, 0, len(nb.DataSources))
+			for _, s := range nb.DataSources {
+				part := s.Qualified
+				if s.ArgExpr != "" {
+					part += fmt.Sprintf(" via %q", s.ArgExpr)
+				}
+				parts = append(parts, part)
+			}
+			fmt.Fprintf(&nbText, "Data flows from: %s\n", strings.Join(parts, ", "))
+		}
+		if len(nb.Reads) > 0 {
+			fmt.Fprintf(&nbText, "Reads: %s\n", strings.Join(nb.Reads, ", "))
+		}
+		if len(nb.Writes) > 0 {
+			fmt.Fprintf(&nbText, "Writes: %s\n", strings.Join(nb.Writes, ", "))
+		}
+		sb.WriteString(truncate(nbText.String(), b.Neighbors))
 	}
 
-	// 6. Body (secondary — code body for exact matching)
-	sb.WriteString("---\n")
-	bodyLimit := cb.bodyLimit(node.Kind)
-	sb.WriteString(cb.truncate(node.Body, bodyLimit))
+	// 6. Body (lowest priority — gets remainder of budget)
+	if b.Body > 0 && node.Body != "" {
+		sb.WriteString("---\n")
+		sb.WriteString(truncate(node.Body, b.Body))
+	}
 
-	return sb.String()
+	// Final safety: enforce total budget
+	result := sb.String()
+	if len(result) > b.Total && b.Total > 0 {
+		return truncate(result, b.Total)
+	}
+	return result
 }
 
-// ForNode generates embedding input text from a code node.
-// Uses semantic summary if available, falls back to metadata.
+// ForNode generates embedding input text without graph neighborhood.
 func (cb *ContextBuilder) ForNode(node *types.CodeNode) string {
 	if node == nil {
 		return ""
 	}
 
 	var sb strings.Builder
+	b := cb.budget
 
-	// Task prefix + Kind + Name
-	sb.WriteString(cb.docPrefix)
-	fmt.Fprintf(&sb, "[%s] %s", strings.ToUpper(string(node.Kind)), cb.nodeLabel(node))
+	// Prefix
+	prefix := fmt.Sprintf("%s[%s] %s", cb.docPrefix, strings.ToUpper(string(node.Kind)), cb.nodeLabel(node))
+	sb.WriteString(truncate(prefix, b.Prefix))
 
-	// Semantic summary (priority) or docstring (fallback)
-	if node.Summary != "" {
-		fmt.Fprintf(&sb, " — %s", node.Summary)
-	} else if node.Docstring != "" {
-		fmt.Fprintf(&sb, " — %s", node.Docstring)
-	} else {
-		// Minimal fallback: location metadata
-		fmt.Fprintf(&sb, " — %s %s defined in %s", node.Language, node.Kind, node.FilePath)
-		if node.StartLine > 0 {
-			fmt.Fprintf(&sb, ", lines %d–%d", node.StartLine, node.EndLine)
+	// Summary
+	if b.Summary > 0 {
+		if node.Summary != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(truncate(node.Summary, b.Summary))
+		} else if node.Docstring != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(truncate(node.Docstring, b.Summary))
+		} else {
+			fmt.Fprintf(&sb, " — %s %s defined in %s", node.Language, node.Kind, node.FilePath)
+			if node.StartLine > 0 {
+				fmt.Fprintf(&sb, ", lines %d–%d", node.StartLine, node.EndLine)
+			}
 		}
 	}
 
-	// Concept tags
-	if len(node.Concepts) > 0 {
-		fmt.Fprintf(&sb, ". Concepts: %s", strings.Join(node.Concepts, ", "))
+	// Concepts
+	if b.Concepts > 0 && len(node.Concepts) > 0 {
+		sb.WriteString(". Concepts: ")
+		sb.WriteString(truncate(strings.Join(node.Concepts, ", "), b.Concepts))
 	}
 
 	// Signature
-	if node.Signature != "" {
-		fmt.Fprintf(&sb, "\nSignature: %s", node.Signature)
+	if b.Signature > 0 && node.Signature != "" {
+		fmt.Fprintf(&sb, "\nSignature: %s", truncate(node.Signature, b.Signature))
 	}
 
 	// Body
-	sb.WriteString("\n---\n")
-	bodyLimit := cb.bodyLimit(node.Kind)
-	sb.WriteString(cb.truncate(node.Body, bodyLimit))
+	if b.Body > 0 && node.Body != "" {
+		sb.WriteString("\n---\n")
+		sb.WriteString(truncate(node.Body, b.Body))
+	}
 
-	return sb.String()
+	result := sb.String()
+	if len(result) > b.Total && b.Total > 0 {
+		return truncate(result, b.Total)
+	}
+	return result
 }
 
 // ForQuery generates embedding input text for a user query.
@@ -184,7 +200,7 @@ func (cb *ContextBuilder) ForQuery(question string) string {
 	return "task: code retrieval | query: " + question
 }
 
-// nodeLabel returns the best label for a node (qualified name or file path).
+// nodeLabel returns the best label for a node.
 func (cb *ContextBuilder) nodeLabel(node *types.CodeNode) string {
 	switch node.Kind {
 	case types.NodeFile:
@@ -199,22 +215,7 @@ func (cb *ContextBuilder) nodeLabel(node *types.CodeNode) string {
 	}
 }
 
-// bodyLimit returns the max body runes for a given node kind.
-func (cb *ContextBuilder) bodyLimit(kind types.NodeKind) int {
-	switch kind {
-	case types.NodeClass:
-		return min(2048, cb.maxBodyRunes)
-	case types.NodeFile:
-		return min(2048, cb.maxBodyRunes)
-	default:
-		// Functions: cap at maxBodyRunes. The metadata (prefix, summary,
-		// signature, graph neighbors) consumes ~500 runes, so body gets
-		// the remainder of the model's context budget.
-		return min(4096, cb.maxBodyRunes)
-	}
-}
-
-// neighborSigs formats neighbors as "Qualified(Signature)".
+// neighborSigs formats neighbors as "Qualified Signature".
 func neighborSigs(nodes []domain.NeighborNode) []string {
 	out := make([]string, 0, len(nodes))
 	for _, n := range nodes {
@@ -239,7 +240,7 @@ func neighborNames(nodes []domain.NeighborNode) []string {
 }
 
 // truncate safely truncates a string to maxRunes runes.
-func (cb *ContextBuilder) truncate(s string, maxRunes int) string {
+func truncate(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return ""
 	}

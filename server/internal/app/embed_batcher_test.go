@@ -194,7 +194,7 @@ func TestEmbedBatcherProcessResultMapping(t *testing.T) {
 	}
 
 	batcher := NewEmbedBatcher(embedder, 100)
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	ctx := context.Background()
 
 	nodes := []types.CodeNode{
@@ -222,7 +222,7 @@ func TestEmbedBatcherProcessResultMapping(t *testing.T) {
 func TestEmbedBatcherProcessEmptyNodes(t *testing.T) {
 	embedder := &stubEmbedder{}
 	batcher := NewEmbedBatcher(embedder, 100)
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 
 	result, err := batcher.Process(context.Background(), []types.CodeNode{}, cb)
 	if err != nil {
@@ -240,7 +240,7 @@ func TestEmbedBatcherProcessFlushError(t *testing.T) {
 	}
 
 	batcher := NewEmbedBatcher(embedder, 100)
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	ctx := context.Background()
 
 	nodes := []types.CodeNode{
@@ -261,7 +261,7 @@ func TestEmbedBatcherProcessAddError(t *testing.T) {
 	}
 
 	batcher := NewEmbedBatcher(embedder, 1) // size 1 → auto-flush on first add
-	cb := NewContextBuilder(1000)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
 	ctx := context.Background()
 
 	nodes := []types.CodeNode{

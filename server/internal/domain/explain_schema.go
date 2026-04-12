@@ -128,8 +128,8 @@ func summarizeBatchSchema() map[string]any {
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"summary":  map[string]any{"type": "string", "description": "One-paragraph description of what this code does and why"},
-				"concepts": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "3-5 semantic tags like caching, auth, middleware"},
+				"summary":  map[string]any{"type": "string", "description": "2 sentences: what it does and why. No boilerplate."},
+				"concepts": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "3-5 lowercase hyphenated tags: auth, caching, middleware"},
 			},
 			"required": []string{"summary", "concepts"},
 		},
@@ -140,8 +140,8 @@ func summarizeSingleSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"summary":  map[string]any{"type": "string", "description": "One-paragraph description of what this code does and why"},
-			"concepts": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "3-5 semantic tags like caching, auth, middleware"},
+			"summary":  map[string]any{"type": "string", "description": "2 sentences: what it does and why. No boilerplate."},
+			"concepts": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "3-5 lowercase hyphenated tags: auth, caching, middleware"},
 		},
 		"required": []string{"summary", "concepts"},
 	}
