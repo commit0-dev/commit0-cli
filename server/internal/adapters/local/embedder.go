@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	defaultEmbedModel = "nomic-embed-text"
+	defaultEmbedModel = "qwen3-embedding:4b"
 	defaultEmbedDim   = 768
 	defaultEmbedBatch = 50
 )
@@ -22,7 +22,7 @@ const (
 // modelPrefixes maps known Ollama embedding models to their document/query
 // prefix conventions. Unknown models default to no prefix.
 var modelPrefixes = map[string][2]string{
-	"nomic-embed-text":       {"search_document: ", "search_query: "},
+	"qwen3-embedding:4b":     {"search_document: ", "search_query: "},
 	"snowflake-arctic-embed": {"", ""},
 	"mxbai-embed-large":      {"", "Represent this sentence for searching relevant passages: "},
 	"all-minilm":             {"", ""},
@@ -31,7 +31,7 @@ var modelPrefixes = map[string][2]string{
 // DocPrefixForModel returns the document embedding prefix for a known model.
 // Returns empty string for unknown models.
 func DocPrefixForModel(model string) string {
-	// Strip tag (e.g. "nomic-embed-text:latest" → "nomic-embed-text")
+	// Strip tag (e.g. "qwen3-embedding:4b:latest" → "qwen3-embedding:4b")
 	base := model
 	if idx := strings.Index(model, ":"); idx > 0 {
 		base = model[:idx]
@@ -133,7 +133,7 @@ func (e *OllamaEmbedder) EmbedBatch(ctx context.Context, inputs []domain.EmbedIn
 	}
 
 	// Truncate individual texts to stay within the model's context window.
-	// nomic-embed-text (BERT-based): 2048 tokens. At ~3 chars/token for code,
+	// qwen3-embedding:4b (BERT-based): 2048 tokens. At ~3 chars/token for code,
 	// that is ~6000 chars max. Use 5000 for safety margin (prefix overhead).
 	const maxChars = 5000
 	texts := make([]string, len(inputs))

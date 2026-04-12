@@ -58,9 +58,14 @@ func (r *Runner) Run(ctx context.Context, config agent.AgentConfig, userMessage 
 		return nil, fmt.Errorf("create eino agent: %w", err)
 	}
 
-	// Create Eino Runner.
+	// Create Eino Runner with streaming enabled.
+	// Streaming is required for Unsloth Studio compatibility: its API defaults
+	// to SSE when the "stream" field is omitted (go-openai omits false values),
+	// causing JSON parse errors. Using streaming mode makes the agent call
+	// ChatModel.Stream() which properly handles SSE responses.
 	einoRunner := adk.NewRunner(ctx, adk.RunnerConfig{
-		Agent: einoAgent,
+		Agent:           einoAgent,
+		EnableStreaming: true,
 	})
 
 	// Inject state into context for tools.

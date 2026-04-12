@@ -11,7 +11,7 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	EmbedProvider string // "gemini" (default), "voyage", or "ollama"
+	EmbedProvider string // "gemini" (default), "voyage", "ollama", or "unsloth"
 	LLMProvider   string // "gemini" (default), "openrouter", "ollama", or "unsloth"
 	EmbedDim      int    // Normalized HNSW dimension for all providers (default 1024, env: EMBED_DIM)
 	BatchSize     int    // Embedding batch size for all providers (default 100, env: BATCH_SIZE)
@@ -21,19 +21,19 @@ type Config struct {
 	Ollama        OllamaConfig
 	OpenRouter    OpenRouterConfig
 	Unsloth       UnslothConfig
-	Server     ServerConfig
-	Index      IndexConfig
-	Query      QueryConfig
-	Sync       SyncConfig
+	Server        ServerConfig
+	Index         IndexConfig
+	Query         QueryConfig
+	Sync          SyncConfig
 }
 
 // SyncConfig holds settings for P2P graph sync.
 type SyncConfig struct {
-	Passphrase   string // env: SYNC_PASSPHRASE (shared secret for auth)
-	QUICPort     int    // env: SYNC_QUIC_PORT (default: 9443)
-	AutoDiscover bool   // env: SYNC_AUTO_DISCOVER (mDNS LAN discovery, default: false)
-	AutoPull     bool   // env: SYNC_AUTO_PULL (auto-pull on notification, default: false)
-	AutoPush     bool   // env: SYNC_AUTO_PUSH (auto-push after index, default: false)
+	Passphrase    string // env: SYNC_PASSPHRASE (shared secret for auth)
+	QUICPort      int    // env: SYNC_QUIC_PORT (default: 9443)
+	AutoDiscover  bool   // env: SYNC_AUTO_DISCOVER (mDNS LAN discovery, default: false)
+	AutoPull      bool   // env: SYNC_AUTO_PULL (auto-pull on notification, default: false)
+	AutoPush      bool   // env: SYNC_AUTO_PUSH (auto-push after index, default: false)
 	InstanceName  string // env: SYNC_INSTANCE_NAME (mDNS instance name, default: hostname)
 	ConsulAddr    string // env: SYNC_CONSUL_ADDR (default: "127.0.0.1:8500")
 	ConsulToken   string // env: SYNC_CONSUL_TOKEN (optional, for Consul ACL)
@@ -49,10 +49,11 @@ type OpenRouterConfig struct {
 }
 
 // UnslothConfig holds settings for Unsloth-served models (via vLLM or llama.cpp).
-// Both serve an OpenAI-compatible /v1/chat/completions endpoint.
+// Both serve OpenAI-compatible /v1/chat/completions and /v1/embeddings endpoints.
 type UnslothConfig struct {
 	URL        string // Server URL (env: UNSLOTH_URL, default: http://localhost:8000/v1)
-	Model      string // Model identifier (env: UNSLOTH_MODEL)
+	Model      string // LLM model identifier (env: UNSLOTH_MODEL)
+	EmbedModel string // Embedding model identifier (env: UNSLOTH_EMBED_MODEL)
 	APIKey     string // Optional API key (env: UNSLOTH_API_KEY, default: "sk-no-key-required")
 	TimeoutSec int    // HTTP request timeout (env: UNSLOTH_TIMEOUT_SEC, default: 300)
 }
@@ -61,16 +62,16 @@ type UnslothConfig struct {
 type OllamaConfig struct {
 	URL        string // Ollama API URL (default: http://localhost:11434)
 	Model      string // LLM model name (e.g. "gemma4:e2b"). If set, uses local LLM.
-	EmbedModel string // Embedding model (default: "nomic-embed-text")
+	EmbedModel string // Embedding model (default: "qwen3-embedding:4b")
 
 	// Generation parameters — tuned for gemma4 spec (temp=1.0, top_p=0.95, top_k=64).
-	NumCtx     int     // Context window size tokens (env: OLLAMA_NUM_CTX, default 8192)
-	NumPredict int     // Max tokens to generate (env: OLLAMA_NUM_PREDICT, default 2048)
-	Temperature float32 // Sampling temperature (env: OLLAMA_TEMPERATURE, default 1.0)
-	TopP        float32 // Nucleus sampling probability (env: OLLAMA_TOP_P, default 0.95)
-	TopK        int     // Top-k sampling (env: OLLAMA_TOP_K, default 64)
-	TimeoutSec  int     // HTTP request timeout in seconds (env: OLLAMA_TIMEOUT_SEC, default 300)
-	KeepAliveSec int   // Seconds to keep model loaded between requests (env: OLLAMA_KEEP_ALIVE_SEC, default 600)
+	NumCtx       int     // Context window size tokens (env: OLLAMA_NUM_CTX, default 8192)
+	NumPredict   int     // Max tokens to generate (env: OLLAMA_NUM_PREDICT, default 2048)
+	Temperature  float32 // Sampling temperature (env: OLLAMA_TEMPERATURE, default 1.0)
+	TopP         float32 // Nucleus sampling probability (env: OLLAMA_TOP_P, default 0.95)
+	TopK         int     // Top-k sampling (env: OLLAMA_TOP_K, default 64)
+	TimeoutSec   int     // HTTP request timeout in seconds (env: OLLAMA_TIMEOUT_SEC, default 300)
+	KeepAliveSec int     // Seconds to keep model loaded between requests (env: OLLAMA_KEEP_ALIVE_SEC, default 600)
 }
 
 // ServerConfig holds HTTP server settings.
@@ -167,6 +168,7 @@ func Load(cfgPath string) (*Config, error) {
 		Unsloth: UnslothConfig{
 			URL:        v.GetString("unsloth.url"),
 			Model:      v.GetString("unsloth.model"),
+			EmbedModel: v.GetString("unsloth.embed_model"),
 			APIKey:     v.GetString("unsloth.api_key"),
 			TimeoutSec: v.GetInt("unsloth.timeout_sec"),
 		},
@@ -210,11 +212,11 @@ func Load(cfgPath string) (*Config, error) {
 			WriteTimeoutSec: v.GetInt("server.write_timeout_sec"),
 		},
 		Sync: SyncConfig{
-			Passphrase:   v.GetString("sync.passphrase"),
-			QUICPort:     v.GetInt("sync.quic_port"),
-			AutoDiscover: v.GetBool("sync.auto_discover"),
-			AutoPull:     v.GetBool("sync.auto_pull"),
-			AutoPush:     v.GetBool("sync.auto_push"),
+			Passphrase:    v.GetString("sync.passphrase"),
+			QUICPort:      v.GetInt("sync.quic_port"),
+			AutoDiscover:  v.GetBool("sync.auto_discover"),
+			AutoPull:      v.GetBool("sync.auto_pull"),
+			AutoPush:      v.GetBool("sync.auto_push"),
 			InstanceName:  v.GetString("sync.instance_name"),
 			ConsulAddr:    v.GetString("sync.consul_addr"),
 			ConsulToken:   v.GetString("sync.consul_token"),
@@ -230,6 +232,10 @@ func Load(cfgPath string) (*Config, error) {
 	switch cfg.EmbedProvider {
 	case "ollama":
 		// Fully local — no cloud API keys needed for embeddings.
+	case "unsloth":
+		if cfg.Unsloth.EmbedModel == "" {
+			return nil, domain.Validation("UNSLOTH_EMBED_MODEL is required when EMBED_PROVIDER=unsloth")
+		}
 	case "voyage":
 		if cfg.Voyage.APIKey == "" {
 			return nil, domain.Validation("VOYAGE_API_KEY is required when EMBED_PROVIDER=voyage")
@@ -268,7 +274,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("ollama.url", "http://localhost:11434")
 	v.SetDefault("ollama.model", "")
-	v.SetDefault("ollama.embed_model", "nomic-embed-text")
+	v.SetDefault("ollama.embed_model", "qwen3-embedding:4b")
 	// gemma4:e2b recommended generation params (128K ctx window; 8192 is practical for agentic use).
 	v.SetDefault("ollama.num_ctx", 8192)
 	v.SetDefault("ollama.num_predict", 2048)
@@ -280,6 +286,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("unsloth.url", "http://localhost:8000/v1")
 	v.SetDefault("unsloth.model", "")
+	v.SetDefault("unsloth.embed_model", "")
 	v.SetDefault("unsloth.api_key", "sk-no-key-required")
 	v.SetDefault("unsloth.timeout_sec", 300)
 
@@ -307,10 +314,10 @@ func setDefaults(v *viper.Viper) {
 // bindEnvs maps Viper keys to their canonical environment variable names.
 func bindEnvs(v *viper.Viper) {
 	envMap := map[string]string{
-		"surreal.url":       "SURREAL_URL",
-		"surreal.user":      "SURREAL_USER",
-		"surreal.pass":      "SURREAL_PASS",
-		"surreal.namespace": "SURREAL_NAMESPACE",
+		"surreal.url":             "SURREAL_URL",
+		"surreal.user":            "SURREAL_USER",
+		"surreal.pass":            "SURREAL_PASS",
+		"surreal.namespace":       "SURREAL_NAMESPACE",
 		"surreal.database":        "SURREAL_DATABASE",
 		"surreal.read_pool_size":  "SURREAL_READ_POOL",
 		"surreal.write_pool_size": "SURREAL_WRITE_POOL",
@@ -325,24 +332,25 @@ func bindEnvs(v *viper.Viper) {
 		"openrouter.model":      "OPENROUTER_MODEL",
 		"openrouter.max_tokens": "OPENROUTER_MAX_TOKENS",
 
-		"ollama.url":           "OLLAMA_URL",
-		"ollama.model":         "OLLAMA_MODEL",
-		"ollama.embed_model":   "OLLAMA_EMBED_MODEL",
-		"ollama.num_ctx":       "OLLAMA_NUM_CTX",
-		"ollama.num_predict":   "OLLAMA_NUM_PREDICT",
-		"ollama.temperature":   "OLLAMA_TEMPERATURE",
-		"ollama.top_p":         "OLLAMA_TOP_P",
-		"ollama.top_k":         "OLLAMA_TOP_K",
-		"ollama.timeout_sec":   "OLLAMA_TIMEOUT_SEC",
+		"ollama.url":            "OLLAMA_URL",
+		"ollama.model":          "OLLAMA_MODEL",
+		"ollama.embed_model":    "OLLAMA_EMBED_MODEL",
+		"ollama.num_ctx":        "OLLAMA_NUM_CTX",
+		"ollama.num_predict":    "OLLAMA_NUM_PREDICT",
+		"ollama.temperature":    "OLLAMA_TEMPERATURE",
+		"ollama.top_p":          "OLLAMA_TOP_P",
+		"ollama.top_k":          "OLLAMA_TOP_K",
+		"ollama.timeout_sec":    "OLLAMA_TIMEOUT_SEC",
 		"ollama.keep_alive_sec": "OLLAMA_KEEP_ALIVE_SEC",
 
 		"unsloth.url":         "UNSLOTH_URL",
 		"unsloth.model":       "UNSLOTH_MODEL",
+		"unsloth.embed_model": "UNSLOTH_EMBED_MODEL",
 		"unsloth.api_key":     "UNSLOTH_API_KEY",
 		"unsloth.timeout_sec": "UNSLOTH_TIMEOUT_SEC",
 
-		"voyage.api_key": "VOYAGE_API_KEY",
-		"voyage.model":   "VOYAGE_MODEL",
+		"voyage.api_key":  "VOYAGE_API_KEY",
+		"voyage.model":    "VOYAGE_MODEL",
 		"voyage.base_url": "VOYAGE_BASE_URL",
 
 		"gemini.api_key":       "GEMINI_API_KEY",
@@ -363,11 +371,11 @@ func bindEnvs(v *viper.Viper) {
 		"server.read_timeout_sec":  "SERVER_READ_TIMEOUT",
 		"server.write_timeout_sec": "SERVER_WRITE_TIMEOUT",
 
-		"sync.passphrase":    "SYNC_PASSPHRASE",
-		"sync.quic_port":     "SYNC_QUIC_PORT",
-		"sync.auto_discover": "SYNC_AUTO_DISCOVER",
-		"sync.auto_pull":     "SYNC_AUTO_PULL",
-		"sync.auto_push":     "SYNC_AUTO_PUSH",
+		"sync.passphrase":     "SYNC_PASSPHRASE",
+		"sync.quic_port":      "SYNC_QUIC_PORT",
+		"sync.auto_discover":  "SYNC_AUTO_DISCOVER",
+		"sync.auto_pull":      "SYNC_AUTO_PULL",
+		"sync.auto_push":      "SYNC_AUTO_PUSH",
 		"sync.instance_name":  "SYNC_INSTANCE_NAME",
 		"sync.consul_addr":    "SYNC_CONSUL_ADDR",
 		"sync.consul_token":   "SYNC_CONSUL_TOKEN",

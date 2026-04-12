@@ -8,11 +8,13 @@ import (
 
 	"google.golang.org/genai"
 
+	einoembedopenai "github.com/cloudwego/eino-ext/components/embedding/openai"
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
 	"github.com/cloudwego/eino/components/model"
 
 	"github.com/commit0-dev/commit0/server/internal/adapters/eino"
+	unslothadapter "github.com/commit0-dev/commit0/server/internal/adapters/unsloth"
 	"github.com/commit0-dev/commit0/server/internal/adapters/gemini"
 	gitadapter "github.com/commit0-dev/commit0/server/internal/adapters/git"
 	localadapter "github.com/commit0-dev/commit0/server/internal/adapters/local"
@@ -122,6 +124,22 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 		emb = localadapter.NewOllamaEmbedder(cfg.Ollama.URL, cfg.Ollama.EmbedModel, embedDim, log)
 		log.Info("using local embeddings via Ollama",
 			"model", cfg.Ollama.EmbedModel, "dim", embedDim, "url", cfg.Ollama.URL)
+	case "unsloth":
+		dim := embedDim
+		einoEmb, einoErr := einoembedopenai.NewEmbedder(ctx, &einoembedopenai.EmbeddingConfig{
+			APIKey:     cfg.Unsloth.APIKey,
+			BaseURL:    cfg.Unsloth.URL,
+			Model:      cfg.Unsloth.EmbedModel,
+			Dimensions: &dim,
+			Timeout:    time.Duration(cfg.Unsloth.TimeoutSec) * time.Second,
+		})
+		if einoErr != nil {
+			db.Close(ctx)
+			return nil, nil, fmt.Errorf("unsloth embedder: %w", einoErr)
+		}
+		emb = eino.NewEinoEmbedder(einoEmb, embedDim, log)
+		log.Info("using Unsloth embeddings via Eino OpenAI adapter",
+			"model", cfg.Unsloth.EmbedModel, "dim", embedDim, "url", cfg.Unsloth.URL)
 	case "voyage":
 		emb, err = voyage.NewVoyageEmbedder(cfg.Voyage.APIKey, cfg.Voyage.Model, cfg.Voyage.BaseURL, embedDim, batchSize, log)
 		if err != nil {
@@ -284,8 +302,12 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 			if err != nil {
 				log.Warn("failed to create Unsloth chat model", "err", err)
 			} else {
-				chatModel = cm
-				log.Info("using Unsloth LLM for agent",
+				// Wrap with ToolCallModel: Unsloth/llama.cpp doesn't reliably
+				// return structured tool_calls via the API. The wrapper injects
+				// tool definitions into the system prompt and parses
+				// <tool_call>{...}</tool_call> blocks from the model's text output.
+				chatModel = unslothadapter.NewToolCallModel(cm)
+				log.Info("using Unsloth LLM for agent (prompt-injected tool calling)",
 					"model", cfg.Unsloth.Model,
 					"url", cfg.Unsloth.URL,
 				)

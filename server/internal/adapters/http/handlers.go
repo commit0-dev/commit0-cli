@@ -98,6 +98,9 @@ func (s *Server) handleHealthz(c *gin.Context) {
 		if s.fullCfg.Unsloth.Model != "" {
 			providers = append(providers, "unsloth")
 		}
+		if s.fullCfg.Unsloth.EmbedModel != "" {
+			providers = append(providers, "unsloth-embed")
+		}
 		checks["configured_providers"] = healthzCheck{
 			Status: "ok",
 			Detail: strings.Join(providers, ","),

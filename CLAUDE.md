@@ -20,7 +20,7 @@ This file provides guidance to Claude Code when working with this repository.
 |-------|-----------|
 | Language | Go 1.26+ (CGO for tree-sitter) |
 | Database | SurrealDB 3.0 (graph + HNSW vector + BM25 FTS) |
-| Embeddings | Gemini / Voyage / Ollama (`EMBED_PROVIDER`) |
+| Embeddings | Gemini / Voyage / Ollama / Unsloth (`EMBED_PROVIDER`) |
 | LLM | Gemini / OpenRouter / Ollama / Unsloth (`LLM_PROVIDER`) |
 | Agent | CloudWeGo Eino v0.8 with SubRunnerFactory injection |
 | HTTP Server | Gin + gin-contrib/cors + gin-contrib/requestid |

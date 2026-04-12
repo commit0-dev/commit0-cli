@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // IndexRequest represents a request to index a repository.
@@ -45,11 +45,11 @@ type IndexService struct {
 	summarizer  *Summarizer
 	cfg         *config.Config
 	log         *slog.Logger
-	parsedChBuf int            // channel buffer override: <0 = unbuffered, 0 = default (64), >0 = exact size
-	progressFn  ProgressFunc   // set during IndexWithProgress, nil otherwise
-	tracker     *IndexTracker  // set during IndexWithProgress, nil otherwise
-	embedChBuf  int            // channel buffer override: <0 = unbuffered, 0 = default (32), >0 = exact size
-	temporalSvc *TemporalService // optional: set via SetTemporalService for commit-aware indexing
+	parsedChBuf int                 // channel buffer override: <0 = unbuffered, 0 = default (64), >0 = exact size
+	progressFn  ProgressFunc        // set during IndexWithProgress, nil otherwise
+	tracker     *IndexTracker       // set during IndexWithProgress, nil otherwise
+	embedChBuf  int                 // channel buffer override: <0 = unbuffered, 0 = default (32), >0 = exact size
+	temporalSvc *TemporalService    // optional: set via SetTemporalService for commit-aware indexing
 	linkers     []domain.EdgeLinker // global cross-file edge resolution chain
 }
 
@@ -89,7 +89,7 @@ func (is *IndexService) SetLinkers(linkers []domain.EdgeLinker) {
 
 // SetDocPrefix overrides the document embedding prefix on the ContextBuilder.
 // Called by wiring when the embedding provider uses a different prefix convention
-// (e.g. "search_document: " for nomic-embed-text via Ollama).
+// (e.g. "search_document: " for qwen3-embedding:4b via Ollama).
 func (is *IndexService) SetDocPrefix(prefix string) {
 	is.builder.SetDocPrefix(prefix)
 }
