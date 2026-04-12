@@ -226,10 +226,18 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	// Agent service (optional — constructor decides availability based on config).
 	// Create LLM model based on provider.
 	var llmModel adkmodel.LLM // nil = use Gemini fallback in AgentService
-	if cfg.LLMProvider == "openrouter" && cfg.OpenRouter.APIKey != "" {
-		orClient := openrouter.NewClient(cfg.OpenRouter.APIKey, cfg.OpenRouter.BaseURL)
-		llmModel = openrouter.NewModel(orClient, cfg.OpenRouter.Model, cfg.OpenRouter.MaxTokens)
-		log.Info("using OpenRouter LLM", "model", cfg.OpenRouter.Model)
+	switch cfg.LLMProvider {
+	case "openrouter":
+		if cfg.OpenRouter.APIKey != "" {
+			orClient := openrouter.NewClient(cfg.OpenRouter.APIKey, cfg.OpenRouter.BaseURL)
+			llmModel = openrouter.NewModel(orClient, cfg.OpenRouter.Model, cfg.OpenRouter.MaxTokens)
+			log.Info("using OpenRouter LLM", "model", cfg.OpenRouter.Model)
+		}
+	case "ollama":
+		if cfg.Ollama.Model != "" {
+			llmModel = localadapter.NewOllamaModel(cfg.Ollama.URL, cfg.Ollama.Model, 4096)
+			log.Info("using Ollama LLM for agent", "model", cfg.Ollama.Model, "url", cfg.Ollama.URL)
+		}
 	}
 
 	var agentRunner domain.AgentRunner
