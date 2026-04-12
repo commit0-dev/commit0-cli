@@ -524,6 +524,7 @@ func newAnalyzeCommitTool(gitWalker domain.GitWalker, explainer domain.LLMExplai
 					"Analyze this commit and identify risk areas:\nCommit: %s\nAuthor: %s\nMessage: %s\n\nChanges:\n%s",
 					info.Hash[:8], info.Author, info.Message, diffDesc,
 				),
+				ResponseSchema: domain.SchemaForQueryType("search"),
 			})
 			if err == nil {
 				var result struct {

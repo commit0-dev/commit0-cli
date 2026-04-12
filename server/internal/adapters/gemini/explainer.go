@@ -122,7 +122,10 @@ func (e *GeminiExplainer) ExplainStructured(ctx context.Context, req domain.Expl
 	}
 
 	prompt := buildExplainPrompt(req)
-	schema := schemaForQueryType(req.QueryType)
+	schema := req.ResponseSchema
+	if schema == nil {
+		schema = domain.SchemaForQueryType(req.QueryType)
+	}
 
 	contents := []*genai.Content{
 		genai.NewContentFromText(prompt, genai.RoleUser),

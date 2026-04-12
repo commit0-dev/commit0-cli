@@ -167,7 +167,8 @@ func (s *ReviewService) Review(ctx context.Context, req ReviewRequest) (*ReviewR
 				"Review this code change for bugs, security issues, and missing error handling.\n\nDiff:\n%s\n\nBlast radius: %d affected functions\nMissing tests: %s",
 				diffSummary.String(), totalBlastRadius, strings.Join(missingTests, ", "),
 			),
-			CodeContext: excerpts,
+			CodeContext:    excerpts,
+			ResponseSchema: domain.SchemaForQueryType("search"),
 		})
 		if err == nil {
 			var result struct {

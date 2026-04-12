@@ -277,6 +277,7 @@ func (s *AnalysisService) llmVerifyIssues(ctx context.Context, issues []Analysis
 			"Review these security findings and assess each one. Mark false positives.\n\n%s",
 			string(issuesJSON),
 		),
+		ResponseSchema: domain.SchemaForQueryType("search"),
 	})
 	if err != nil {
 		return issues // return unfiltered if LLM fails

@@ -96,9 +96,10 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 		ts.collectHopExcerpts(hops, &excerpts)
 
 		explainReq := domain.ExplainRequest{
-			QueryType:   "trace",
-			UserQuery:   fmt.Sprintf("trace %s from %s", req.Direction, req.Symbol),
-			CodeContext: excerpts,
+			QueryType:      "trace",
+			UserQuery:      fmt.Sprintf("trace %s from %s", req.Direction, req.Symbol),
+			CodeContext:    excerpts,
+			ResponseSchema: domain.SchemaForQueryType("trace"),
 		}
 
 		raw, err := ts.explainer.ExplainStructured(ctx, explainReq)

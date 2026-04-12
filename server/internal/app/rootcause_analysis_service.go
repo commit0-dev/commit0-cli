@@ -203,7 +203,8 @@ func (s *RootCauseAnalysisService) FindRootCause(ctx context.Context, req RootCa
 					"Analyze whether commit %s (%q by %s) is the root cause of: %s\n\nCommit diff:\n%s",
 					top.Hash[:8], top.Message, top.Author, req.Description, diffSummary,
 				),
-				CodeContext: buildExcerptsFromChain(causalChain),
+				CodeContext:    buildExcerptsFromChain(causalChain),
+				ResponseSchema: domain.SchemaForQueryType("search"),
 			}
 
 			raw, err := s.explainer.ExplainStructured(ctx, explainReq)

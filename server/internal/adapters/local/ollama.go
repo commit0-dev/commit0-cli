@@ -100,14 +100,27 @@ func (o *OllamaExplainer) Explain(ctx context.Context, req domain.ExplainRequest
 	return ch, nil
 }
 
-// ExplainStructured returns structured JSON from Ollama using the format parameter.
+// ExplainStructured returns structured JSON from Ollama using schema-constrained
+// decoding. Ollama's "format" field accepts a full JSON Schema, enabling
+// grammar-constrained token generation — the model cannot produce invalid JSON.
 func (o *OllamaExplainer) ExplainStructured(ctx context.Context, req domain.ExplainRequest) ([]byte, error) {
 	if req.UserQuery == "" {
 		return nil, domain.Validation("ExplainStructured: UserQuery must not be empty")
 	}
 
 	prompt := buildOllamaPrompt(req)
-	prompt += "\n\nRespond ONLY with valid JSON. No markdown, no explanation outside the JSON."
+
+	// Build the format field: full JSON Schema for constrained decoding.
+	// The schema comes from the request (set by the caller). Fall back to
+	// QueryType-based lookup for backward compatibility.
+	schema := req.ResponseSchema
+	if schema == nil {
+		schema = domain.SchemaForQueryType(req.QueryType)
+	}
+	formatBytes, err := json.Marshal(schema)
+	if err != nil {
+		return nil, fmt.Errorf("ollama: marshal schema: %w", err)
+	}
 
 	var chatResp ollamaChatResponse
 	resp, err := o.rc.R().
@@ -116,7 +129,7 @@ func (o *OllamaExplainer) ExplainStructured(ctx context.Context, req domain.Expl
 			Model:    o.model,
 			Messages: []ollamaMessage{{Role: "user", Content: prompt}},
 			Stream:   false,
-			Format:   json.RawMessage(`"json"`),
+			Format:   json.RawMessage(formatBytes),
 		}).
 		SetResult(&chatResp).
 		Post("/api/chat")

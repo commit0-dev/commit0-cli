@@ -123,9 +123,10 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 		}
 
 		explainReq := domain.ExplainRequest{
-			QueryType:   "blast",
-			UserQuery:   fmt.Sprintf("impact of changing %s", req.Symbol),
-			CodeContext: excerpts,
+			QueryType:      "blast",
+			UserQuery:      fmt.Sprintf("impact of changing %s", req.Symbol),
+			CodeContext:    excerpts,
+			ResponseSchema: domain.SchemaForQueryType("blast"),
 		}
 
 		raw, err := bs.explainer.ExplainStructured(ctx, explainReq)

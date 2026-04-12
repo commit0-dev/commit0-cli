@@ -1,8 +1,9 @@
-package gemini
+package domain
 
-// schemaForQueryType returns the JSON Schema for Gemini's structured output
-// based on the query type (search, trace, blast).
-func schemaForQueryType(queryType string) map[string]any {
+// SchemaForQueryType returns the JSON Schema for structured LLM output.
+// Used by both Gemini (ResponseJsonSchema) and Ollama (format field)
+// to enable constrained decoding.
+func SchemaForQueryType(queryType string) map[string]any {
 	switch queryType {
 	case "search":
 		return searchSchema()

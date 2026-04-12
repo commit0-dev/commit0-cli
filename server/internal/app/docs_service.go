@@ -145,8 +145,9 @@ func (s *DocsService) generateREADME(ctx context.Context, repoSlug string) (*Gen
 	}
 
 	raw, err := s.explainer.ExplainStructured(ctx, domain.ExplainRequest{
-		QueryType: "search",
-		UserQuery: fmt.Sprintf("Generate a README.md for this project. Include: overview, key features, architecture summary, getting started.\n\n%s", context_str.String()),
+		QueryType:      "search",
+		UserQuery:      fmt.Sprintf("Generate a README.md for this project. Include: overview, key features, architecture summary, getting started.\n\n%s", context_str.String()),
+		ResponseSchema: domain.SchemaForQueryType("search"),
 	})
 	if err != nil {
 		return nil, err

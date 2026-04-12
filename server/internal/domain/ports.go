@@ -55,6 +55,14 @@ type ExplainRequest struct {
 	UserQuery    string
 	GraphContext string
 	CodeContext  []CodeExcerpt
+	// ResponseSchema is an optional JSON Schema that constrains the LLM output.
+	// When set, ExplainStructured uses it for grammar-constrained decoding.
+	// Adapters translate this to their native schema format:
+	//   Gemini:     ResponseJsonSchema
+	//   Ollama:     format field (JSON Schema)
+	//   OpenRouter: response_format.json_schema
+	// When nil, adapters fall back to unstructured JSON mode.
+	ResponseSchema map[string]any
 }
 
 // ExplainChunk represents a streamed chunk of explanation.

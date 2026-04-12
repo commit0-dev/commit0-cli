@@ -113,8 +113,9 @@ func (s *Summarizer) summarizeBatch(ctx context.Context, nodes []*types.CodeNode
 	prompt := s.buildBatchPrompt(nodes)
 
 	req := domain.ExplainRequest{
-		QueryType: "summarize",
-		UserQuery: prompt,
+		QueryType:      "summarize",
+		UserQuery:      prompt,
+		ResponseSchema: domain.SchemaForQueryType("summarize"),
 	}
 
 	raw, err := s.explainer.ExplainStructured(ctx, req)
@@ -157,8 +158,9 @@ func (s *Summarizer) summarizeSingle(ctx context.Context, n *types.CodeNode) {
 	prompt := s.buildSinglePrompt(n)
 
 	req := domain.ExplainRequest{
-		QueryType: "summarize-single",
-		UserQuery: prompt,
+		QueryType:      "summarize-single",
+		UserQuery:      prompt,
+		ResponseSchema: domain.SchemaForQueryType("summarize-single"),
 	}
 
 	raw, err := s.explainer.ExplainStructured(ctx, req)

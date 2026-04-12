@@ -174,10 +174,11 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 	var structuredExplan *types.SearchExplanation
 	if qs.explainer != nil && !req.NoExplain {
 		explainReq := domain.ExplainRequest{
-			QueryType:    "search",
-			UserQuery:    req.Question,
-			GraphContext: graphContext,
-			CodeContext:  excerpts,
+			QueryType:      "search",
+			UserQuery:      req.Question,
+			GraphContext:   graphContext,
+			CodeContext:    excerpts,
+			ResponseSchema: domain.SchemaForQueryType("search"),
 		}
 
 		raw, err := qs.explainer.ExplainStructured(ctx, explainReq)
