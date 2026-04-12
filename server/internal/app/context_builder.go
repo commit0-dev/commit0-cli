@@ -205,9 +205,12 @@ func (cb *ContextBuilder) bodyLimit(kind types.NodeKind) int {
 	case types.NodeClass:
 		return min(2048, cb.maxBodyRunes)
 	case types.NodeFile:
-		return min(4096, cb.maxBodyRunes)
+		return min(2048, cb.maxBodyRunes)
 	default:
-		return cb.maxBodyRunes
+		// Functions: cap at maxBodyRunes. The metadata (prefix, summary,
+		// signature, graph neighbors) consumes ~500 runes, so body gets
+		// the remainder of the model's context budget.
+		return min(4096, cb.maxBodyRunes)
 	}
 }
 
