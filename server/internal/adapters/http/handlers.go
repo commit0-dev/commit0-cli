@@ -83,6 +83,25 @@ func (s *Server) handleHealthz(c *gin.Context) {
 	if s.fullCfg != nil {
 		checks["llm_provider"] = healthzCheck{Status: "ok", Detail: s.fullCfg.LLMProvider}
 		checks["embed_provider"] = healthzCheck{Status: "ok", Detail: s.fullCfg.EmbedProvider}
+
+		// 5. List all configured LLM providers (shows available backends).
+		var providers []string
+		if s.fullCfg.Gemini.APIKey != "" {
+			providers = append(providers, "gemini")
+		}
+		if s.fullCfg.OpenRouter.APIKey != "" {
+			providers = append(providers, "openrouter")
+		}
+		if s.fullCfg.Ollama.Model != "" {
+			providers = append(providers, "ollama")
+		}
+		if s.fullCfg.Unsloth.Model != "" {
+			providers = append(providers, "unsloth")
+		}
+		checks["configured_providers"] = healthzCheck{
+			Status: "ok",
+			Detail: strings.Join(providers, ","),
+		}
 	}
 
 	status := http.StatusOK
