@@ -42,7 +42,6 @@ Single interface for all graph operations. Every application service depends on 
 | `Parser` | `Parse`, `SupportedLanguages` | tree-sitter (CGO) |
 | `FileWalker` | `Walk` | OS filesystem (.gitignore-aware) |
 | `AgentRunner` | `Chat` | Google ADK |
-| `TemporalStore` | Commit-aware upsert, mark removed, query ranges, history | SurrealDB |
 | `MemoryStore` | `StoreMemory`, `RetrieveMemories`, `ListSessionMemories` | SurrealDB |
 | `GitWalker` | `ListCommits`, `DiffCommit`, `ReadFileAtCommit`, `CommitInfo` | git CLI |
 
@@ -108,8 +107,7 @@ Reverse transitive traversal from a target node. Groups affected nodes by module
 | `RepoService` | `repo_service.go` | Repository CRUD |
 | `AgentService` | `agent/service.go` | ADK agent with tool use and sub-agent delegation |
 | `FieldFlowService` | `field_flow_service.go` | Data flow tracing with field-level granularity |
-| `TemporalService` | `temporal_service.go` | Git history and temporal graph queries |
-| `RootCauseAnalysisService` | `rootcause_analysis_service.go` | Root cause analysis across commit history |
+| `RootCauseAnalysisService` | `rootcause_analysis_service.go` | Root cause analysis via data flow and git history |
 | `APISurfaceService` | `api_surface_service.go` | HTTP endpoint discovery |
 | `MemoryManager` | `memory/manager.go` | Three-tier memory: working, session, persistent |
 
@@ -119,7 +117,7 @@ Reverse transitive traversal from a target node. Groups affected nodes by module
 
 ### SurrealDB (`internal/adapters/surreal/`)
 
-Implements `OpenCodeGraph`, `TemporalStore`, `MemoryStore`, `SessionStore`, and sync interfaces. Uses dual WebSocket connection pools (read and write).
+Implements `OpenCodeGraph`, `MemoryStore`, `SessionStore`, and sync interfaces. Uses dual WebSocket connection pools (read and write).
 
 | File | Responsibility |
 |------|---------------|
@@ -180,7 +178,6 @@ Multi-step code analysis using Google ADK. An analyst agent delegates to special
 | POST | `/api/v1/blast` | JSON |
 | POST | `/api/v1/agent/chat` | SSE |
 | POST | `/api/v1/flow` | JSON |
-| POST | `/api/v1/history` | JSON |
 | POST | `/api/v1/find-root` | SSE |
 | POST | `/api/v1/api/discover` | JSON |
 | POST | `/api/v1/api/spec` | JSON |

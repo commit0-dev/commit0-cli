@@ -68,7 +68,6 @@ The codebase follows a ports-and-adapters pattern. Domain logic depends only on 
 | `AgentRunner` | Multi-turn agent conversations | Google ADK |
 | `Parser` | Source file to AST nodes and edges | tree-sitter (CGO) |
 | `FileWalker` | Repository file enumeration | OS filesystem |
-| `TemporalStore` | Commit-aware graph operations | SurrealDB |
 | `MemoryStore` | Persistent memory with vector retrieval | SurrealDB |
 | `GitWalker` | Git history access | git CLI |
 

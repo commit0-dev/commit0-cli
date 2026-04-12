@@ -113,9 +113,6 @@ Extractors produce `data_dep` edges with variable name, definition line, and use
 
 Extractors identify HTTP handler registrations and produce `route` edges with `http_method`, `http_path`, and `middleware` properties. The `RouteLinker` resolves handler function references.
 
-### Temporal Analysis
-
-Git history is accessed through the `GitWalker` interface. Commit diffs are re-parsed and compared against the current graph. Temporal metadata (introduced commit, last modified commit) is managed by the `TemporalStore` port, which is separate from `OpenCodeGraph` because temporal operations are orthogonal to graph structure.
 
 ---
 

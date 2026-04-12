@@ -187,7 +187,6 @@ type serveServices struct {
 	graph      domain.OpenCodeGraph
 	agent      domain.AgentRunner
 	flow       *app.FieldFlowService
-	temporal   *app.TemporalService
 	rootCause  *app.RootCauseAnalysisService
 	apiSurface *app.APISurfaceService
 	syncSvc    *app.SyncService
@@ -215,11 +214,10 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	traceSvc := app.NewTraceService(graph, d.embedder, d.explainer, cfg)
 	blastSvc := app.NewBlastService(graph, d.explainer, cfg)
 
-	// Field flow + temporal services (for root cause analysis)
+	// Field flow + root cause analysis services.
 	flowSvc := app.NewFieldFlowService(graph, d.embedder, d.explainer, cfg)
 	gitW := gitadapter.NewWalker(log)
-	tempSvc := app.NewTemporalService(graph, d.db, gitW, d.parser)
-	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, tempSvc, graph, gitW, d.explainer, cfg)
+	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, nil, graph, gitW, d.explainer, cfg)
 
 	// Memory management (3-tier: working → session → persistent).
 	memMgr := memory.NewManager(d.db.AsMemoryStore(), d.embedder, nil, memory.DefaultBudgets())
@@ -236,7 +234,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 
 	var agentRunner domain.AgentRunner
 	agentSvc, err := agentpkg.NewAgentService(
-		querySvc, traceSvc, blastSvc, flowSvc, tempSvc, rootCauseSvc,
+		querySvc, traceSvc, blastSvc, flowSvc, nil, rootCauseSvc,
 		graph, gitW, d.explainer, cfg, memMgr, llmModel,
 	)
 	if err != nil {
@@ -249,7 +247,6 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	if cfg.EmbedProvider == "ollama" {
 		indexSvc.SetDocPrefix(localadapter.DocPrefixForModel(cfg.Ollama.EmbedModel))
 	}
-	indexSvc.SetTemporalService(tempSvc)
 	indexSvc.SetLinkers([]domain.EdgeLinker{
 		&linkers.DefinesLinker{},
 		&linkers.CallLinker{},
@@ -310,7 +307,6 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		graph:       graph,
 		agent:      agentRunner,
 		flow:       flowSvc,
-		temporal:   tempSvc,
 		rootCause:  rootCauseSvc,
 		apiSurface: apiSurfaceSvc,
 		syncSvc:    syncSvc,

@@ -48,7 +48,7 @@ var serveCmd = &cobra.Command{
 			svcs.graph,
 			svcs.agent,
 			svcs.flow,
-			svcs.temporal,
+			nil, // temporal: enterprise feature
 			svcs.rootCause,
 			svcs.apiSurface,
 			&cfg.Server,

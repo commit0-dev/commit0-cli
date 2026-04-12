@@ -39,7 +39,6 @@ commit0/
 │   │   │   ├── blast_service.go         Impact analysis
 │   │   │   ├── repo_service.go          Repository CRUD
 │   │   │   ├── field_flow_service.go    Data flow tracing
-│   │   │   ├── temporal_service.go      Git history queries
 │   │   │   ├── rootcause_analysis_service.go  Root cause analysis
 │   │   │   ├── analysis_service.go      Security analysis
 │   │   │   ├── api_surface_service.go   Endpoint discovery
@@ -96,7 +95,7 @@ commit0/
 │   ├── main.go
 │   └── cmd/                             CLI commands
 │       ├── query.go  trace.go  blast.go  index.go
-│       ├── flow.go  history.go  findroot.go
+│       ├── flow.go  findroot.go
 │       ├── repo.go  api.go  analyze.go
 │       └── report.go
 ├── sdk/                                 Go SDK
