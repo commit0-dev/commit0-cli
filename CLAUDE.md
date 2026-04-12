@@ -6,7 +6,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 - `internal/domain/` and `pkg/types/` — **zero** external imports, ever.
 - `internal/app/` composes port interfaces only — never import adapters.
-- `internal/app/agent/delegate.go` uses `ModelFactory`, never concrete model imports.
+- `internal/app/agent/delegate.go` uses `SubRunnerFactory`, never concrete model imports.
 - Domain errors from `internal/domain/errors.go`, not raw `fmt.Errorf`.
 - Bounded goroutines only — `errgroup.WithContext` + `SetLimit(N)`.
 - HTTP clients: Resty v3 (`resty.dev/v3`). Never raw `net/http` for outbound.
@@ -22,7 +22,7 @@ This file provides guidance to Claude Code when working with this repository.
 | Database | SurrealDB 3.0 (graph + HNSW vector + BM25 FTS) |
 | Embeddings | Gemini / Voyage / Ollama (`EMBED_PROVIDER`) |
 | LLM | Gemini / OpenRouter / Ollama (`LLM_PROVIDER`) |
-| Agent | Google ADK v1.0.0 with ModelFactory injection |
+| Agent | CloudWeGo Eino v0.8 with SubRunnerFactory injection |
 | HTTP Server | Gin + gin-contrib/cors + gin-contrib/requestid |
 | HTTP Client | Resty v3 (outbound APIs + CLI→server) |
 | CLI | Cobra + Viper |

@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"google.golang.org/adk/tool"
-	"google.golang.org/adk/tool/functiontool"
-
 	"github.com/commit0-dev/commit0/server/internal/app"
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
-// BuildTools creates ADK tools wrapping commit0's services.
+// BuildTools creates the agent tools wrapping commit0's services.
 func BuildTools(
 	querySvc *app.QueryService,
 	traceSvc *app.TraceService,
@@ -23,112 +20,35 @@ func BuildTools(
 	graph domain.OpenCodeGraph,
 	gitWalker domain.GitWalker,
 	explainer domain.LLMExplainer,
-) ([]tool.Tool, error) {
-	var tools []tool.Tool
-	var t tool.Tool
-	var err error
+) []AgentTool {
+	var tools []AgentTool
 
-	// --- Existing tools ---
-
-	t, err = newSearchTool(querySvc)
-	if err != nil {
-		return nil, fmt.Errorf("search: %w", err)
-	}
-	tools = append(tools, t)
-
-	t, err = newTraceTool(traceSvc)
-	if err != nil {
-		return nil, fmt.Errorf("trace: %w", err)
-	}
-	tools = append(tools, t)
-
-	t, err = newBlastTool(blastSvc)
-	if err != nil {
-		return nil, fmt.Errorf("blast: %w", err)
-	}
-	tools = append(tools, t)
-
-	t, err = newLookupTool(graph)
-	if err != nil {
-		return nil, fmt.Errorf("lookup: %w", err)
-	}
-	tools = append(tools, t)
-
-	t, err = newNeighborhoodTool(graph)
-	if err != nil {
-		return nil, fmt.Errorf("neighborhood: %w", err)
-	}
-	tools = append(tools, t)
-
-	// --- New tools for commit zero detection ---
+	tools = append(tools, &searchTool{svc: querySvc})
+	tools = append(tools, &traceTool{svc: traceSvc})
+	tools = append(tools, &blastTool{svc: blastSvc})
+	tools = append(tools, &lookupTool{graph: graph})
+	tools = append(tools, &neighborhoodTool{graph: graph})
 
 	if flowSvc != nil {
-		t, err = newFieldFlowTool(flowSvc)
-		if err != nil {
-			return nil, fmt.Errorf("flow: %w", err)
-		}
-		tools = append(tools, t)
+		tools = append(tools, &fieldFlowTool{svc: flowSvc})
 	}
-
 	if tempSvc != nil {
-		t, err = newTemporalTool(tempSvc)
-		if err != nil {
-			return nil, fmt.Errorf("temporal: %w", err)
-		}
-		tools = append(tools, t)
+		tools = append(tools, &temporalTool{svc: tempSvc})
 	}
-
 	if gitWalker != nil && explainer != nil {
-		t, err = newAnalyzeCommitTool(gitWalker, explainer)
-		if err != nil {
-			return nil, fmt.Errorf("analyze_commit: %w", err)
-		}
-		tools = append(tools, t)
+		tools = append(tools, &analyzeCommitTool{gitWalker: gitWalker, explainer: explainer})
 	}
-
 	if rootCauseSvc != nil {
-		t, err = newFindRootCauseTool(rootCauseSvc)
-		if err != nil {
-			return nil, fmt.Errorf("find_root: %w", err)
-		}
-		tools = append(tools, t)
+		tools = append(tools, &findRootCauseTool{svc: rootCauseSvc})
 	}
 
-	// write_report — presentation tool for structured terminal output.
-	t, err = newWriteReportTool()
-	if err != nil {
-		return nil, fmt.Errorf("write_report: %w", err)
-	}
-	tools = append(tools, t)
+	tools = append(tools, &writeReportTool{})
 
-	return tools, nil
-}
-
-// getRepoSlug extracts repo_slug from the tool context state.
-func getRepoSlug(ctx tool.Context) string {
-	if state := ctx.ReadonlyState(); state != nil {
-		if v, err := state.Get("repo_slug"); err == nil {
-			if s, ok := v.(string); ok {
-				return s
-			}
-		}
-	}
-	return ""
-}
-
-func getRepoPath(ctx tool.Context) string {
-	if state := ctx.ReadonlyState(); state != nil {
-		if v, err := state.Get("repo_path"); err == nil {
-			if s, ok := v.(string); ok {
-				return s
-			}
-		}
-	}
-	return "."
+	return tools
 }
 
 // ==========================================================================
-// Existing tools (search, trace, blast, lookup, neighborhood)
+// Search tool
 // ==========================================================================
 
 type searchInput struct {
@@ -151,53 +71,65 @@ type searchResult struct {
 	Summary   string   `json:"summary,omitempty"`
 	Docstring string   `json:"docstring,omitempty"`
 	Concepts  []string `json:"concepts,omitempty"`
-	Body      string   `json:"body,omitempty"` // truncated to 1500 chars
+	Body      string   `json:"body,omitempty"`
 }
 
-func newSearchTool(svc *app.QueryService) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
-		Name:        "search_code",
-		Description: "Search the codebase using natural language. Returns ranked functions and classes with relevance scores.",
-	}, func(ctx tool.Context, input searchInput) (searchOutput, error) {
-		topK := input.TopK
-		if topK <= 0 {
-			topK = 10
-		}
-		if topK > 20 {
-			topK = 20 // cap to reduce token consumption and avoid rate limits
-		}
-		result, err := svc.Query(context.Background(), app.QueryRequest{
-			Question: input.Question, RepoSlug: getRepoSlug(ctx), TopK: topK,
-			NoExplain: true, // agent generates its own explanation — skip LLM explain call
-			FilePath: input.FilePath,
-		})
-		if err != nil {
-			return searchOutput{}, err
-		}
-		out := searchOutput{ResultCount: len(result.Nodes)}
-		for _, n := range result.Nodes {
-			body := n.Node.Body
-			if len(body) > 1500 {
-				body = body[:1500] + "\n// ... truncated"
-			}
-			out.Results = append(out.Results, searchResult{
-				Qualified: n.Node.Qualified, Kind: string(n.Node.Kind),
-				FilePath: n.Node.FilePath, StartLine: n.Node.StartLine,
-				EndLine: n.Node.EndLine, Score: n.FusedScore,
-				Signature: n.Node.Signature, Summary: n.Node.Summary,
-				Docstring: n.Node.Docstring, Concepts: n.Node.Concepts,
-				Body: body,
-			})
-		}
-		return out, nil
-	})
+type searchTool struct{ svc *app.QueryService }
+
+func (t *searchTool) Def() ToolDef {
+	return ToolDef{
+		Name:         "search_code",
+		Description:  "Search the codebase using natural language. Returns ranked functions and classes with relevance scores.",
+		InputExample: searchInput{},
+	}
 }
+
+func (t *searchTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input searchInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	topK := input.TopK
+	if topK <= 0 {
+		topK = 10
+	}
+	if topK > 20 {
+		topK = 20
+	}
+	result, err := t.svc.Query(context.Background(), app.QueryRequest{
+		Question: input.Question, RepoSlug: RepoSlugFrom(ctx), TopK: topK,
+		NoExplain: true, FilePath: input.FilePath,
+	})
+	if err != nil {
+		return "", err
+	}
+	out := searchOutput{ResultCount: len(result.Nodes)}
+	for _, n := range result.Nodes {
+		body := n.Node.Body
+		if len(body) > 1500 {
+			body = body[:1500] + "\n// ... truncated"
+		}
+		out.Results = append(out.Results, searchResult{
+			Qualified: n.Node.Qualified, Kind: string(n.Node.Kind),
+			FilePath: n.Node.FilePath, StartLine: n.Node.StartLine,
+			EndLine: n.Node.EndLine, Score: n.FusedScore,
+			Signature: n.Node.Signature, Summary: n.Node.Summary,
+			Docstring: n.Node.Docstring, Concepts: n.Node.Concepts,
+			Body: body,
+		})
+	}
+	return marshalJSON(out)
+}
+
+// ==========================================================================
+// Trace tool
+// ==========================================================================
 
 type traceInput struct {
 	Symbol     string   `json:"symbol"`
 	Direction  string   `json:"direction"`
 	Depth      int      `json:"depth"`
-	EdgeLabels []string `json:"edge_labels"` // which edge types: calls, data_flow, reads, writes. Empty = calls.
+	EdgeLabels []string `json:"edge_labels"`
 }
 type traceHop struct {
 	Qualified string `json:"qualified"`
@@ -213,45 +145,58 @@ type traceOutput struct {
 	Hops      []traceHop `json:"hops"`
 }
 
-func newTraceTool(svc *app.TraceService) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
-		Name:        "trace_calls",
-		Description: "Follow edges forward (callees/sinks) or reverse (callers/sources) from a function. Set edge_labels to choose which edges: calls, data_flow, reads, writes. Default: calls only.",
-	}, func(ctx tool.Context, input traceInput) (traceOutput, error) {
-		dir := input.Direction
-		if dir == "" {
-			dir = "forward"
-		}
-		depth := input.Depth
-		if depth <= 0 {
-			depth = 5
-		}
-		result, err := svc.Trace(context.Background(), app.TraceRequest{
-			Symbol: input.Symbol, RepoSlug: getRepoSlug(ctx), Direction: dir, Depth: depth,
-			EdgeLabels: input.EdgeLabels,
-		})
-		if err != nil {
-			return traceOutput{}, err
-		}
-		out := traceOutput{
-			Direction: result.Direction, HopCount: len(result.Tree),
-			Root: result.Root.Qualified,
-		}
-		for _, hop := range result.Tree {
-			out.Hops = append(out.Hops, traceHop{
-				Qualified: hop.Node.Qualified, FilePath: hop.Node.FilePath,
-				Line: hop.Node.StartLine, Signature: hop.Node.Signature,
-				Depth: hop.Depth,
-			})
-		}
-		return out, nil
-	})
+type traceTool struct{ svc *app.TraceService }
+
+func (t *traceTool) Def() ToolDef {
+	return ToolDef{
+		Name:         "trace_calls",
+		Description:  "Follow edges forward (callees/sinks) or reverse (callers/sources) from a function. Set edge_labels to choose which edges: calls, data_flow, reads, writes. Default: calls only.",
+		InputExample: traceInput{},
+	}
 }
+
+func (t *traceTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input traceInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	dir := input.Direction
+	if dir == "" {
+		dir = "forward"
+	}
+	depth := input.Depth
+	if depth <= 0 {
+		depth = 5
+	}
+	result, err := t.svc.Trace(context.Background(), app.TraceRequest{
+		Symbol: input.Symbol, RepoSlug: RepoSlugFrom(ctx), Direction: dir, Depth: depth,
+		EdgeLabels: input.EdgeLabels,
+	})
+	if err != nil {
+		return "", err
+	}
+	out := traceOutput{
+		Direction: result.Direction, HopCount: len(result.Tree),
+		Root: result.Root.Qualified,
+	}
+	for _, hop := range result.Tree {
+		out.Hops = append(out.Hops, traceHop{
+			Qualified: hop.Node.Qualified, FilePath: hop.Node.FilePath,
+			Line: hop.Node.StartLine, Signature: hop.Node.Signature,
+			Depth: hop.Depth,
+		})
+	}
+	return marshalJSON(out)
+}
+
+// ==========================================================================
+// Blast radius tool
+// ==========================================================================
 
 type blastInput struct {
 	Symbol     string   `json:"symbol"`
 	MaxDepth   int      `json:"max_depth"`
-	EdgeLabels []string `json:"edge_labels"` // which edge types. Empty = calls.
+	EdgeLabels []string `json:"edge_labels"`
 }
 type blastOutput struct {
 	AffectedCount int      `json:"affected_count"`
@@ -259,71 +204,104 @@ type blastOutput struct {
 	Affected      []string `json:"affected"`
 }
 
-func newBlastTool(svc *app.BlastService) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
-		Name:        "blast_radius",
-		Description: "Analyze what would break if a given function changes. Set edge_labels to include data_flow for broader impact. Default: calls only.",
-	}, func(ctx tool.Context, input blastInput) (blastOutput, error) {
-		maxDepth := input.MaxDepth
-		if maxDepth <= 0 {
-			maxDepth = 3
-		}
-		result, err := svc.Blast(context.Background(), app.BlastRequest{
-			Symbol: input.Symbol, RepoSlug: getRepoSlug(ctx), MaxDepth: maxDepth,
-			EdgeLabels: input.EdgeLabels,
-		})
-		if err != nil {
-			return blastOutput{}, err
-		}
-		var affected []string
-		for _, a := range result.Affected {
-			affected = append(affected, fmt.Sprintf("[depth %d] %s (%s)", a.HopCount, a.Node.Qualified, a.Path))
-		}
-		return blastOutput{AffectedCount: len(result.Affected), Summary: result.Summary, Affected: affected}, nil
-	})
+type blastTool struct{ svc *app.BlastService }
+
+func (t *blastTool) Def() ToolDef {
+	return ToolDef{
+		Name:         "blast_radius",
+		Description:  "Analyze what would break if a given function changes. Set edge_labels to include data_flow for broader impact. Default: calls only.",
+		InputExample: blastInput{},
+	}
 }
+
+func (t *blastTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input blastInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	maxDepth := input.MaxDepth
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
+	result, err := t.svc.Blast(context.Background(), app.BlastRequest{
+		Symbol: input.Symbol, RepoSlug: RepoSlugFrom(ctx), MaxDepth: maxDepth,
+		EdgeLabels: input.EdgeLabels,
+	})
+	if err != nil {
+		return "", err
+	}
+	var affected []string
+	for _, a := range result.Affected {
+		affected = append(affected, fmt.Sprintf("[depth %d] %s (%s)", a.HopCount, a.Node.Qualified, a.Path))
+	}
+	return marshalJSON(blastOutput{AffectedCount: len(result.Affected), Summary: result.Summary, Affected: affected})
+}
+
+// ==========================================================================
+// Lookup tool
+// ==========================================================================
 
 type lookupInput struct {
 	Qualified string `json:"qualified"`
 }
 
-func newLookupTool(graph domain.OpenCodeGraph) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
-		Name:        "lookup_node",
-		Description: "Look up a specific function or class by its qualified name.",
-	}, func(ctx tool.Context, input lookupInput) (json.RawMessage, error) {
-		node, err := graph.FindNode(context.Background(), getRepoSlug(ctx), input.Qualified)
-		if err != nil {
-			return nil, err
-		}
-		b, _ := json.Marshal(node)
-		return b, nil
-	})
+type lookupTool struct{ graph domain.OpenCodeGraph }
+
+func (t *lookupTool) Def() ToolDef {
+	return ToolDef{
+		Name:         "lookup_node",
+		Description:  "Look up a specific function or class by its qualified name.",
+		InputExample: lookupInput{},
+	}
 }
+
+func (t *lookupTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input lookupInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	node, err := t.graph.FindNode(context.Background(), RepoSlugFrom(ctx), input.Qualified)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(node)
+	return string(b), nil
+}
+
+// ==========================================================================
+// Neighborhood tool
+// ==========================================================================
 
 type neighborhoodInput struct {
 	NodeID string `json:"node_id"`
 }
 
-func newNeighborhoodTool(graph domain.OpenCodeGraph) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
-		Name:        "get_neighborhood",
-		Description: "Get callers, callees, and data flow for a code node by its ID.",
-	}, func(ctx tool.Context, input neighborhoodInput) (json.RawMessage, error) {
-		nb, err := graph.Neighbors(context.Background(), input.NodeID)
-		if err != nil {
-			return nil, err
-		}
-		b, _ := json.Marshal(nb)
-		return b, nil
-	})
+type neighborhoodTool struct{ graph domain.OpenCodeGraph }
+
+func (t *neighborhoodTool) Def() ToolDef {
+	return ToolDef{
+		Name:         "get_neighborhood",
+		Description:  "Get callers, callees, and data flow for a code node by its ID.",
+		InputExample: neighborhoodInput{},
+	}
+}
+
+func (t *neighborhoodTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input neighborhoodInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	nb, err := t.graph.Neighbors(context.Background(), input.NodeID)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(nb)
+	return string(b), nil
 }
 
 // ==========================================================================
-// New tools for commit zero detection
+// Field Flow Trace tool
 // ==========================================================================
-
-// --- Field Flow Trace Tool ---
 
 type fieldFlowInput struct {
 	Symbol        string `json:"symbol"`
@@ -351,57 +329,60 @@ type chainInfo struct {
 	Functions []string `json:"functions"`
 }
 
-func newFieldFlowTool(svc *app.FieldFlowService) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
+type fieldFlowTool struct{ svc *app.FieldFlowService }
+
+func (t *fieldFlowTool) Def() ToolDef {
+	return ToolDef{
 		Name: "flow_trace",
 		Description: "Trace field-level data flow through the codebase. Shows how a specific " +
 			"data field (e.g. user.Email) flows through functions, and where it gets mutated. " +
 			"Use this to find taint chains — where data is transformed in ways that cause downstream bugs.",
-	}, func(ctx tool.Context, input fieldFlowInput) (fieldFlowOutput, error) {
-		dir := input.Direction
-		if dir == "" {
-			dir = "both"
-		}
-		result, err := svc.TraceFieldFlow(context.Background(), app.FieldFlowRequest{
-			Symbol:        input.Symbol,
-			FieldPath:     input.FieldPath,
-			RepoSlug:      getRepoSlug(ctx),
-			Direction:     dir,
-			Depth:         10,
-			ShowMutations: input.ShowMutations,
-		})
-		if err != nil {
-			return fieldFlowOutput{}, err
-		}
-		out := fieldFlowOutput{ChainCount: len(result.Chains)}
-		for _, chain := range result.Chains {
-			out.MutationCount += len(chain.Mutations)
-			// Collect taint points
-			if chain.TaintPoint != nil {
-				tp := chain.TaintPoint
-				out.TaintPoints = append(out.TaintPoints, taintPointInfo{
-					Function:     tp.Node.Qualified,
-					FilePath:     tp.Node.FilePath,
-					Line:         tp.MutationLine,
-					MutationType: string(tp.MutationType),
-					MutationExpr: tp.MutationExpr,
-					FieldPath:    tp.FieldPath,
-				})
-			}
-			// Summarize chain
-			var funcs []string
-			for _, hop := range chain.Hops {
-				funcs = append(funcs, hop.Node.Qualified)
-			}
-			out.Chains = append(out.Chains, chainInfo{
-				FieldPath: chain.FieldPath, HopCount: len(chain.Hops), Functions: funcs,
-			})
-		}
-		return out, nil
-	})
+		InputExample: fieldFlowInput{},
+	}
 }
 
-// --- Temporal Query Tool ---
+func (t *fieldFlowTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input fieldFlowInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	dir := input.Direction
+	if dir == "" {
+		dir = "both"
+	}
+	result, err := t.svc.TraceFieldFlow(context.Background(), app.FieldFlowRequest{
+		Symbol: input.Symbol, FieldPath: input.FieldPath,
+		RepoSlug: RepoSlugFrom(ctx), Direction: dir,
+		Depth: 10, ShowMutations: input.ShowMutations,
+	})
+	if err != nil {
+		return "", err
+	}
+	out := fieldFlowOutput{ChainCount: len(result.Chains)}
+	for _, chain := range result.Chains {
+		out.MutationCount += len(chain.Mutations)
+		if chain.TaintPoint != nil {
+			tp := chain.TaintPoint
+			out.TaintPoints = append(out.TaintPoints, taintPointInfo{
+				Function: tp.Node.Qualified, FilePath: tp.Node.FilePath,
+				Line: tp.MutationLine, MutationType: string(tp.MutationType),
+				MutationExpr: tp.MutationExpr, FieldPath: tp.FieldPath,
+			})
+		}
+		var funcs []string
+		for _, hop := range chain.Hops {
+			funcs = append(funcs, hop.Node.Qualified)
+		}
+		out.Chains = append(out.Chains, chainInfo{
+			FieldPath: chain.FieldPath, HopCount: len(chain.Hops), Functions: funcs,
+		})
+	}
+	return marshalJSON(out)
+}
+
+// ==========================================================================
+// Temporal Query tool
+// ==========================================================================
 
 type temporalInput struct {
 	Symbol     string `json:"symbol"`
@@ -424,51 +405,59 @@ type changeInfo struct {
 	ChangeType string `json:"change_type"`
 }
 
-func newTemporalTool(svc *app.TemporalService) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
+type temporalTool struct{ svc *app.TemporalService }
+
+func (t *temporalTool) Def() ToolDef {
+	return ToolDef{
 		Name: "temporal_query",
 		Description: "Query the temporal history of a code element. Shows when a function was " +
 			"introduced, when it was last modified, and what commits changed it. " +
 			"Use this to find WHEN a suspicious change was made.",
-	}, func(ctx tool.Context, input temporalInput) (temporalOutput, error) {
-		changes, err := svc.QueryHistory(context.Background(), app.TemporalQueryRequest{
-			RepoSlug:      getRepoSlug(ctx),
-			NodeQualified: input.Symbol,
-			FromCommit:    input.FromCommit,
-			ToCommit:      input.ToCommit,
-		})
-		if err != nil {
-			return temporalOutput{}, err
-		}
-		out := temporalOutput{ChangeCount: len(changes)}
-		for _, c := range changes {
-			ct := "modified"
-			if len(c.NodesAdded) > 0 {
-				ct = "introduced"
-			}
-			if len(c.NodesRemoved) > 0 {
-				ct = "removed"
-			}
-			out.Changes = append(out.Changes, changeInfo{
-				CommitHash: c.CommitHash, Author: c.Author,
-				Message: c.CommitMessage, Timestamp: c.Timestamp.Format("2006-01-02 15:04"),
-				ChangeType: ct,
-			})
-		}
-		// Set top-level fields from first/last change
-		if len(changes) > 0 {
-			first := changes[0]
-			out.IntroducedCommit = first.CommitHash
-			out.IntroducedAt = first.Timestamp.Format("2006-01-02 15:04")
-			last := changes[len(changes)-1]
-			out.LastModifiedCommit = last.CommitHash
-			out.LastModifiedAt = last.Timestamp.Format("2006-01-02 15:04")
-		}
-		return out, nil
-	})
+		InputExample: temporalInput{},
+	}
 }
 
-// --- Analyze Commit Diff Tool ---
+func (t *temporalTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input temporalInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	changes, err := t.svc.QueryHistory(context.Background(), app.TemporalQueryRequest{
+		RepoSlug: RepoSlugFrom(ctx), NodeQualified: input.Symbol,
+		FromCommit: input.FromCommit, ToCommit: input.ToCommit,
+	})
+	if err != nil {
+		return "", err
+	}
+	out := temporalOutput{ChangeCount: len(changes)}
+	for _, c := range changes {
+		ct := "modified"
+		if len(c.NodesAdded) > 0 {
+			ct = "introduced"
+		}
+		if len(c.NodesRemoved) > 0 {
+			ct = "removed"
+		}
+		out.Changes = append(out.Changes, changeInfo{
+			CommitHash: c.CommitHash, Author: c.Author,
+			Message: c.CommitMessage, Timestamp: c.Timestamp.Format("2006-01-02 15:04"),
+			ChangeType: ct,
+		})
+	}
+	if len(changes) > 0 {
+		first := changes[0]
+		out.IntroducedCommit = first.CommitHash
+		out.IntroducedAt = first.Timestamp.Format("2006-01-02 15:04")
+		last := changes[len(changes)-1]
+		out.LastModifiedCommit = last.CommitHash
+		out.LastModifiedAt = last.Timestamp.Format("2006-01-02 15:04")
+	}
+	return marshalJSON(out)
+}
+
+// ==========================================================================
+// Analyze Commit Diff tool
+// ==========================================================================
 
 type analyzeCommitInput struct {
 	CommitHash string `json:"commit_hash"`
@@ -482,124 +471,138 @@ type analyzeCommitOutput struct {
 	RiskAreas    []string `json:"risk_areas"`
 }
 
-func newAnalyzeCommitTool(gitWalker domain.GitWalker, explainer domain.LLMExplainer) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
+type analyzeCommitTool struct {
+	gitWalker domain.GitWalker
+	explainer domain.LLMExplainer
+}
+
+func (t *analyzeCommitTool) Def() ToolDef {
+	return ToolDef{
 		Name: "analyze_commit_diff",
 		Description: "Analyze a specific git commit's diff to understand what changed and assess " +
 			"its risk. Shows files changed, a summary of the modifications, and potential risk areas. " +
 			"Use this to VERIFY whether a suspect commit could have caused a bug.",
-	}, func(ctx tool.Context, input analyzeCommitInput) (analyzeCommitOutput, error) {
-		repoPath := getRepoPath(ctx)
-
-		info, err := gitWalker.CommitInfo(context.Background(), repoPath, input.CommitHash)
-		if err != nil {
-			return analyzeCommitOutput{}, err
-		}
-		diffs, err := gitWalker.DiffCommit(context.Background(), repoPath, input.CommitHash)
-		if err != nil {
-			return analyzeCommitOutput{}, err
-		}
-
-		out := analyzeCommitOutput{
-			Hash:         info.Hash,
-			Author:       info.Author,
-			Message:      info.Message,
-			FilesChanged: len(diffs),
-		}
-
-		// Build diff summary for LLM analysis
-		var diffDesc string
-		for _, d := range diffs {
-			diffDesc += fmt.Sprintf("  %s %s (+%d -%d)\n", d.Status, d.Path, d.Additions, d.Deletions)
-			if d.Patch != "" && len(d.Patch) < 2000 {
-				diffDesc += d.Patch + "\n"
-			}
-		}
-
-		// Ask LLM to summarize the commit
-		if explainer != nil {
-			raw, err := explainer.ExplainStructured(context.Background(), domain.ExplainRequest{
-				QueryType: "search",
-				UserQuery: fmt.Sprintf(
-					"Analyze this commit and identify risk areas:\nCommit: %s\nAuthor: %s\nMessage: %s\n\nChanges:\n%s",
-					info.Hash[:8], info.Author, info.Message, diffDesc,
-				),
-				ResponseSchema: domain.SchemaForQueryType("search"),
-			})
-			if err == nil {
-				var result struct {
-					Overview string   `json:"overview"`
-					Insights []string `json:"insights"`
-				}
-				if json.Unmarshal(raw, &result) == nil {
-					out.Summary = result.Overview
-					out.RiskAreas = result.Insights
-				}
-			}
-		}
-
-		if out.Summary == "" {
-			out.Summary = fmt.Sprintf("Commit %s by %s: %s (%d files changed)", info.Hash[:8], info.Author, info.Message, len(diffs))
-		}
-
-		return out, nil
-	})
+		InputExample: analyzeCommitInput{},
+	}
 }
 
-// --- Find Root Cause Tool (automated pipeline) ---
+func (t *analyzeCommitTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input analyzeCommitInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	repoPath := RepoPathFrom(ctx)
+
+	info, err := t.gitWalker.CommitInfo(context.Background(), repoPath, input.CommitHash)
+	if err != nil {
+		return "", err
+	}
+	diffs, err := t.gitWalker.DiffCommit(context.Background(), repoPath, input.CommitHash)
+	if err != nil {
+		return "", err
+	}
+
+	out := analyzeCommitOutput{
+		Hash: info.Hash, Author: info.Author,
+		Message: info.Message, FilesChanged: len(diffs),
+	}
+
+	var diffDesc string
+	for _, d := range diffs {
+		diffDesc += fmt.Sprintf("  %s %s (+%d -%d)\n", d.Status, d.Path, d.Additions, d.Deletions)
+		if d.Patch != "" && len(d.Patch) < 2000 {
+			diffDesc += d.Patch + "\n"
+		}
+	}
+
+	if t.explainer != nil {
+		raw, err := t.explainer.ExplainStructured(context.Background(), domain.ExplainRequest{
+			QueryType: "search",
+			UserQuery: fmt.Sprintf(
+				"Analyze this commit and identify risk areas:\nCommit: %s\nAuthor: %s\nMessage: %s\n\nChanges:\n%s",
+				info.Hash[:8], info.Author, info.Message, diffDesc,
+			),
+			ResponseSchema: domain.SchemaForQueryType("search"),
+		})
+		if err == nil {
+			var result struct {
+				Overview string   `json:"overview"`
+				Insights []string `json:"insights"`
+			}
+			if json.Unmarshal(raw, &result) == nil {
+				out.Summary = result.Overview
+				out.RiskAreas = result.Insights
+			}
+		}
+	}
+
+	if out.Summary == "" {
+		out.Summary = fmt.Sprintf("Commit %s by %s: %s (%d files changed)", info.Hash[:8], info.Author, info.Message, len(diffs))
+	}
+
+	return marshalJSON(out)
+}
+
+// ==========================================================================
+// Find Root Cause tool
+// ==========================================================================
 
 type findRootInput struct {
 	Description string `json:"description"`
 	Since       string `json:"since"`
 }
 type findRootOutput struct {
-	CommitZero    string   `json:"commit_zero"`
-	Author        string   `json:"author"`
-	Message       string   `json:"message"`
-	Confidence    float64  `json:"confidence"`
-	Explanation   string   `json:"explanation"`
-	SuggestedFix  string   `json:"suggested_fix"`
-	CausalChain   []string `json:"causal_chain"`
-	SuspectCount  int      `json:"suspect_count"`
+	CommitZero   string   `json:"commit_zero"`
+	Author       string   `json:"author"`
+	Message      string   `json:"message"`
+	Confidence   float64  `json:"confidence"`
+	Explanation  string   `json:"explanation"`
+	SuggestedFix string   `json:"suggested_fix"`
+	CausalChain  []string `json:"causal_chain"`
+	SuspectCount int      `json:"suspect_count"`
 }
 
-func newFindRootCauseTool(svc *app.RootCauseAnalysisService) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
+type findRootCauseTool struct{ svc *app.RootCauseAnalysisService }
+
+func (t *findRootCauseTool) Def() ToolDef {
+	return ToolDef{
 		Name: "find_root_cause",
 		Description: "Automatically find the commit that introduced a bug (commit zero). " +
 			"This runs the full 6-step root cause analysis: LOCATE relevant functions, " +
 			"TRACE data flow for mutations, query TIMELINE for when changes were introduced, " +
 			"CORRELATE to score suspect commits, VERIFY the top suspect, and REPORT findings. " +
 			"Use this for complex investigations that span multiple functions and commits.",
-	}, func(ctx tool.Context, input findRootInput) (findRootOutput, error) {
-		result, err := svc.FindRootCause(context.Background(), app.RootCauseRequest{
-			Description: input.Description,
-			RepoSlug:    getRepoSlug(ctx),
-			RepoPath:    getRepoPath(ctx),
-			Since:       input.Since,
-		})
-		if err != nil {
-			return findRootOutput{}, err
-		}
-		out := findRootOutput{
-			CommitZero:   result.CommitHash,
-			Author:       result.Author,
-			Message:      result.CommitMessage,
-			Confidence:   result.Confidence,
-			Explanation:  result.Explanation,
-			SuggestedFix: result.SuggestedFix,
-			SuspectCount: len(result.SuspectCommits),
-		}
-		for _, hop := range result.CausalChain {
-			out.CausalChain = append(out.CausalChain,
-				fmt.Sprintf("%s (%s:%d)", hop.Node.Qualified, hop.Node.FilePath, hop.Node.StartLine))
-		}
-		return out, nil
+		InputExample: findRootInput{},
+	}
+}
+
+func (t *findRootCauseTool) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	var input findRootInput
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	result, err := t.svc.FindRootCause(context.Background(), app.RootCauseRequest{
+		Description: input.Description, RepoSlug: RepoSlugFrom(ctx),
+		RepoPath: RepoPathFrom(ctx), Since: input.Since,
 	})
+	if err != nil {
+		return "", err
+	}
+	out := findRootOutput{
+		CommitZero: result.CommitHash, Author: result.Author,
+		Message: result.CommitMessage, Confidence: result.Confidence,
+		Explanation: result.Explanation, SuggestedFix: result.SuggestedFix,
+		SuspectCount: len(result.SuspectCommits),
+	}
+	for _, hop := range result.CausalChain {
+		out.CausalChain = append(out.CausalChain,
+			fmt.Sprintf("%s (%s:%d)", hop.Node.Qualified, hop.Node.FilePath, hop.Node.StartLine))
+	}
+	return marshalJSON(out)
 }
 
 // ==========================================================================
-// Presentation tool — structured terminal output
+// Write Report tool — presentation tool for structured terminal output
 // ==========================================================================
 
 // ReportSection is a single section of a structured report.
@@ -621,18 +624,31 @@ type ReportInput struct {
 	Sections []ReportSection `json:"sections"`
 }
 
-type reportAck struct {
-	Status string `json:"status"`
-}
+type writeReportTool struct{}
 
-func newWriteReportTool() (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
+func (t *writeReportTool) Def() ToolDef {
+	return ToolDef{
 		Name: "write_report",
 		Description: "Present your analysis as a structured report. ALWAYS use this tool to deliver " +
 			"your final answer instead of writing raw text. Structure your findings into sections with " +
 			"headings, explanations, code snippets, call chains, and file references. " +
 			"The report will be rendered with proper formatting for the user's display.",
-	}, func(_ tool.Context, _ ReportInput) (reportAck, error) {
-		return reportAck{Status: "rendered"}, nil
-	})
+		InputExample: ReportInput{},
+	}
+}
+
+func (t *writeReportTool) Invoke(_ context.Context, _ string) (string, error) {
+	return `{"status":"rendered"}`, nil
+}
+
+// ==========================================================================
+// Helper
+// ==========================================================================
+
+func marshalJSON(v any) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("marshal output: %w", err)
+	}
+	return string(b), nil
 }

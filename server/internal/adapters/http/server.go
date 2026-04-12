@@ -96,6 +96,7 @@ func (s *Server) registerMiddleware() {
 
 func (s *Server) registerRoutes() {
 	s.router.GET("/health", s.handleHealth)
+	s.router.GET("/healthz", s.handleHealthz)
 
 	v1 := s.router.Group("/api/v1")
 

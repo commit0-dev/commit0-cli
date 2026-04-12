@@ -38,6 +38,62 @@ func (s *Server) handleHealth(c *gin.Context) {
 	})
 }
 
+// healthzCheck represents the status of a single dependency.
+type healthzCheck struct {
+	Status string `json:"status"` // "ok" or "fail"
+	Detail string `json:"detail,omitempty"`
+}
+
+// handleHealthz is a readiness probe that checks all critical dependencies.
+// Returns 200 when every check passes, 503 if any check fails.
+func (s *Server) handleHealthz(c *gin.Context) {
+	checks := make(map[string]healthzCheck)
+	allOK := true
+
+	// 1. Database (SurrealDB) — lightweight read.
+	if s.repoSvc != nil {
+		_, err := s.repoSvc.ListRepos(c.Request.Context())
+		if err != nil {
+			checks["database"] = healthzCheck{Status: "fail", Detail: err.Error()}
+			allOK = false
+		} else {
+			checks["database"] = healthzCheck{Status: "ok"}
+		}
+	} else {
+		checks["database"] = healthzCheck{Status: "fail", Detail: "repo service not initialized"}
+		allOK = false
+	}
+
+	// 2. Graph store.
+	if s.graph != nil {
+		checks["graph"] = healthzCheck{Status: "ok"}
+	} else {
+		checks["graph"] = healthzCheck{Status: "fail", Detail: "graph store not initialized"}
+		allOK = false
+	}
+
+	// 3. Agent (LLM provider configured).
+	if s.agentRunner != nil {
+		checks["agent"] = healthzCheck{Status: "ok"}
+	} else {
+		checks["agent"] = healthzCheck{Status: "ok", Detail: "agent not configured (optional)"}
+	}
+
+	// 4. Provider info from config.
+	if s.fullCfg != nil {
+		checks["llm_provider"] = healthzCheck{Status: "ok", Detail: s.fullCfg.LLMProvider}
+		checks["embed_provider"] = healthzCheck{Status: "ok", Detail: s.fullCfg.EmbedProvider}
+	}
+
+	status := http.StatusOK
+	result := "ready"
+	if !allOK {
+		status = http.StatusServiceUnavailable
+		result = "not_ready"
+	}
+	c.JSON(status, gin.H{"status": result, "checks": checks})
+}
+
 // ---- Query ----------------------------------------------------------------
 
 type queryRequest struct {

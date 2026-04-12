@@ -8,12 +8,14 @@ import (
 
 	"google.golang.org/genai"
 
-	adkmodel "google.golang.org/adk/model"
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
+	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
+	"github.com/cloudwego/eino/components/model"
 
+	"github.com/commit0-dev/commit0/server/internal/adapters/eino"
 	"github.com/commit0-dev/commit0/server/internal/adapters/gemini"
 	gitadapter "github.com/commit0-dev/commit0/server/internal/adapters/git"
 	localadapter "github.com/commit0-dev/commit0/server/internal/adapters/local"
-	"github.com/commit0-dev/commit0/server/internal/adapters/openrouter"
 	consuladapter "github.com/commit0-dev/commit0/server/internal/adapters/consul"
 	mdnsadapter "github.com/commit0-dev/commit0/server/internal/adapters/mdns"
 	quicadapter "github.com/commit0-dev/commit0/server/internal/adapters/quic"
@@ -223,32 +225,92 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	memMgr := memory.NewManager(d.db.AsMemoryStore(), d.embedder, nil, memory.DefaultBudgets())
 	sessionSvc := d.db.AsSessionStore() // SurrealDB-backed session persistence
 
-	// Agent service (optional — constructor decides availability based on config).
-	// Create LLM model based on provider.
-	var llmModel adkmodel.LLM // nil = use Gemini fallback in AgentService
+	// Agent service — create Eino chat model based on LLM provider.
+	var chatModel model.ToolCallingChatModel
 	switch cfg.LLMProvider {
 	case "openrouter":
 		if cfg.OpenRouter.APIKey != "" {
-			orClient := openrouter.NewClient(cfg.OpenRouter.APIKey, cfg.OpenRouter.BaseURL)
-			llmModel = openrouter.NewModel(orClient, cfg.OpenRouter.Model, cfg.OpenRouter.MaxTokens)
-			log.Info("using OpenRouter LLM", "model", cfg.OpenRouter.Model)
+			cm, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+				APIKey:  cfg.OpenRouter.APIKey,
+				BaseURL: cfg.OpenRouter.BaseURL,
+				Model:   cfg.OpenRouter.Model,
+			})
+			if err != nil {
+				log.Warn("failed to create OpenRouter chat model", "err", err)
+			} else {
+				chatModel = cm
+				log.Info("using OpenRouter LLM", "model", cfg.OpenRouter.Model)
+			}
 		}
 	case "ollama":
 		if cfg.Ollama.Model != "" {
-			llmModel = localadapter.NewOllamaModel(cfg.Ollama.URL, cfg.Ollama.Model, 4096)
-			log.Info("using Ollama LLM for agent", "model", cfg.Ollama.Model, "url", cfg.Ollama.URL)
+			keepAlive := time.Duration(cfg.Ollama.KeepAliveSec) * time.Second
+			// Build Options — NumCtx lives in the embedded Runner so set after literal.
+			ollamaOpts := &einoollama.Options{
+				NumPredict:  cfg.Ollama.NumPredict,
+				Temperature: cfg.Ollama.Temperature,
+				TopP:        cfg.Ollama.TopP,
+				TopK:        cfg.Ollama.TopK,
+			}
+			ollamaOpts.NumCtx = cfg.Ollama.NumCtx // promoted field from embedded Runner
+			cm, err := einoollama.NewChatModel(ctx, &einoollama.ChatModelConfig{
+				BaseURL:   cfg.Ollama.URL,
+				Model:     cfg.Ollama.Model,
+				Timeout:   time.Duration(cfg.Ollama.TimeoutSec) * time.Second,
+				KeepAlive: &keepAlive,
+				Options:   ollamaOpts,
+			})
+			if err != nil {
+				log.Warn("failed to create Ollama chat model", "err", err)
+			} else {
+				chatModel = cm
+				log.Info("using Ollama LLM for agent",
+					"model", cfg.Ollama.Model,
+					"url", cfg.Ollama.URL,
+					"num_ctx", cfg.Ollama.NumCtx,
+					"temperature", cfg.Ollama.Temperature,
+					"top_p", cfg.Ollama.TopP,
+					"top_k", cfg.Ollama.TopK,
+				)
+			}
+		}
+	default:
+		// Gemini fallback — use eino-ext openai model pointed at Gemini's OpenAI-compatible endpoint,
+		// or create via Gemini genai client. For now, use OpenAI-compatible approach if API key is set.
+		if cfg.Gemini.APIKey != "" {
+			modelName := cfg.Gemini.ExplainModel
+			if modelName == "" {
+				modelName = "gemini-2.5-flash"
+			}
+			cm, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+				APIKey:  cfg.Gemini.APIKey,
+				BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+				Model:   modelName,
+			})
+			if err != nil {
+				log.Warn("failed to create Gemini chat model", "err", err)
+			} else {
+				chatModel = cm
+				log.Info("using Gemini LLM (via OpenAI compat)", "model", modelName)
+			}
 		}
 	}
 
 	var agentRunner domain.AgentRunner
-	agentSvc, err := agentpkg.NewAgentService(
-		querySvc, traceSvc, blastSvc, flowSvc, nil, rootCauseSvc,
-		graph, gitW, d.explainer, cfg, memMgr, llmModel,
-	)
-	if err != nil {
-		log.Warn("agent service unavailable", "err", err)
+	if chatModel != nil {
+		runnerPort := eino.NewRunner(chatModel)
+		subRunnerFactory := eino.NewSubRunnerFactory(chatModel)
+		agentSvc, err := agentpkg.NewAgentService(
+			querySvc, traceSvc, blastSvc, flowSvc, nil, rootCauseSvc,
+			graph, gitW, d.explainer, cfg, memMgr, runnerPort, subRunnerFactory,
+		)
+		if err != nil {
+			log.Warn("agent service unavailable", "err", err)
+		} else {
+			agentRunner = agentSvc
+		}
 	} else {
-		agentRunner = agentSvc
+		log.Warn("no LLM provider configured — agent service disabled")
 	}
 
 	indexSvc := app.NewIndexService(d.walker, d.parser, d.embedder, graph, d.explainer, cfg)

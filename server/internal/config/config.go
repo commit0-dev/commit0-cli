@@ -50,8 +50,17 @@ type OpenRouterConfig struct {
 // OllamaConfig holds local Ollama settings for LLM and embeddings.
 type OllamaConfig struct {
 	URL        string // Ollama API URL (default: http://localhost:11434)
-	Model      string // LLM model name (e.g. "gemma3:4b"). If set, uses local LLM.
+	Model      string // LLM model name (e.g. "gemma4:e2b"). If set, uses local LLM.
 	EmbedModel string // Embedding model (default: "nomic-embed-text")
+
+	// Generation parameters — tuned for gemma4 spec (temp=1.0, top_p=0.95, top_k=64).
+	NumCtx     int     // Context window size tokens (env: OLLAMA_NUM_CTX, default 8192)
+	NumPredict int     // Max tokens to generate (env: OLLAMA_NUM_PREDICT, default 2048)
+	Temperature float32 // Sampling temperature (env: OLLAMA_TEMPERATURE, default 1.0)
+	TopP        float32 // Nucleus sampling probability (env: OLLAMA_TOP_P, default 0.95)
+	TopK        int     // Top-k sampling (env: OLLAMA_TOP_K, default 64)
+	TimeoutSec  int     // HTTP request timeout in seconds (env: OLLAMA_TIMEOUT_SEC, default 300)
+	KeepAliveSec int   // Seconds to keep model loaded between requests (env: OLLAMA_KEEP_ALIVE_SEC, default 600)
 }
 
 // ServerConfig holds HTTP server settings.
@@ -146,9 +155,16 @@ func Load(cfgPath string) (*Config, error) {
 			MaxTokens: v.GetInt("openrouter.max_tokens"),
 		},
 		Ollama: OllamaConfig{
-			URL:        v.GetString("ollama.url"),
-			Model:      v.GetString("ollama.model"),
-			EmbedModel: v.GetString("ollama.embed_model"),
+			URL:          v.GetString("ollama.url"),
+			Model:        v.GetString("ollama.model"),
+			EmbedModel:   v.GetString("ollama.embed_model"),
+			NumCtx:       v.GetInt("ollama.num_ctx"),
+			NumPredict:   v.GetInt("ollama.num_predict"),
+			Temperature:  float32(v.GetFloat64("ollama.temperature")),
+			TopP:         float32(v.GetFloat64("ollama.top_p")),
+			TopK:         v.GetInt("ollama.top_k"),
+			TimeoutSec:   v.GetInt("ollama.timeout_sec"),
+			KeepAliveSec: v.GetInt("ollama.keep_alive_sec"),
 		},
 		Gemini: GeminiConfig{
 			APIKey:       v.GetString("gemini.api_key"),
@@ -237,6 +253,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ollama.url", "http://localhost:11434")
 	v.SetDefault("ollama.model", "")
 	v.SetDefault("ollama.embed_model", "nomic-embed-text")
+	// gemma4:e2b recommended generation params (128K ctx window; 8192 is practical for agentic use).
+	v.SetDefault("ollama.num_ctx", 8192)
+	v.SetDefault("ollama.num_predict", 2048)
+	v.SetDefault("ollama.temperature", 1.0)
+	v.SetDefault("ollama.top_p", 0.95)
+	v.SetDefault("ollama.top_k", 64)
+	v.SetDefault("ollama.timeout_sec", 300)
+	v.SetDefault("ollama.keep_alive_sec", 600)
 
 	v.SetDefault("voyage.model", "voyage-code-3")
 	v.SetDefault("voyage.base_url", "https://api.voyageai.com/v1")
@@ -280,9 +304,16 @@ func bindEnvs(v *viper.Viper) {
 		"openrouter.model":      "OPENROUTER_MODEL",
 		"openrouter.max_tokens": "OPENROUTER_MAX_TOKENS",
 
-		"ollama.url":         "OLLAMA_URL",
-		"ollama.model":       "OLLAMA_MODEL",
-		"ollama.embed_model": "OLLAMA_EMBED_MODEL",
+		"ollama.url":           "OLLAMA_URL",
+		"ollama.model":         "OLLAMA_MODEL",
+		"ollama.embed_model":   "OLLAMA_EMBED_MODEL",
+		"ollama.num_ctx":       "OLLAMA_NUM_CTX",
+		"ollama.num_predict":   "OLLAMA_NUM_PREDICT",
+		"ollama.temperature":   "OLLAMA_TEMPERATURE",
+		"ollama.top_p":         "OLLAMA_TOP_P",
+		"ollama.top_k":         "OLLAMA_TOP_K",
+		"ollama.timeout_sec":   "OLLAMA_TIMEOUT_SEC",
+		"ollama.keep_alive_sec": "OLLAMA_KEEP_ALIVE_SEC",
 
 		"voyage.api_key": "VOYAGE_API_KEY",
 		"voyage.model":   "VOYAGE_MODEL",
