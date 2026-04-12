@@ -803,9 +803,9 @@ func (a *SurrealAdapter) ListNodeIDs(ctx context.Context, repoSlug string) ([]st
 func (a *SurrealAdapter) ListFilePaths(ctx context.Context, repoSlug string) ([]string, error) {
 	// SurrealDB: use GROUP BY for distinct values, or just SELECT file_path
 	// and deduplicate client-side (simpler, avoids SQL dialect issues).
-	q := `SELECT file_path FROM function WHERE repo = $repo_ref;
-	SELECT file_path FROM class WHERE repo = $repo_ref;
-	SELECT path AS file_path FROM file WHERE repo = $repo_ref;`
+	q := "SELECT file_path FROM `function` WHERE repo = $repo_ref;" +
+		"SELECT file_path FROM `class` WHERE repo = $repo_ref;" +
+		"SELECT path AS file_path FROM `file` WHERE repo = $repo_ref;"
 
 	type row struct {
 		FilePath string `json:"file_path"`

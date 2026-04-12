@@ -111,19 +111,38 @@ type ollamaEmbedResponse struct {
 }
 
 // EmbedBatch embeds a batch of inputs using Ollama's /api/embed endpoint.
+// If the batch exceeds the Ollama limit, it is split internally.
+// Individual texts that exceed the model's context window are truncated.
 func (e *OllamaEmbedder) EmbedBatch(ctx context.Context, inputs []domain.EmbedInput) ([]domain.EmbedResult, error) {
 	if len(inputs) == 0 {
 		return nil, nil
 	}
+
+	// Split into sub-batches if needed (caller may send more than our limit).
 	if len(inputs) > e.batch {
-		return nil, domain.Validation(fmt.Sprintf(
-			"EmbedBatch: input count %d exceeds maximum batch size %d", len(inputs), e.batch,
-		))
+		var all []domain.EmbedResult
+		for i := 0; i < len(inputs); i += e.batch {
+			end := min(i+e.batch, len(inputs))
+			chunk, err := e.EmbedBatch(ctx, inputs[i:end])
+			if err != nil {
+				return nil, err
+			}
+			all = append(all, chunk...)
+		}
+		return all, nil
 	}
 
+	// Truncate individual texts to stay within the model's context window.
+	// nomic-embed-text (BERT-based): 2048 tokens. At ~3 chars/token for code,
+	// that is ~6000 chars max. Use 5000 for safety margin (prefix overhead).
+	const maxChars = 5000
 	texts := make([]string, len(inputs))
 	for i, inp := range inputs {
-		texts[i] = e.docPrefix + inp.Text
+		t := e.docPrefix + inp.Text
+		if len(t) > maxChars {
+			t = t[:maxChars]
+		}
+		texts[i] = t
 	}
 
 	embeddings, err := e.callAPI(ctx, texts)
