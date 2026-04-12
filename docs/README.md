@@ -1,9 +1,9 @@
-# commit0 Documentation
+# Documentation
 
-| Document | Purpose |
-|----------|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, hexagonal layers, tech stack, key decisions |
-| [BACKEND.md](BACKEND.md) | Services, port interfaces, HTTP API (21 endpoints), agent, configuration |
-| [DATABASE.md](DATABASE.md) | SurrealDB schema, HNSW tuning, traversal patterns, BM25 search |
-| [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) | Unified graph abstraction, six analysis techniques, edge resolution pipeline |
-| [LAYOUT.md](LAYOUT.md) | Annotated directory tree |
+| Document | Contents |
+|----------|----------|
+| [Architecture](ARCHITECTURE.md) | System design, hexagonal layers, technology choices |
+| [Backend](BACKEND.md) | Services, port interfaces, HTTP API, configuration |
+| [Database](DATABASE.md) | SurrealDB schema, vector indexes, traversal patterns |
+| [OpenCodeGraph](OPEN_CODE_GRAPH.md) | Graph abstraction, analysis techniques, edge resolution |
+| [Layout](LAYOUT.md) | Annotated directory tree |

@@ -1,157 +1,132 @@
-# commit0 — Architecture
+# Architecture
 
-> Graph-based source code analyzer. Single Go binary. Streamable HTTP client-server architecture.
-
-**See also:** [BACKEND.md](BACKEND.md) (services, adapters, API) · [DATABASE.md](DATABASE.md) (schema, indexes) · [PIPELINE.md](PIPELINE.md) (indexing, retrieval) · [LAYOUT.md](LAYOUT.md) (file tree)
+**See also:** [BACKEND.md](BACKEND.md) · [DATABASE.md](DATABASE.md) · [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) · [LAYOUT.md](LAYOUT.md)
 
 ---
 
-## 1. Vision
+## 1. Overview
 
-commit0 indexes any codebase into a knowledge graph — every function, class, and file is a node, every call/import/inheritance is an edge, and every entity carries a dense embedding. Users query in plain English, trace call chains, and analyze blast radius.
+commit0 parses source code into a graph where functions, classes, and files are nodes, and calls, imports, and data flows are edges. Each node carries a vector embedding for semantic search. The system exposes this graph through an HTTP API that supports natural-language queries, call-chain traversal, and impact analysis.
 
-```
-curl -fsSL https://install.commit0.dev | sh
-commit0 db start
-commit0 serve &
-commit0 index https://github.com/owner/repo
-commit0 query "where is the JWT middleware?"
-commit0 trace auth.ValidateToken --direction forward
-commit0 blast UserService.Create --max-depth 5
-```
-
-### Single Binary Philosophy
-
-One binary, no runtime deps, no Python, no Docker. SurrealDB is the only external dependency (commit0 can manage it locally via `commit0 db start`).
+The server is a single Go binary. The CLI is a separate binary that communicates with the server over HTTP.
 
 ---
 
-## 2. Client-Server Architecture
+## 2. Client-Server Model
 
-Streamable HTTP (POST + SSE), aligned with MCP specification patterns. The server owns all adapters and services. CLI commands are thin HTTP clients.
+The server owns all adapters and state. Clients communicate via HTTP with JSON request-response and Server-Sent Events (SSE) for streaming.
 
 ```
-  CLI (Go)       Web (React)     VSCode (TS)      Mobile
-    │                │               │               │
-    └────────────────┴───────────────┴───────────────┘
+  CLI (Go)       Web (React)     VSCode (TS)
+    │                │               │
+    └────────────────┴──────────���────┘
                           │
-                 ┌────────┴────────┐
-                 │  Streamable HTTP │  POST + SSE (JSON)
-                 └────────┬────────┘
+                   Streamable HTTP
+                  POST + SSE (JSON)
                           │
               ┌───────────┴───────────┐
               │    commit0 server     │
               │                       │
               │  ┌─────────────────┐  │
-              │  │ Application     │  │
-              │  │ Services        │  │  Index, Query, Trace, Blast, Repo,
-              │  │ (internal/app/) │  │  Agent, FieldFlow, Temporal, RootCause
+              │  │  Application    │  │
+              │  │  Services       │  │
               │  └────────┬────────┘  │
               │           │           │
               │  ┌────────┴────────┐  │
-              │  │ Driven Adapters │  │  SurrealDB, Gemini, OpenRouter,
-              │  │ (adapters/*)    │  │  Voyage, Ollama, tree-sitter
+              │  │ Driven Adapters │  │
               │  └─────────────────┘  │
               └───────────────────────┘
 ```
 
-### Communication Patterns
-
-| Pattern | Transport | Used By |
+| Pattern | Transport | Used by |
 |---------|-----------|---------|
-| Request-response | POST → JSON | query, trace, blast, repo CRUD, api |
-| SSE streaming | POST → `text/event-stream` | agent chat, trace (hop-by-hop), find-root |
-| Async polling | POST (start) → GET (poll) | index (long-running) |
+| Request-response | POST, JSON body | query, trace, blast, repo CRUD |
+| SSE streaming | POST, `text/event-stream` | agent chat, find-root |
+| Async polling | POST (start) + GET (poll) | index |
 
 ---
 
 ## 3. Hexagonal Architecture
 
-Ports-and-adapters pattern. Domain logic has zero knowledge of SurrealDB, Gemini, or tree-sitter — those are swappable adapters behind port interfaces.
+The codebase follows a ports-and-adapters pattern. Domain logic depends only on Go interfaces defined in `internal/domain/`. External systems are accessed through adapter implementations.
 
 | Layer | Location | Rule |
 |-------|----------|------|
-| Domain Core | `internal/domain/`, `pkg/types/` | Zero external imports. Defines port interfaces + types. |
-| Application Services | `internal/app/` | Composes ports only. Never imports adapters. |
-| Driven Adapters | `internal/adapters/surreal/`, `gemini/`, etc. | Implements port interfaces. |
-| Driving Adapters | `internal/adapters/http/` (server), `client/` (CLI) | Translates HTTP ↔ service calls. |
-| CLI | `cmd/` | Thin HTTP client via `internal/adapters/client/`. |
+| Domain | `internal/domain/`, `pkg/types/` | No external imports. Defines interfaces and types. |
+| Application | `internal/app/` | Composes interfaces. Does not import adapters. |
+| Driven adapters | `internal/adapters/surreal/`, `gemini/`, etc. | Implement domain interfaces. |
+| Driving adapters | `internal/adapters/http/`, `client/` | Translate HTTP to service calls. |
+| CLI | `cli/cmd/` | HTTP client only. |
 
 ### Port Interfaces
 
-| Port | Implementations |
-|------|----------------|
-| `OpenCodeGraph` | SurrealDB 3.0 (graph + HNSW vector + BM25 FTS — unified) |
-| `Embedder` | Gemini, Voyage AI, Ollama |
-| `LLMExplainer` | Gemini, Ollama |
-| `AgentRunner` | Google ADK (Gemini or OpenRouter via ModelFactory) |
-| `Parser` | tree-sitter (CGO) — Go, Python, TypeScript, JavaScript |
-| `FileWalker` | OS filesystem (.gitignore-aware) |
-| `TemporalStore` | SurrealDB |
-| `SessionStore` + `MemoryStore` | SurrealDB |
-| `GitWalker` | git CLI adapter |
+| Interface | Purpose | Implementations |
+|-----------|---------|----------------|
+| `OpenCodeGraph` | Graph CRUD, traversal, vector/text search | SurrealDB 3.0 |
+| `Embedder` | Text/code to vector embeddings | Gemini, Voyage AI, Ollama |
+| `LLMExplainer` | Natural-language explanation generation | Gemini, Ollama |
+| `AgentRunner` | Multi-turn agent conversations | Google ADK |
+| `Parser` | Source file to AST nodes and edges | tree-sitter (CGO) |
+| `FileWalker` | Repository file enumeration | OS filesystem |
+| `TemporalStore` | Commit-aware graph operations | SurrealDB |
+| `MemoryStore` | Persistent memory with vector retrieval | SurrealDB |
+| `GitWalker` | Git history access | git CLI |
 
-`OpenCodeGraph` is the single graph port replacing the previous GraphStore, VectorIndex, TextIndex, and FieldFlowStore interfaces. See [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) for the full design.
+`OpenCodeGraph` consolidates all graph operations (node/edge CRUD, traversal, search, listing) into a single interface. See [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md).
 
 ---
 
 ## 4. Technology Stack
 
-| Layer | Technology | Rationale |
-|-------|-----------|-----------|
-| Language | Go 1.26+ | Single static binary, strong concurrency, CGO for tree-sitter |
-| CLI | Cobra + Viper | Industry-standard Go CLI framework |
-| HTTP server | Gin + gin-contrib | Fast, middleware ecosystem |
-| HTTP clients | Resty v3 | Fluent API, auto-retry, EventSource SSE |
-| AST parsing | go-tree-sitter (CGO) | Multi-language, incremental parsing |
-| Database | SurrealDB 3.0 | Hybrid graph + vector (HNSW) + FTS (BM25) in single query |
-| Embeddings | Gemini / Voyage AI / Ollama | Configurable via `EMBED_PROVIDER` |
-| LLM | Gemini / OpenRouter / Ollama | Configurable via `LLM_PROVIDER` |
-| Agent | Google ADK for Go | model.LLM interface, tool use, session management |
-| Logging | log/slog (stdlib) | Structured, zero dependencies |
+| Component | Technology |
+|-----------|-----------|
+| Language | Go 1.26+ (CGO for tree-sitter) |
+| CLI framework | Cobra + Viper |
+| HTTP server | Gin |
+| HTTP clients | Resty v3 |
+| AST parsing | go-tree-sitter |
+| Database | SurrealDB 3.0 |
+| Embeddings | Gemini, Voyage AI, or Ollama |
+| LLM | Gemini, OpenRouter, or Ollama |
+| Agent framework | Google ADK for Go |
+| Logging | log/slog (stdlib) |
 
 ---
 
-## 5. Embedding Strategy
+## 5. Embedding Providers
 
-Three providers, selected by `EMBED_PROVIDER` env var:
+Selected by the `EMBED_PROVIDER` environment variable. All providers normalize output to the dimension specified by `EMBED_DIM` (default 1024).
 
-| Provider | Model | Dimensions | Cost/1M tokens |
-|----------|-------|-----------|----------------|
-| gemini | `gemini-embedding-2-preview` | 3072 | $0.15 |
-| voyage | `voyage-code-3` | 1024 | $0.06 |
-| ollama | configurable | configurable | Free (local) |
-
-All providers output at a normalized dimension configured by `EMBED_DIM`. HNSW indexes are created at this dimension.
-
-See [EMBEDDING_RESEARCH.md](EMBEDDING_RESEARCH.md) for model comparison and benchmarks.
+| Provider | Model | Native dimensions |
+|----------|-------|-------------------|
+| `gemini` | gemini-embedding-2-preview | 3072 |
+| `voyage` | voyage-code-3 | 1024 |
+| `ollama` | configurable | varies |
 
 ---
 
 ## 6. Graph Data Model
 
-The graph uses string labels (not Go enums) and extensible property maps. Node tables (`function`, `class`, `file`, `module`) are SCHEMAFULL for HNSW vector indexes and COMPUTED fields. Edge tables are SCHEMALESS — new edge types are created automatically via `RELATE`.
+The graph stores four node types (`function`, `class`, `file`, `module`) and thirteen edge types (`calls`, `imports`, `defines`, `inherits`, `uses`, `data_flow`, `reads`, `writes`, `route`, `control_flow`, `data_dep`, and others).
 
-13 edge types: `calls`, `imports`, `defines`, `inherits`, `uses`, `data_flow`, `reads`, `writes`, `route`, `control_flow`, `data_dep`, plus system edges.
+Node and edge types use string labels and extensible property maps rather than fixed Go enums. Node tables are SCHEMAFULL (required for HNSW indexes). Edge tables are SCHEMALESS, allowing new relationship types without schema changes.
 
-Every traversal is label-parameterized: the caller specifies which edge labels to follow. Trace, blast, flow, and security analysis are all the same `TraverseGraph` API with different label sets.
+Traversal is label-parameterized: the caller specifies which edge labels to follow. Trace, blast, flow, and security analysis all use the same traversal API with different label sets.
 
-See [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) for the unified graph abstraction and [DATABASE.md](DATABASE.md) for schema details.
+See [OPEN_CODE_GRAPH.md](OPEN_CODE_GRAPH.md) and [DATABASE.md](DATABASE.md).
 
 ---
 
-## 7. Key Design Decisions
+## 7. Design Decisions
 
-**Single binary** — `curl | sh` installs it in seconds. No version conflicts. Works offline.
+**Ports and adapters.** SurrealDB, Gemini, and tree-sitter each have distinct failure modes and upgrade cycles. Isolating them behind interfaces enables independent testing and replacement.
 
-**Ports and adapters** — Three complex external systems (SurrealDB, Gemini, tree-sitter) each with their own failure modes. Isolating domain logic means every service is unit-testable without infrastructure.
+**SurrealDB as unified store.** Graph traversal, HNSW vector search, and BM25 full-text search run in a single database, avoiding the operational complexity of separate graph, vector, and search systems.
 
-**SurrealDB over Neo4j + Pinecone** — Graph traversal + HNSW vector ANN + BM25 full-text in a single SurrealQL query. Eliminates three separate databases.
+**OpenCodeGraph.** A single interface for all graph operations. Traversal is parameterized by edge labels rather than encoded as separate methods per analysis technique. New techniques register an EdgeLinker without modifying the interface, adapter, or services.
 
-**OpenCodeGraph** — One port interface for all graph operations. Traversal is label-parameterized, not method-per-technique. Adding a new analysis technique means registering an EdgeLinker — zero changes to the port, adapter, or services.
+**Streamable HTTP.** JSON request-response for synchronous operations, SSE for streaming. Compatible with browser clients and standard HTTP tooling.
 
-**Streamable HTTP over gRPC** — Industry standard for AI tools (Claude Code, MCP, Continue.dev). Browser-native, curl-debuggable.
+**Multi-provider.** Embedding and LLM providers are independently configurable. The agent uses a ModelFactory abstraction to avoid coupling to any specific provider.
 
-**Multi-provider** — Embeddings and LLM are separate choices. Use Gemini for embeddings + OpenRouter for LLM, or Ollama for both locally. Agent uses ModelFactory injection so delegate.go never imports concrete adapters.
-
-**Two-phase indexing** — Extract per-file (parallel) → Link globally (sequential with SymbolTable) → Process per-batch (parallel). This architecture enables cross-file edge resolution without requiring a full database round-trip during parsing.
+**Two-phase indexing.** Files are parsed in parallel (Phase 1), then a global SymbolTable is built and cross-file edges are resolved sequentially (Phase 2), then embeddings are computed and stored in parallel (Phase 3). This avoids database round-trips during parsing while enabling cross-file resolution.

@@ -1,77 +1,74 @@
 # OpenCodeGraph
 
-> The unified graph abstraction for code intelligence. Every node, every edge, every
-> analysis technique — one graph model, one port interface, one traversal API.
->
-> Open by design: new languages, new techniques, new data sources — zero schema changes.
+Unified graph abstraction for code intelligence. Defines the data model, port interface, analysis techniques, and edge resolution pipeline.
 
 ---
 
-## 1. Graph Model
+## 1. Data Model
 
-### GraphNode
+### Nodes
 
 ```go
 type GraphNode struct {
-    ID        string         `json:"id"`         // "function:app.IndexService.Index"
-    Label     string         `json:"label"`      // "function", "class", "dependency", ...
-    Qualified string         `json:"qualified"`  // "app.IndexService.Index"
-    Name      string         `json:"name"`       // "Index"
-    FilePath  string         `json:"file_path"`  // "server/internal/app/index_service.go"
-    RepoSlug  string         `json:"repo_slug"`  // "commit0-dev/commit0"
-    Props     map[string]any `json:"props"`      // label-specific properties
+    ID        string         `json:"id"`
+    Label     string         `json:"label"`      // "function", "class", "file", "module"
+    Qualified string         `json:"qualified"`   // fully qualified name
+    Name      string         `json:"name"`
+    FilePath  string         `json:"file_path"`
+    RepoSlug  string         `json:"repo_slug"`
+    Props     map[string]any `json:"props"`       // label-specific properties
     Embedding []float32      `json:"embedding,omitempty"`
 }
 ```
 
-A `GraphNode` is any entity in the knowledge graph. Current labels: `function`, `class`, `file`, `module`. Future: `dependency`, `vulnerability`, `endpoint`, `field`, `test`.
+`Label` is a string, not an enum. `Props` is an open property map. Label-specific properties (e.g., `signature`, `body`, `start_line` for functions) are documented by convention and accessed via typed helper functions.
 
-`Label` is a string, not an enum. `Props` is a property bag, not a fixed struct. Label-specific properties are documented by convention and accessed via typed helpers.
+Current node labels: `function`, `class`, `file`, `module`.
 
-### GraphEdge
+### Edges
 
 ```go
 type GraphEdge struct {
-    Label  string         `json:"label"`   // "calls", "depends_on", "has_vuln", ...
-    FromID string         `json:"from_id"` // source node ID
-    ToID   string         `json:"to_id"`   // target node ID
-    Props  map[string]any `json:"props"`   // label-specific properties
+    Label  string         `json:"label"`    // "calls", "data_flow", "defines", ...
+    FromID string         `json:"from_id"`
+    ToID   string         `json:"to_id"`
+    Props  map[string]any `json:"props"`    // label-specific properties
 }
 ```
 
-A `GraphEdge` is any relationship. Current labels: `calls`, `data_flow`, `reads`, `writes`, `defines`, `imports`, `inherits`, `uses`, `route`, `control_flow`, `data_dep`. Future: `depends_on`, `has_vuln`, `tests`, `exposes`.
+Current edge labels: `calls`, `data_flow`, `reads`, `writes`, `defines`, `imports`, `inherits`, `uses`, `route`, `control_flow`, `data_dep`.
 
 ---
 
-## 2. The OpenCodeGraph Port
+## 2. Port Interface
 
 ```go
 type OpenCodeGraph interface {
     // Node CRUD
-    PutNode(ctx, node)     GetNode(ctx, id)
-    FindNode(ctx, repo, qualified)     DeleteNode(ctx, id)
+    PutNode(ctx, node)          GetNode(ctx, id)
+    FindNode(ctx, repo, qual)   DeleteNode(ctx, id)
 
     // Edge CRUD
-    PutEdge(ctx, edge)     DeleteEdgesFrom(ctx, nodeID)
+    PutEdge(ctx, edge)          DeleteEdgesFrom(ctx, nodeID)
 
     // Batch
     PutBatch(ctx, nodes, edges)
-    DeleteByRepo(ctx, repo)     DeleteByFile(ctx, repo, filePath)
+    DeleteByRepo(ctx, repo)     DeleteByFile(ctx, repo, path)
 
-    // Traversal (label-parameterized)
-    TraverseGraph(ctx, startID, edgeLabels, direction, maxDepth) → []TraceHop
-    Neighbors(ctx, nodeID) → *Neighborhood
+    // Traversal
+    TraverseGraph(ctx, startID, edgeLabels, direction, maxDepth)
+    Neighbors(ctx, nodeID)
 
     // Search
-    VectorSearch(ctx, vec, opts) → []ScoredNode
-    TextSearch(ctx, query, opts) → []ScoredNode
+    VectorSearch(ctx, vec, opts)
+    TextSearch(ctx, query, opts)
 
     // Listing
-    ListNodes(ctx, repo, opts) → []CodeNode
-    ListEdges(ctx, repo, labels) → []CodeEdge
-    ListFilePaths(ctx, repo) → []string
+    ListNodes(ctx, repo, opts)
+    ListEdges(ctx, repo, labels)
+    ListFilePaths(ctx, repo)
 
-    // Repo
+    // Repo management
     PutRepo  GetRepo  ListRepos  DeleteRepo
     FindRepoByRemoteURL  UpdateRepoIndexedAt
 
@@ -80,103 +77,78 @@ type OpenCodeGraph interface {
 }
 ```
 
-All graph operations go through this single interface. Traversal is label-parameterized: the caller specifies which edge labels to follow. The same `TraverseGraph` call powers trace, blast, flow, and security analysis.
+All application services depend on this interface. Traversal is parameterized by edge labels: the caller specifies which relationship types to follow. The same `TraverseGraph` method is used for call tracing, impact analysis, data flow, and other techniques.
 
-### How Techniques Map to Traversal
+### Technique-to-Traversal Mapping
 
-| Technique | Edge Labels | Direction |
-|-----------|------------|-----------|
+| Analysis | Edge labels | Direction |
+|----------|------------|-----------|
 | Call trace | `["calls"]` | forward |
-| Blast radius | `["calls", "data_flow"]` | reverse |
+| Impact (blast radius) | `["calls", "data_flow"]` | reverse |
 | Data flow | `["data_flow", "reads", "writes"]` | forward |
 | Taint analysis | `["data_flow", "route", "calls"]` | forward |
-| API surface | `ListEdges(repo, ["route"])` | — |
-| Neighborhood | `Neighbors(nodeID)` | both |
+| API surface | `ListEdges(repo, ["route"])` | n/a |
 
 ---
 
-## 3. The Six Analysis Techniques
+## 3. Analysis Techniques
 
-### Technique 1: Call Graph
+### Call Graph
 
-```
-Extractor:  GraphEdge{Label: "calls", Props: {call_site, call_type, is_dynamic}}
-Linker:     CallLinker — 4-strategy resolution (exact → same-package → suffix → interface)
-Traversal:  TraverseGraph(id, ["calls"], "forward", depth)
-```
+Tree-sitter extractors produce `calls` edges with `call_site`, `call_type`, and `is_dynamic` properties. The `CallLinker` resolves unresolved callee names to node IDs using four strategies: exact qualified match, same-package match, suffix match, and interface dispatch.
 
-### Technique 2: Data Flow
+### Data Flow
 
-```
-Extractor:  GraphEdge{Label: "data_flow", Props: {param_name, arg_expr, field_path, mutation_*}}
-Linker:     DataFlowLinker — same resolution as CallLinker
-Traversal:  TraverseGraph(id, ["data_flow"], "forward", depth)
-```
+Extractors produce `data_flow` edges with `param_name`, `arg_expr`, `field_path`, and mutation metadata. The `DataFlowLinker` resolves targets using the same strategies as the call linker.
 
-### Technique 3: Control Flow (CFG)
+### Control Flow
 
-```
-Extractor:  GraphEdge{Label: "control_flow", Props: {branch_type, condition, from_line, to_line}}
-Linker:     None (intra-function)
-Traversal:  TraverseGraph(id, ["control_flow"], "forward", depth)
-```
+Extractors produce `control_flow` edges with `branch_type`, `condition`, and line ranges. These are intra-function edges and do not require cross-file resolution.
 
-### Technique 4: Data Dependence (Def-Use)
+### Data Dependence
 
-```
-Extractor:  GraphEdge{Label: "data_dep", Props: {var_name, def_line, use_line}}
-Linker:     None (intra-function)
-Traversal:  TraverseGraph(id, ["data_dep"], "forward", depth)
-```
+Extractors produce `data_dep` edges with variable name, definition line, and use line. These are intra-function and do not require cross-file resolution.
 
-### Technique 5: Route Discovery
+### Route Discovery
 
-```
-Extractor:  GraphEdge{Label: "route", Props: {http_method, http_path, middleware}}
-Linker:     RouteLinker — resolves handler function names
-Query:      ListEdges(repo, ["route"])
-```
+Extractors identify HTTP handler registrations and produce `route` edges with `http_method`, `http_path`, and `middleware` properties. The `RouteLinker` resolves handler function references.
 
-### Technique 6: Temporal
+### Temporal Analysis
 
-```
-Source:     GitWalker → diff per commit → re-extract → diff graph
-Storage:    TemporalStore (separate port — temporal is orthogonal to graph shape)
-Query:      NodeHistory(nodeID), QueryTemporalRange(repo, from, to)
-```
+Git history is accessed through the `GitWalker` interface. Commit diffs are re-parsed and compared against the current graph. Temporal metadata (introduced commit, last modified commit) is managed by the `TemporalStore` port, which is separate from `OpenCodeGraph` because temporal operations are orthogonal to graph structure.
 
 ---
 
 ## 4. Edge Resolution Pipeline
 
+During indexing, edges are extracted per-file with unresolved target IDs (raw text from the AST). A global resolution step then maps these to actual node IDs.
+
 ```
 Phase 1: EXTRACT (per-file, parallel)
-  Walk files → Parse (tree-sitter) → accumulate all GraphNode[] + GraphEdge[]
-  Edge ToIDs are raw text at this stage (unresolved)
+  Parse each file with tree-sitter.
+  Accumulate all nodes and edges. Edge ToIDs are unresolved.
 
 Phase 2: LINK (global, sequential)
-  Build SymbolTable from ALL parsed nodes
-  Run EdgeLinker chain:
-    CallLinker         → resolves calls edges
-    DataFlowLinker     → resolves data_flow edges
-    DefinesLinker      → generates file→fn, class→method defines edges
-    FieldAccessLinker  → resolves reads/writes with receiver inference
-    RouteLinker        → resolves route handler targets
-  Coverage stats collected per linker
+  Build a SymbolTable from all parsed nodes.
+  Run each EdgeLinker against the complete edge set:
+    CallLinker, DataFlowLinker, DefinesLinker,
+    FieldAccessLinker, RouteLinker
+  Collect resolution statistics per linker.
 
 Phase 3: PROCESS (per-batch, parallel)
-  Summarize (LLM) → Embed (vector) → Store (SurrealDB)
-  All nodes + ALL resolved edges
+  Summarize nodes (optional, via LLM).
+  Compute embeddings.
+  Store nodes and resolved edges in SurrealDB.
 ```
 
 ### SymbolTable
 
-Built once from all parsed nodes. Provides O(1) resolution via four strategies:
+Built once from all parsed nodes. Maps qualified names, file paths, and name suffixes to node IDs. Resolution strategies:
 
-1. **Exact match**: `QualifiedToID["app.IndexService.Index"]`
-2. **Same-package**: match within the calling node's package
-3. **Suffix match**: `SuffixToIDs[".UpsertNode"]` for ambiguous short names
-4. **Interface dispatch**: match method name against all implementing types
+1. Exact qualified name match
+2. Same-package match (when the caller and callee share a package prefix)
+3. Suffix match (for short names like `.UpsertNode`)
+4. Interface dispatch (match method name against all types implementing it)
 
 ### EdgeLinker Interface
 
@@ -188,82 +160,28 @@ type EdgeLinker interface {
 }
 ```
 
-Adding a new analysis technique: implement `EdgeLinker`, register it in `IndexService.SetLinkers()`. Zero changes to the pipeline, port, adapter, or schema.
+To add a new analysis technique, implement `EdgeLinker` and register it with `IndexService.SetLinkers()`. No changes are required to the port interface, adapter, or existing services.
 
 ---
 
 ## 5. Extensibility
 
-The architecture supports new dimensions without code changes outside the extractor/linker layer.
+New node and edge types can be introduced without schema changes. Edge tables are SCHEMALESS in SurrealDB; the first `RELATE` statement for a new label creates the table automatically.
 
-### New Languages
+**Adding a language.** Implement a tree-sitter extractor in `internal/adapters/treesitter/lang/`. The extractor produces the same node and edge types as existing languages.
 
-Write `lang/rust.go` implementing the Extractor interface. Produces the same `GraphNode{Label: "function"}` and `GraphEdge{Label: "calls"}` as existing languages. Zero changes to OpenCodeGraph, adapter, services, or CLI.
-
-### Dependency Analysis
-
-Parse `go.mod`/`package.json` → produce `GraphNode{Label: "dependency"}` + `GraphEdge{Label: "depends_on"}`. SCHEMALESS edge tables auto-create on first `RELATE`.
-
-### Vulnerability Correlation
-
-Query OSV API → produce `GraphNode{Label: "vulnerability"}` + `GraphEdge{Label: "has_vuln"}`. A single traversal through `[calls, data_flow, depends_on, has_vuln]` answers: "does user input reach a vulnerable library?"
-
-### Test Coverage Mapping
-
-Analyze test imports → produce `GraphEdge{Label: "tests"}`. Reverse traverse answers: "which tests cover this function?"
+**Adding an analysis dimension.** Implement an `EdgeLinker` for the new edge label. Register it in the index service. The existing traversal, search, and listing operations work with any label.
 
 ---
 
-## 6. SurrealDB Adapter Strategy
+## 6. SurrealDB Implementation
 
-### Node Storage
+Node storage uses dedicated SCHEMAFULL tables for the four current node types (required for HNSW indexes and COMPUTED fields). New node types would use auto-created SCHEMALESS tables.
 
-| Node Label | SurrealDB Table | Schema |
-|------------|-----------------|--------|
-| `function`, `class`, `file`, `module` | Dedicated table | SCHEMAFULL (HNSW + COMPUTED) |
-| Any new label | Auto-created | SCHEMALESS |
-
-### Edge Storage
-
-All edges use a generic RELATE query. No per-type SQL:
+Edge storage uses a single generic `RELATE` query for all edge types:
 
 ```go
 q := fmt.Sprintf("RELATE $from->%s->$to CONTENT $props;", edge.Label)
 ```
 
-### Multi-Label Traversal
-
-SurrealDB does not support `(->edge_a | ->edge_b)` in one recursive expression. The adapter runs parallel per-label traversals and merges results:
-
-```go
-g, gCtx := errgroup.WithContext(ctx)
-for i, label := range labels {
-    g.Go(func() error {
-        hops, err := a.traverseSingle(gCtx, startID, label, q)
-        results[i] = hops
-        return err
-    })
-}
-g.Wait()
-return mergeAndDedup(results), nil
-```
-
----
-
-## 7. Composable Graph Queries
-
-Single traversals answer simple questions. Complex questions require composing multiple graph operations.
-
-| User Question | Graph Operations |
-|---------------|-----------------|
-| "Does user input reach a SQL query unsanitized?" | List routes → forward trace [calls, data_flow] → filter sinks → check sanitizer paths |
-| "Which commit broke notifications?" | Semantic search → reverse data flow → temporal query → correlate commits |
-| "If I change IndexService, which teams are affected?" | Reverse traverse [calls, data_flow] → collect file paths → group by CODEOWNERS team |
-
-Three execution strategies:
-
-1. **Service-layer composition** — Go functions chaining `TraverseGraph` + `Neighbors` calls. Deterministic, testable. Used by RootCauseAnalysisService, APISurfaceService.
-2. **Declarative DSL** — JSON graph programs interpreted by a query engine. Scenarios as data.
-3. **Agent-composed** — LLM agent with graph primitive tools. Handles any question dynamically.
-
-All three layers use the same OpenCodeGraph primitives.
+Multi-label traversal runs parallel per-label queries and merges results, because SurrealDB does not support multi-table recursive traversal in a single expression.
