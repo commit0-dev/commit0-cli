@@ -1,10 +1,9 @@
 # ── Post-merge Pipeline ────────────────────────────────────────────────────────
 # Runs after a PR is merged (or on direct push) to main. Verifies the merge
-# commit, publishes coverage, builds snapshot binaries, and pushes the edge
-# container image.
+# commit, publishes coverage, and builds snapshot binaries for all platforms.
 #
-# PR quality checks (lint, test, vuln scan, dep review, image scan) live in
-# ci.yml — this workflow focuses on artifacts and publishing.
+# PR quality checks (lint, test, vuln scan) live in ci.yml — this workflow
+# focuses on artifacts and publishing.
 name: Main
 
 on:
@@ -20,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  CGO_ENABLED: "1"
+  CGO_ENABLED: "0"   # pure Go — no tree-sitter, no CGO ever
 
 jobs:
   # ── Lint ──────────────────────────────────────────────────────────────────
@@ -62,7 +61,6 @@ jobs:
           go test -race -count=1 -timeout=5m \
             -coverprofile=coverage.out \
             -covermode=atomic \
-            -coverpkg=./internal/app/... \
             ./...
 
       - name: Write coverage summary
@@ -71,12 +69,11 @@ jobs:
           COVERAGE=$(go tool cover -func=coverage.out \
             | grep -E "^total:" | awk '{print $3}' | tr -d '%')
           {
-            echo "## Coverage report — \`internal/app\`"
+            echo "## Coverage report"
             echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| **Total** | **${COVERAGE}%** |"
-            echo "| Threshold | 98% |"
             echo ""
             echo "### Per-function breakdown"
             echo '```'
@@ -118,7 +115,8 @@ jobs:
           go-package: ./...
 
   # ── GoReleaser snapshot ───────────────────────────────────────────────────
-  # Validates .goreleaser.yaml and builds linux/amd64 + linux/arm64 binaries.
+  # Validates .goreleaser.yaml and builds binaries for all platforms.
+  # Pure Go — no cross-compiler needed, runs directly in the GitHub runner.
   # Gated on lint + test to avoid publishing from a broken main.
   goreleaser:
     name: GoReleaser snapshot
@@ -134,90 +132,22 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install arm64 cross-compiler
-        run: sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
-
       - name: Validate .goreleaser.yaml
         uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
           args: check
 
-      - name: Snapshot build (linux/amd64 + linux/arm64)
+      - name: Snapshot build (all platforms)
         uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: build --snapshot --clean --id linux
+          args: build --snapshot --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: snapshot-linux
+          name: snapshot
           path: dist/
           retention-days: 3
-
-  # ── Edge container image ──────────────────────────────────────────────────
-  # Multi-arch build (linux/amd64 + linux/arm64), pushed to ghcr.io with SBOM
-  # and SLSA provenance attestations, then scanned with Trivy.
-  image:
-    name: Build, push & scan edge image
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    permissions:
-      contents: read
-      packages: write
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/commit0
-          tags: |
-            type=raw,value=edge
-            type=sha,prefix=sha-,format=short
-
-      - uses: docker/build-push-action@v6
-        id: build
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=edge
-            COMMIT=${{ github.sha }}
-          provenance: mode=max
-          sbom: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/commit0@${{ steps.build.outputs.digest }}
-          format: sarif
-          output: trivy.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy.sarif
-          category: trivy-image
