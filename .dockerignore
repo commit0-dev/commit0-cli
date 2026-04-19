@@ -1,0 +1,11 @@
+bin/
+dist/
+*.exe
+*.test
+coverage.*
+.git
+.claude
+.development
+.env
+.env.*
+vscode-extension/node_modules

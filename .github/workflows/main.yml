@@ -1,0 +1,223 @@
+# ── Post-merge Pipeline ────────────────────────────────────────────────────────
+# Runs after a PR is merged (or on direct push) to main. Verifies the merge
+# commit, publishes coverage, builds snapshot binaries, and pushes the edge
+# container image.
+#
+# PR quality checks (lint, test, vuln scan, dep review, image scan) live in
+# ci.yml — this workflow focuses on artifacts and publishing.
+name: Main
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "1"
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────────────────
+  # Safety net for the merge commit — catches issues that slipped through
+  # (admin bypass, merge conflict resolution, etc.).
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          install-mode: goinstall
+          args: --timeout=5m
+
+  # ── Unit tests + coverage publishing ──────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # ncruces/go-coverage-report writes to the repo Wiki
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests with coverage
+        run: |
+          go test -race -count=1 -timeout=5m \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            -coverpkg=./internal/app/... \
+            ./...
+
+      - name: Write coverage summary
+        if: always()
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out \
+            | grep -E "^total:" | awk '{print $3}' | tr -d '%')
+          {
+            echo "## Coverage report — \`internal/app\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Total** | **${COVERAGE}%** |"
+            echo "| Threshold | 98% |"
+            echo ""
+            echo "### Per-function breakdown"
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+      # Publish coverage report + trend chart to the repo Wiki.
+      - uses: ncruces/go-coverage-report@v0
+        with:
+          coverage-file: coverage.out
+          report: true
+          chart: true
+          amend: true
+        continue-on-error: true
+
+  # ── Go vulnerability scan ─────────────────────────────────────────────────
+  govulncheck:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+  # ── GoReleaser snapshot ───────────────────────────────────────────────────
+  # Validates .goreleaser.yaml and builds linux/amd64 + linux/arm64 binaries.
+  # Gated on lint + test to avoid publishing from a broken main.
+  goreleaser:
+    name: GoReleaser snapshot
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # goreleaser needs full history for changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install arm64 cross-compiler
+        run: sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+
+      - name: Validate .goreleaser.yaml
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: check
+
+      - name: Snapshot build (linux/amd64 + linux/arm64)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: build --snapshot --clean --id linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-linux
+          path: dist/
+          retention-days: 3
+
+  # ── Edge container image ──────────────────────────────────────────────────
+  # Multi-arch build (linux/amd64 + linux/arm64), pushed to ghcr.io with SBOM
+  # and SLSA provenance attestations, then scanned with Trivy.
+  image:
+    name: Build, push & scan edge image
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/commit0
+          tags: |
+            type=raw,value=edge
+            type=sha,prefix=sha-,format=short
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=edge
+            COMMIT=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/commit0@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
