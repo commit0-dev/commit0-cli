@@ -36,13 +36,39 @@ Streamable HTTP client-server. Server (`commit0 serve`) owns all adapters. CLI i
 - **Streaming**: POST → SSE (agent chat, find-root)
 - **Async**: POST (start) → GET (poll) (index)
 
+## Running the Server
+
+**The server runs via Docker Compose — never start it directly with `go run` or the binary.**
+
+```bash
+# Start SurrealDB + commit0 server (both containerised)
+docker compose up -d
+
+# Rebuild server image then start (after code changes)
+docker compose up -d --build
+
+# Tail server logs
+docker compose logs -f commit0
+
+# Stop everything
+docker compose down
+```
+
+Copy `.env.example` → `.env` and set provider API keys before first start.
+Server is ready when `curl http://localhost:8080/health` returns `{"status":"ok"}`.
+
 ## Commands
 
 ```bash
-make build          # CGO_ENABLED=1 go build -o commit0 .
-make test           # go test -count=1 -timeout=5m ./...
-make test-race      # + race detector
-make test-cover     # 98% threshold on internal/app/...
+# Build (for local dev / CI — server itself runs in Docker)
+make build-server   # CGO_ENABLED=1 go build ./server (produces bin/commit0)
+make build-cli      # CGO_ENABLED=0 go build ./cli     (produces bin/commit0-cli)
+make build          # both
+
+# Tests (run per sub-module — repo uses go.work workspace)
+cd server && go test -count=1 -timeout=5m ./...
+cd cli    && go test -count=1 -timeout=5m ./...
+
 make lint           # golangci-lint
 ```
 
