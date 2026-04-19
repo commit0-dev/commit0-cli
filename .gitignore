@@ -1,0 +1,25 @@
+# Build outputs
+commit0
+dist/
+coverage.out
+coverage.html
+bin/
+
+# Test outputs
+**/*.out
+
+# OS / editor
+.DS_Store
+*.log
+.env
+
+# pre-commit cache
+.pre-commit-cache/
+
+# Python virtual environment
+.venv/
+
+node_modules/
+
+.development/
+autoresearch-results.tsv

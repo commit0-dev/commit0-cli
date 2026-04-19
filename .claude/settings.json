@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat *)",
+      "Bash(find *)",
+      "Bash(go build:*)",
+      "Bash(go env:*)",
+      "Bash(go get:*)",
+      "Bash(go list:*)",
+      "Bash(go mod:*)",
+      "Bash(go test:*)",
+      "Bash(go tool:*)",
+      "Bash(go version:*)",
+      "Bash(go vet:*)",
+      "Bash(grep *)",
+      "Bash(head *)",
+      "Bash(ls *)",
+      "Bash(sed *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(awk *)",
+      "Bash(sed *)",
+      "Edit(/.claude/skills/commit0-go/**)",
+      "Read(//private/tmp/**)",
+      "Read(//Users/thomas.nguyen/go/**/pkg/mod/**)",
+      "Read(~/.claude/skills/engineering-skills/**)"
+    ]
+  }
+}

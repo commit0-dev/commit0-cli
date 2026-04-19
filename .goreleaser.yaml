@@ -1,0 +1,120 @@
+# GoReleaser v2 configuration
+# https://goreleaser.com/customization/
+#
+# CGO is required by smacker/go-tree-sitter (bundles tree-sitter C sources).
+# Darwin cross-compilation uses osxcross tools (o64-clang / oa64-clang)
+# available inside ghcr.io/goreleaser/goreleaser-cross.
+#
+# Container images are built separately via Dockerfile + docker/build-push-action
+# (see .github/workflows/ci.yml and release.yml).
+version: 2
+
+project_name: commit0
+
+before:
+  hooks:
+    - go mod tidy
+
+# ── Binaries ─────────────────────────────────────────────────────────────────
+builds:
+  - id: linux
+    main: .
+    binary: commit0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=1
+    overrides:
+      - goos: linux
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
+          - CC=aarch64-linux-gnu-gcc
+          - CXX=aarch64-linux-gnu-g++
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+
+  - id: darwin
+    main: .
+    binary: commit0
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=1
+    overrides:
+      # osxcross tools are provided by goreleaser-cross
+      - goos: darwin
+        goarch: amd64
+        env:
+          - CGO_ENABLED=1
+          - CC=o64-clang
+          - CXX=o64-clang++
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
+          - CC=oa64-clang
+          - CXX=oa64-clang++
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+
+# ── Archives ──────────────────────────────────────────────────────────────────
+archives:
+  - id: default
+    name_template: "commit0_{{.Version}}_{{.Os}}_{{.Arch}}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+
+# ── Checksum ──────────────────────────────────────────────────────────────────
+checksum:
+  name_template: "commit0_{{.Version}}_checksums.txt"
+  algorithm: sha256
+
+# ── Changelog ─────────────────────────────────────────────────────────────────
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^fix"
+      order: 1
+    - title: Other
+      order: 999
+
+# ── GitHub Release ────────────────────────────────────────────────────────────
+release:
+  github:
+    owner: commit0-dev
+    name: commit0
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Container image
+
+    ```sh
+    docker pull ghcr.io/commit0-dev/commit0:{{.Version}}
+    ```
+
+    **Platforms:** `linux/amd64` · `linux/arm64`

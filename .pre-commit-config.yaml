@@ -1,0 +1,69 @@
+# Pre-commit hook configuration — https://pre-commit.com
+#
+# Install hooks:
+#   make install-hooks
+#
+# Run manually without committing:
+#   pre-commit run            # run pre-commit stage hooks on staged files
+#   pre-commit run --all-files
+#   pre-commit run golangci-lint --hook-stage pre-push  # run slow lints
+#
+# Hook stages:
+#   pre-commit  Fast checks only (< 5 s). Blocks the commit.
+#   pre-push    Full lint suite. Blocks the push. Mirrors CI lint job.
+
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  # ── General file hygiene ───────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]   # allow custom YAML tags (e.g. GitHub Actions)
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ── Go: formatting (pre-commit, fast) ─────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        language: system
+        entry: gofmt -l -w
+        types: [go]
+        # Fails if gofmt modifies any file (the modified file is then unstaged;
+        # stage it again and re-commit).
+
+      - id: go-mod-tidy
+        name: go mod tidy
+        language: system
+        entry: go mod tidy
+        pass_filenames: false
+        files: (go\.mod|go\.sum)$
+
+  # ── Go: vet (pre-commit, fast) ─────────────────────────────────────────────
+      - id: go-vet
+        name: go vet
+        language: system
+        entry: go vet ./...
+        pass_filenames: false
+        types: [go]
+
+  # ── Go: full lint suite (pre-push, mirrors CI) ────────────────────────────
+  # golangci-lint must be installed: https://golangci-lint.run/usage/install/
+  #   brew install golangci-lint        # macOS
+  #   go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - id: golangci-lint
+        name: golangci-lint
+        language: system
+        entry: golangci-lint run --fix
+        pass_filenames: false
+        types: [go]
+        stages: [pre-push]   # slow — only runs on git push, not on every commit
