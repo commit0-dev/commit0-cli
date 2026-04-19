@@ -28,7 +28,7 @@ type GraphEdge struct {
 // These are NOT enums — just discoverable strings. New labels don't need
 // to be added here. They exist for IDE autocomplete and grep-ability.
 
-// Node labels
+// Node labels.
 const (
 	LabelFunction = "function"
 	LabelClass    = "class"
@@ -36,7 +36,7 @@ const (
 	LabelModule   = "module"
 )
 
-// Edge labels
+// Edge labels.
 const (
 	LabelCalls       = "calls"
 	LabelImports     = "imports"

@@ -8,9 +8,9 @@ import "time"
 
 // PeerInfo identifies a remote commit0 server for P2P sync.
 type PeerInfo struct {
-	Name       string     // user-assigned name (like git remote)
-	Endpoint   string     // host:port for QUIC data plane
-	APIURL     string     // HTTP control plane URL
+	Name       string // user-assigned name (like git remote)
+	Endpoint   string // host:port for QUIC data plane
+	APIURL     string // HTTP control plane URL
 	AddedAt    time.Time
 	LastSyncAt *time.Time
 }

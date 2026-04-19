@@ -131,14 +131,6 @@ var repoCreateCmd = &cobra.Command{
 	},
 }
 
-// configPath reads the --config persistent flag from the root command.
-func configPath(cmd *cobra.Command) string {
-	if f := cmd.Root().PersistentFlags().Lookup("config"); f != nil {
-		return f.Value.String()
-	}
-	return ""
-}
-
 func init() {
 	rootCmd.AddCommand(repoCmd)
 	repoCmd.AddCommand(repoListCmd)

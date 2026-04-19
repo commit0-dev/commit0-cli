@@ -2,13 +2,13 @@ package types
 
 // APIEndpoint represents an HTTP route registration discovered from source code.
 type APIEndpoint struct {
-	Method     string   `json:"method"`      // "GET", "POST", "PUT", "DELETE", "PATCH"
-	Path       string   `json:"path"`        // "/api/v1/users/:id"
-	Handler    string   `json:"handler"`     // qualified handler function name
-	Middleware []string `json:"middleware"`   // qualified middleware function names
-	Group      string   `json:"group"`       // route group prefix (e.g. "/api/v1")
-	FilePath   string   `json:"file_path"`   // file where route is registered
-	Line       int      `json:"line"`        // line of registration
+	Method     string   `json:"method"`     // "GET", "POST", "PUT", "DELETE", "PATCH"
+	Path       string   `json:"path"`       // "/api/v1/users/:id"
+	Handler    string   `json:"handler"`    // qualified handler function name
+	Middleware []string `json:"middleware"` // qualified middleware function names
+	Group      string   `json:"group"`      // route group prefix (e.g. "/api/v1")
+	FilePath   string   `json:"file_path"`  // file where route is registered
+	Line       int      `json:"line"`       // line of registration
 }
 
 // APIParam represents a request parameter extracted from handler code.

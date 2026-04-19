@@ -21,10 +21,10 @@ type FindRootRequest struct {
 
 // FindRootEvent is a single SSE event from the find-root stream.
 type FindRootEvent struct {
-	Type   string                // "status", "result", "error", "done"
+	Type   string                 // "status", "result", "error", "done"
 	Result *types.RootCauseReport // non-nil when Type == "result"
-	Status string                // message when Type == "status"
-	Error  string                // message when Type == "error"
+	Status string                 // message when Type == "status"
+	Error  string                 // message when Type == "error"
 }
 
 // FindRoot performs root cause analysis via SSE streaming.
@@ -38,7 +38,7 @@ func (c *Client) FindRoot(ctx context.Context, req FindRootRequest) (<-chan Find
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := http.DefaultClient.Do(httpReq) //nolint:bodyclose // closed in the goroutine via defer resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("find-root: %w", err)
 	}
