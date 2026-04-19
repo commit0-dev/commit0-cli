@@ -1,15 +1,11 @@
 # GoReleaser v2 configuration
 # https://goreleaser.com/customization/
 #
-# CGO is required by smacker/go-tree-sitter (bundles tree-sitter C sources).
-# Darwin cross-compilation uses osxcross tools (o64-clang / oa64-clang)
-# available inside ghcr.io/goreleaser/goreleaser-cross.
-#
-# Container images are built separately via Dockerfile + docker/build-push-action
-# (see .github/workflows/ci.yml and release.yml).
+# Pure Go — CGO_ENABLED=0 throughout. No cross-compiler or osxcross needed;
+# the Go toolchain handles all targets natively.
 version: 2
 
-project_name: commit0
+project_name: commit0-cli
 
 before:
   hooks:
@@ -17,48 +13,16 @@ before:
 
 # ── Binaries ─────────────────────────────────────────────────────────────────
 builds:
-  - id: linux
+  - id: commit0-cli
     main: .
-    binary: commit0
-    goos: [linux]
+    binary: commit0-cli
+    goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
-    env:
-      - CGO_ENABLED=1
-    overrides:
-      - goos: linux
+    ignore:
+      - goos: windows
         goarch: arm64
-        env:
-          - CGO_ENABLED=1
-          - CC=aarch64-linux-gnu-gcc
-          - CXX=aarch64-linux-gnu-g++
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-
-  - id: darwin
-    main: .
-    binary: commit0
-    goos: [darwin]
-    goarch: [amd64, arm64]
     env:
-      - CGO_ENABLED=1
-    overrides:
-      # osxcross tools are provided by goreleaser-cross
-      - goos: darwin
-        goarch: amd64
-        env:
-          - CGO_ENABLED=1
-          - CC=o64-clang
-          - CXX=o64-clang++
-      - goos: darwin
-        goarch: arm64
-        env:
-          - CGO_ENABLED=1
-          - CC=oa64-clang
-          - CXX=oa64-clang++
+      - CGO_ENABLED=0
     flags:
       - -trimpath
     ldflags:
@@ -69,7 +33,7 @@ builds:
 # ── Archives ──────────────────────────────────────────────────────────────────
 archives:
   - id: default
-    name_template: "commit0_{{.Version}}_{{.Os}}_{{.Arch}}"
+    name_template: "commit0-cli_{{.Version}}_{{.Os}}_{{.Arch}}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
@@ -79,7 +43,7 @@ archives:
 
 # ── Checksum ──────────────────────────────────────────────────────────────────
 checksum:
-  name_template: "commit0_{{.Version}}_checksums.txt"
+  name_template: "commit0-cli_{{.Version}}_checksums.txt"
   algorithm: sha256
 
 # ── Changelog ─────────────────────────────────────────────────────────────────
@@ -107,14 +71,19 @@ changelog:
 release:
   github:
     owner: commit0-dev
-    name: commit0
+    name: commit0-cli
   draft: false
   prerelease: auto
   footer: |
-    ## Container image
+    ## Installation
 
+    **macOS / Linux (Homebrew)**
     ```sh
-    docker pull ghcr.io/commit0-dev/commit0:{{.Version}}
+    # coming soon
     ```
 
-    **Platforms:** `linux/amd64` · `linux/arm64`
+    **Direct download**
+    Download the archive for your platform from the assets above, extract, and
+    place `commit0-cli` somewhere on your `$PATH`.
+
+    **Platforms:** `linux/amd64` · `linux/arm64` · `darwin/amd64` · `darwin/arm64` · `windows/amd64`

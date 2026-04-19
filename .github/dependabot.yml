@@ -23,21 +23,3 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     labels: [dependencies, go]
-    groups:
-      # Batch Google SDK bumps together — they version-lock each other.
-      google:
-        patterns:
-          - "google.golang.org/*"
-          - "cloud.google.com/*"
-
-  # ── Dockerfile ────────────────────────────────────────────────────────────
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: UTC
-    commit-message:
-      prefix: "chore(docker)"
-    labels: [dependencies, docker]
