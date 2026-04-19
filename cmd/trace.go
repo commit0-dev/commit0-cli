@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/commit0-dev/commit0-cli/sdk"
 	"github.com/commit0-dev/commit0-cli/pkg/types"
+	"github.com/commit0-dev/commit0-cli/sdk"
 )
 
 var traceCmd = &cobra.Command{

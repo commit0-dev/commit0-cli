@@ -6,15 +6,15 @@ import "fmt"
 type ErrorCode string
 
 const (
-	ErrNotFound       ErrorCode = "not_found"
-	ErrRateLimit      ErrorCode = "rate_limit"
-	ErrTimeout        ErrorCode = "timeout"
-	ErrConflict       ErrorCode = "conflict"
-	ErrValidation     ErrorCode = "validation"
-	ErrBundleCorrupt  ErrorCode = "bundle_corrupt"
-	ErrSyncConflict   ErrorCode = "sync_conflict"
-	ErrAuthFailed     ErrorCode = "auth_failed"
-	ErrOutOfScope     ErrorCode = "out_of_scope"
+	ErrNotFound      ErrorCode = "not_found"
+	ErrRateLimit     ErrorCode = "rate_limit"
+	ErrTimeout       ErrorCode = "timeout"
+	ErrConflict      ErrorCode = "conflict"
+	ErrValidation    ErrorCode = "validation"
+	ErrBundleCorrupt ErrorCode = "bundle_corrupt"
+	ErrSyncConflict  ErrorCode = "sync_conflict"
+	ErrAuthFailed    ErrorCode = "auth_failed"
+	ErrOutOfScope    ErrorCode = "out_of_scope"
 )
 
 // DomainError represents an error within the domain layer.

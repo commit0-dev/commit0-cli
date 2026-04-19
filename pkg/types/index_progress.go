@@ -29,26 +29,26 @@ const (
 
 // StageError records a single error within a stage.
 type StageError struct {
-	File    string `json:"file,omitempty"`    // file path that caused the error
-	Node    string `json:"node,omitempty"`    // node qualified name
-	Message string `json:"message"`           // error description
-	Stage   string `json:"stage"`             // which stage
+	File    string `json:"file,omitempty"` // file path that caused the error
+	Node    string `json:"node,omitempty"` // node qualified name
+	Message string `json:"message"`        // error description
+	Stage   string `json:"stage"`          // which stage
 }
 
 // StageProgress tracks the state of one pipeline stage.
 type StageProgress struct {
-	Status          StageStatus  `json:"status"`
-	ItemsDone       int          `json:"items_done"`
-	ItemsTotal      int          `json:"items_total,omitempty"` // 0 = unknown
-	Errors          []StageError `json:"errors,omitempty"`
-	ErrorCount      int          `json:"error_count"`           // total (may exceed len(Errors) if capped)
-	StartedAt       *time.Time   `json:"started_at,omitempty"`
-	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
-	DurationMS      int64        `json:"duration_ms,omitempty"`
+	Status      StageStatus  `json:"status"`
+	ItemsDone   int          `json:"items_done"`
+	ItemsTotal  int          `json:"items_total,omitempty"` // 0 = unknown
+	Errors      []StageError `json:"errors,omitempty"`
+	ErrorCount  int          `json:"error_count"` // total (may exceed len(Errors) if capped)
+	StartedAt   *time.Time   `json:"started_at,omitempty"`
+	CompletedAt *time.Time   `json:"completed_at,omitempty"`
+	DurationMS  int64        `json:"duration_ms,omitempty"`
 }
 
 // IndexConfig captures the configuration used for this index run.
-// Useful for debugging "why did it use Gemini instead of Ollama?"
+// Useful for debugging which provider and model were selected.
 type IndexConfig struct {
 	EmbedProvider string `json:"embed_provider"` // gemini, voyage, ollama
 	LLMProvider   string `json:"llm_provider"`   // gemini, openrouter, ollama
@@ -56,9 +56,9 @@ type IndexConfig struct {
 	LLMModel      string `json:"llm_model"`      // model name
 	EmbedDim      int    `json:"embed_dim"`      // HNSW dimension
 	BatchSize     int    `json:"batch_size"`
-	Fast          bool   `json:"fast"`           // --fast flag (skip summarize + reembed)
-	Reparse       bool   `json:"reparse"`        // --reparse flag
-	Force         bool   `json:"force"`          // --force flag
+	Fast          bool   `json:"fast"`    // --fast flag (skip summarize + reembed)
+	Reparse       bool   `json:"reparse"` // --reparse flag
+	Force         bool   `json:"force"`   // --force flag
 }
 
 // PipelineCoverage tracks the gap between what the AST parser extracted
@@ -66,9 +66,9 @@ type IndexConfig struct {
 // for debugging search quality and graph completeness.
 type PipelineCoverage struct {
 	// AST extraction totals (ground truth from tree-sitter)
-	FilesWalked  int `json:"files_walked"`   // files discovered by walker
-	FilesParsed  int `json:"files_parsed"`   // files successfully parsed (AST extracted)
-	FilesSkipped int `json:"files_skipped"`  // files skipped (unchanged ContentHash)
+	FilesWalked  int `json:"files_walked"`  // files discovered by walker
+	FilesParsed  int `json:"files_parsed"`  // files successfully parsed (AST extracted)
+	FilesSkipped int `json:"files_skipped"` // files skipped (unchanged ContentHash)
 
 	NodesExtracted int `json:"nodes_extracted"` // total nodes from AST (functions + classes + files + modules)
 	EdgesExtracted int `json:"edges_extracted"` // total edges from AST (calls + imports + defines + data_flow + ...)
@@ -80,8 +80,8 @@ type PipelineCoverage struct {
 	EdgesStored     int `json:"edges_stored"`     // edges written to DB
 
 	// Edge resolution (resolver quality)
-	CallEdgesTotal    int `json:"call_edges_total"`    // total EdgeCalls extracted
-	CallEdgesResolved int `json:"call_edges_resolved"` // EdgeCalls with ToID matching a known node ID
+	CallEdgesTotal      int `json:"call_edges_total"`      // total EdgeCalls extracted
+	CallEdgesResolved   int `json:"call_edges_resolved"`   // EdgeCalls with ToID matching a known node ID
 	CallEdgesUnresolved int `json:"call_edges_unresolved"` // EdgeCalls left as raw callee names (cross-file unresolved)
 
 	// Coverage percentages (computed)
@@ -96,7 +96,7 @@ type PipelineCoverage struct {
 type IndexProgress struct {
 	// Top-level summary (backward-compatible with old IndexJob fields)
 	JobID        string     `json:"job_id"`
-	Status       string     `json:"status"`        // indexing, completed, failed
+	Status       string     `json:"status"` // indexing, completed, failed
 	RepoSlug     string     `json:"repo_slug"`
 	Error        string     `json:"error,omitempty"`
 	FilesIndexed int        `json:"files_indexed"`

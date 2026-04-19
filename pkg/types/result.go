@@ -4,12 +4,12 @@ import "time"
 
 // QueryResult represents the result of a query operation.
 type QueryResult struct {
-	Explanation          string              // plain text (backward compat)
-	StructuredExplanation *SearchExplanation  `json:"StructuredExplanation,omitempty"`
-	Query                string
-	RepoSlug             string
-	Nodes                []ScoredNode
-	Timing               TimingInfo
+	Explanation           string             // plain text (backward compat)
+	StructuredExplanation *SearchExplanation `json:"StructuredExplanation,omitempty"`
+	Query                 string
+	RepoSlug              string
+	Nodes                 []ScoredNode
+	Timing                TimingInfo
 }
 
 // ScoredNode wraps a CodeNode with relevance scores.
@@ -155,10 +155,10 @@ type FieldFlowHop struct {
 
 // FieldFlowChain is one end-to-end path of a specific field through functions.
 type FieldFlowChain struct {
-	FieldPath  string          // the tracked field, e.g. "user.Email"
+	FieldPath  string // the tracked field, e.g. "user.Email"
 	Hops       []FieldFlowHop
-	Mutations  []FieldFlowHop  // subset where MutationType != "none"
-	TaintPoint *FieldFlowHop   // the first mutation point (if any)
+	Mutations  []FieldFlowHop // subset where MutationType != "none"
+	TaintPoint *FieldFlowHop  // the first mutation point (if any)
 }
 
 // FieldFlowResult represents the full result of a field-level data flow query.
@@ -204,7 +204,7 @@ type SuspectCommit struct {
 
 // RootCauseReport is the final output of commit zero detection.
 type RootCauseReport struct {
-	CommitHash     string          // the commit zero
+	CommitHash     string // the commit zero
 	CommitMessage  string
 	Author         string
 	Timestamp      time.Time
@@ -248,7 +248,7 @@ type MemoryEntry struct {
 	SessionID  string
 	RepoSlug   string
 	Content    string
-	Concepts   []string  // semantic tags for retrieval
+	Concepts   []string // semantic tags for retrieval
 	Embedding  []float32
 	CreatedAt  time.Time
 	TokenCount int

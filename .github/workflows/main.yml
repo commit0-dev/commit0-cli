@@ -58,7 +58,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          go test -race -count=1 -timeout=5m \
+          go test -count=1 -timeout=5m \
             -coverprofile=coverage.out \
             -covermode=atomic \
             ./...

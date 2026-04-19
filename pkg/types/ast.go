@@ -68,10 +68,10 @@ type MutationKind string
 const (
 	MutationNone        MutationKind = "none"
 	MutationTransform   MutationKind = "transform"    // string ops, math ops
-	MutationTypeConvert MutationKind = "type_convert"  // cast, conversion
-	MutationFieldSet    MutationKind = "field_set"     // struct field assignment
-	MutationFieldDelete MutationKind = "field_delete"  // map delete, nil assignment
-	MutationFilter      MutationKind = "filter"        // conditional inclusion
+	MutationTypeConvert MutationKind = "type_convert" // cast, conversion
+	MutationFieldSet    MutationKind = "field_set"    // struct field assignment
+	MutationFieldDelete MutationKind = "field_delete" // map delete, nil assignment
+	MutationFilter      MutationKind = "filter"       // conditional inclusion
 )
 
 // CodeNode represents a single entity in the codebase (function, class, file, module).

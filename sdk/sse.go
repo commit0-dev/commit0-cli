@@ -36,7 +36,7 @@ func (c *Client) AgentChat(ctx context.Context, req AgentChatRequest) (<-chan ty
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := http.DefaultClient.Do(httpReq) //nolint:bodyclose // closed in the goroutine via defer resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("agent chat: %w", err)
 	}

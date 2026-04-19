@@ -69,7 +69,6 @@ Use at least 2 tool calls per area. Report concrete findings with
 file:line locations.`,
 }
 
-
 var analyzeCmd = &cobra.Command{
 	Use:   "analyze",
 	Short: "Self-analyze codebase for issues and propose fixes",
