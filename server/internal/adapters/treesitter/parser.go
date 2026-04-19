@@ -12,9 +12,9 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/adapters/treesitter/lang"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // Extractor extracts code nodes and edges from a parsed tree-sitter AST.

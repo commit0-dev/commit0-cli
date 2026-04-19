@@ -3,15 +3,15 @@ package linkers
 import (
 	"strings"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // DefinesLinker generates EdgeDefines edges: file→function, file→class, class→method.
 // Moved from per-file Resolver to global linker so it sees all nodes.
 type DefinesLinker struct{}
 
-func (l *DefinesLinker) Name() string            { return "defines" }
+func (l *DefinesLinker) Name() string             { return "defines" }
 func (l *DefinesLinker) Labels() []types.EdgeKind { return []types.EdgeKind{types.EdgeDefines} }
 
 func (l *DefinesLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([]types.CodeEdge, domain.LinkStats) {

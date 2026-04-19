@@ -169,8 +169,8 @@ func (st *SymbolTable) resolveAmbiguous(_ string, ids []string) (string, bool) {
 	return best, true
 }
 
-// PackageFromQualified extracts the package prefix from a qualified name.
-// "app.IndexService.Index" → "app"
+// PackageFromQualified extracts the package prefix from a qualified name,
+// e.g. "app.IndexService.Index" → "app".
 func PackageFromQualified(qual string) string {
 	if dot := strings.Index(qual, "."); dot > 0 {
 		return qual[:dot]

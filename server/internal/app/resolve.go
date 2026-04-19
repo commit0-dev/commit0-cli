@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // ResolveSymbol finds a code node by name with precision.

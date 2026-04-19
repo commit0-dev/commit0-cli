@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/config"
 )
 
 func TestAPISurfaceService_Discover_NoRoutes(t *testing.T) {
@@ -45,7 +45,7 @@ func TestAPISurfaceService_Discover_WithRoutes(t *testing.T) {
 				Metadata: map[string]string{
 					"http_method":  "GET",
 					"http_path":    "/api/v1/users",
-					"middleware":    "authMiddleware,rateLimiter",
+					"middleware":   "authMiddleware,rateLimiter",
 					"group_prefix": "/api/v1",
 				},
 			},

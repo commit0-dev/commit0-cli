@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // APISurfaceService discovers HTTP API endpoints from the code graph and
@@ -74,13 +74,13 @@ func (s *APISurfaceService) Discover(ctx context.Context, repoSlug string) (*typ
 			Method:     method,
 			Path:       path,
 			Handler:    edge.ToID,
-			Middleware:  middleware,
+			Middleware: middleware,
 			Group:      groupPrefix,
 			FilePath:   edge.CallSite,
 		}
 		if parts := strings.SplitN(edge.CallSite, ":", 2); len(parts) == 2 {
 			endpoint.FilePath = parts[0]
-			fmt.Sscanf(parts[1], "%d", &endpoint.Line)
+			_, _ = fmt.Sscanf(parts[1], "%d", &endpoint.Line)
 		}
 
 		detail := types.APIEndpointDetail{

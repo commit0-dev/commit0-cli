@@ -7,6 +7,11 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
+	// Run from a temp dir so LoadDotEnv cannot walk up and find the repo-root
+	// .env file (which overrides SURREAL_URL to ws://localhost:8001 for local
+	// Docker Compose). We want to test the code defaults, not local dev overrides.
+	t.Chdir(t.TempDir())
+
 	// Set required env var
 	t.Setenv("GEMINI_API_KEY", "test-key")
 

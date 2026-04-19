@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // AnalysisIssue represents a vulnerability found by the scanner.
 type AnalysisIssue struct {
-	Severity    string   `json:"severity"`    // "critical", "high", "medium", "low"
-	Category    string   `json:"category"`    // "sql-injection", "xss", "auth-bypass", "hardcoded-secret", "missing-auth"
+	Severity    string   `json:"severity"` // "critical", "high", "medium", "low"
+	Category    string   `json:"category"` // "sql-injection", "xss", "auth-bypass", "hardcoded-secret", "missing-auth"
 	Title       string   `json:"title"`
 	File        string   `json:"file"`
 	Line        int      `json:"line"`
@@ -144,72 +144,12 @@ func (s *AnalysisService) checkTaintRule(ctx context.Context, repoSlug string, r
 	var issues []AnalysisIssue
 	scanned := 0
 
-	// Find mutations that match source patterns
-	for _, sourcePattern := range rule.Sources {
-		// TODO: FindMutations was on FieldFlowStore. With OpenCodeGraph,
-		// use ListEdges with data_flow label and filter for mutation_type.
-		// For now, return empty to avoid compilation error.
-		var mutations []types.FieldFlowHop
-		_ = sourcePattern
-		_ = ctx
-		_ = repoSlug
-		var err error
-		if err != nil {
-			continue
-		}
-
-		for _, mut := range mutations {
-			scanned++
-			// Check if the data flows to a sink
-			if s.flowSvc != nil {
-				flowResult, err := s.flowSvc.TraceFieldFlow(ctx, FieldFlowRequest{
-					Symbol:    mut.Node.Qualified,
-					FieldPath: sourcePattern,
-					RepoSlug:  repoSlug,
-					Direction: "forward",
-					Depth:     5,
-				})
-				if err != nil {
-					continue
-				}
-
-				for _, chain := range flowResult.Chains {
-					for _, hop := range chain.Hops {
-						for _, sink := range rule.Sinks {
-							if strings.Contains(hop.Node.Qualified, sink) || strings.Contains(hop.ArgExpr, sink) {
-								// Check if sanitized along the way
-								sanitized := false
-								for _, sanHop := range chain.Hops {
-									for _, san := range rule.Sanitizers {
-										if strings.Contains(sanHop.Node.Qualified, san) {
-											sanitized = true
-											break
-										}
-									}
-								}
-								if !sanitized {
-									taintPath := make([]string, 0, len(chain.Hops))
-									for _, h := range chain.Hops {
-										taintPath = append(taintPath, h.Node.Qualified)
-									}
-									issues = append(issues, AnalysisIssue{
-										Severity:    rule.Severity,
-										Category:    rule.Category,
-										Title:       rule.Name,
-										File:        hop.Node.FilePath,
-										Line:        hop.Node.StartLine,
-										Function:    hop.Node.Qualified,
-										Description: fmt.Sprintf("Unsanitized %s reaches %s", sourcePattern, sink),
-										TaintPath:   taintPath,
-									})
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	// TODO: FindMutations — with OpenCodeGraph, use ListEdges with data_flow
+	// label and filter for mutation_type, then trace each mutation to sinks.
+	// Iteration is gated on rule.Sources; scanned stays 0 until implemented.
+	_ = ctx
+	_ = repoSlug
+	_ = rule
 
 	return issues, scanned
 }
@@ -285,7 +225,7 @@ func (s *AnalysisService) llmVerifyIssues(ctx context.Context, issues []Analysis
 
 	// Try to parse LLM response for filtered issues
 	var result struct {
-		Overview string `json:"overview"`
+		Overview string   `json:"overview"`
 		Insights []string `json:"insights"`
 	}
 	if json.Unmarshal(raw, &result) == nil {

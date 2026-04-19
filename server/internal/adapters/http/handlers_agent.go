@@ -53,7 +53,7 @@ func (s *Server) handleAgentChat(c *gin.Context) {
 
 	// Disable write deadline for SSE streaming.
 	if ctrl := http.NewResponseController(c.Writer); ctrl != nil {
-		ctrl.SetWriteDeadline(time.Time{}) // zero = no deadline
+		_ = ctrl.SetWriteDeadline(time.Time{}) // zero = no deadline
 	}
 
 	for event := range events {

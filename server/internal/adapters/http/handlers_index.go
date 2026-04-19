@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/commit0-dev/commit0/server/internal/app"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/app"
 )
 
 // indexTrackerStore holds active and completed IndexTrackers for polling.

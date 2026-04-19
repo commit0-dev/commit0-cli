@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // Budgets controls the token allocation per memory tier.
@@ -190,7 +190,7 @@ func (m *Manager) compactSessionIfNeeded(ctx context.Context, sessionID string) 
 
 	memories, err := m.store.ListSessionMemories(ctx, sessionID)
 	if err != nil {
-		return nil // non-fatal
+		return nil //nolint:nilerr // non-fatal: best-effort memory, degrade gracefully
 	}
 
 	// Calculate total tokens

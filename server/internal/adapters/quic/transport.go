@@ -90,7 +90,7 @@ func (t *Transport) Serve(ctx context.Context, addr string, handler domain.PeerH
 		qconn, err := ln.Accept(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return nil //nolint:nilerr // context canceled is expected shutdown, not an error
 			}
 			t.log.Error("accept connection", "err", err)
 			continue
@@ -100,7 +100,7 @@ func (t *Transport) Serve(ctx context.Context, addr string, handler domain.PeerH
 }
 
 func (t *Transport) handleConn(ctx context.Context, conn *quic.Conn, handler domain.PeerHandler) {
-	defer conn.CloseWithError(0, "done")
+	defer func() { _ = conn.CloseWithError(0, "done") }()
 	for {
 		stream, err := conn.AcceptStream(ctx)
 		if err != nil {
@@ -124,54 +124,54 @@ func (t *Transport) handleStream(ctx context.Context, stream *quic.Stream, handl
 	case CmdManifest:
 		var repoSlug string
 		if err := t.decMode.Unmarshal(payload, &repoSlug); err != nil {
-			writeFrame(stream, StatusError, nil)
+			_ = writeFrame(stream, StatusError, nil)
 			return
 		}
 		manifest, err := handler.HandleManifestRequest(ctx, repoSlug)
 		if err != nil {
-			writeFrame(stream, StatusNotFound, nil)
+			_ = writeFrame(stream, StatusNotFound, nil)
 			return
 		}
 		data, _ := t.encMode.Marshal(manifest)
-		writeFrame(stream, StatusOK, data)
+		_ = writeFrame(stream, StatusOK, data)
 
 	case CmdBundle:
 		var repoSlug string
 		if err := t.decMode.Unmarshal(payload, &repoSlug); err != nil {
-			writeFrame(stream, StatusError, nil)
+			_ = writeFrame(stream, StatusError, nil)
 			return
 		}
 		data, err := handler.HandleBundleRequest(ctx, repoSlug)
 		if err != nil {
-			writeFrame(stream, StatusNotFound, nil)
+			_ = writeFrame(stream, StatusNotFound, nil)
 			return
 		}
-		writeFrame(stream, StatusOK, data)
+		_ = writeFrame(stream, StatusOK, data)
 
 	case CmdDelta:
 		var req DeltaRequest
 		if err := t.decMode.Unmarshal(payload, &req); err != nil {
-			writeFrame(stream, StatusError, nil)
+			_ = writeFrame(stream, StatusError, nil)
 			return
 		}
 		data, err := handler.HandleDeltaRequest(ctx, req.RepoSlug, req.BaseCommit)
 		if err != nil {
-			writeFrame(stream, StatusNotFound, nil)
+			_ = writeFrame(stream, StatusNotFound, nil)
 			return
 		}
-		writeFrame(stream, StatusOK, data)
+		_ = writeFrame(stream, StatusOK, data)
 
 	case CmdPush:
 		result, err := handler.HandlePushBundle(ctx, payload)
 		if err != nil {
-			writeFrame(stream, StatusError, nil)
+			_ = writeFrame(stream, StatusError, nil)
 			return
 		}
 		data, _ := t.encMode.Marshal(result)
-		writeFrame(stream, StatusOK, data)
+		_ = writeFrame(stream, StatusOK, data)
 
 	default:
-		writeFrame(stream, StatusError, nil)
+		_ = writeFrame(stream, StatusError, nil)
 	}
 }
 
@@ -182,7 +182,7 @@ func (t *Transport) request(ctx context.Context, peer *types.PeerInfo, cmd byte,
 	if err != nil {
 		return nil, types.NotFound(fmt.Sprintf("peer %s unreachable: %v", peer.Name, err))
 	}
-	defer conn.CloseWithError(0, "done")
+	defer func() { _ = conn.CloseWithError(0, "done") }()
 
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {

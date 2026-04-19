@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 func TestQueryServiceQueryEmptyQuestion(t *testing.T) {
@@ -212,7 +212,6 @@ func TestQueryServiceQueryWithExplainerSuccess(t *testing.T) {
 func TestQueryServiceQueryWithExplainerFails(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
 
-
 	explainer := &stubExplainer{
 		err: errors.New("llm unavailable"),
 	}
@@ -239,7 +238,6 @@ func TestQueryServiceQueryWithExplainerFails(t *testing.T) {
 
 func TestQueryServiceQueryWithExplainerChunkError(t *testing.T) {
 	embedder := &stubEmbedder{queryVec: []float32{0.1}}
-
 
 	explainer := &stubExplainer{
 		chunks: []domain.ExplainChunk{

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // Stub implementations for testing
@@ -105,7 +105,6 @@ func (s *stubGraphStore) UpsertEdge(ctx context.Context, edge *types.CodeEdge) e
 func (s *stubGraphStore) DeleteEdgesForNode(ctx context.Context, nodeID string) error {
 	return nil
 }
-
 
 func (s *stubGraphStore) UpsertFileBatch(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error {
 	if s.upsertBatchFn != nil {

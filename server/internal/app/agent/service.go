@@ -138,5 +138,5 @@ func (s *AgentService) Chat(ctx context.Context, req domain.ChatRequest) (<-chan
 	return ch, nil
 }
 
-// compile-time check
+// compile-time check.
 var _ domain.AgentRunner = (*AgentService)(nil)

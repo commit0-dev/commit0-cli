@@ -60,13 +60,15 @@ var serveCmd = &cobra.Command{
 			if err := svcs.discovery.Register(ctx, cfg.Sync.InstanceName, cfg.Sync.QUICPort, cfg.Server.Port); err != nil {
 				slog.Warn("discovery register failed", "err", err)
 			} else {
-				defer svcs.discovery.Deregister(context.Background())
+				defer func() { _ = svcs.discovery.Deregister(context.Background()) }()
 				if cfg.Sync.AutoDiscover {
-					go svcs.discovery.Watch(ctx, func(peers []types.PeerInfo) {
-						for i := range peers {
-							svcs.peerStore.UpsertPeer(ctx, &peers[i])
-						}
-					})
+					go func() {
+						_ = svcs.discovery.Watch(ctx, func(peers []types.PeerInfo) {
+							for i := range peers {
+								_ = svcs.peerStore.UpsertPeer(ctx, &peers[i])
+							}
+						})
+					}()
 				}
 			}
 		}

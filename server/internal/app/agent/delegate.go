@@ -15,19 +15,19 @@ import (
 
 // delegateConfig holds services needed to create sub-agents.
 type delegateConfig struct {
-	querySvc        *app.QueryService
-	traceSvc        *app.TraceService
-	blastSvc        *app.BlastService
-	flowSvc         *app.FieldFlowService
-	tempSvc         *app.TemporalService
-	rootCauseSvc    *app.RootCauseAnalysisService
-	graph           domain.OpenCodeGraph
-	gitWalker       domain.GitWalker
-	explainer       domain.LLMExplainer
-	cfg             *config.Config
-	pad             *Scratchpad
+	querySvc         *app.QueryService
+	traceSvc         *app.TraceService
+	blastSvc         *app.BlastService
+	flowSvc          *app.FieldFlowService
+	tempSvc          *app.TemporalService
+	rootCauseSvc     *app.RootCauseAnalysisService
+	graph            domain.OpenCodeGraph
+	gitWalker        domain.GitWalker
+	explainer        domain.LLMExplainer
+	cfg              *config.Config
+	pad              *Scratchpad
 	subRunnerFactory SubRunnerFactory
-	log             *slog.Logger
+	log              *slog.Logger
 }
 
 // BuildDelegateTool creates the delegate tool for the Analyst agent.

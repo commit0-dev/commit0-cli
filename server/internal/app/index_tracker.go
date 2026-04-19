@@ -14,9 +14,9 @@ const maxErrorsPerStage = 50
 type IndexTracker struct {
 	mu sync.RWMutex
 
-	jobID    string
-	repoSlug string
-	config   types.IndexConfig
+	jobID     string
+	repoSlug  string
+	config    types.IndexConfig
 	startedAt time.Time
 
 	currentStage types.IndexStage

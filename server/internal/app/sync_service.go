@@ -190,11 +190,11 @@ func (s *SyncService) Manifest(ctx context.Context, repoSlug string) (*types.Syn
 	// the hash reflects the actual graph data.
 	bundle, err := s.exporter.ExportBundle(ctx, repoSlug)
 	if err != nil {
-		return manifest, nil // return manifest without hash if export fails
+		return manifest, nil //nolint:nilerr // return partial manifest without hash on export failure
 	}
 	hash, err := s.codec.HashBundle(bundle)
 	if err != nil {
-		return manifest, nil
+		return manifest, nil //nolint:nilerr // return partial manifest without hash on codec failure
 	}
 	manifest.ContentHash = hash
 

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // EmbedBatcher accumulates embedding inputs and batches API calls.

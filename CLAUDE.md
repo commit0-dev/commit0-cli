@@ -24,13 +24,12 @@ This file provides guidance to Claude Code when working with this repository.
 | LLM | Gemini / OpenRouter / Ollama / Unsloth (`LLM_PROVIDER`) |
 | Agent | CloudWeGo Eino v0.8 with SubRunnerFactory injection |
 | HTTP Server | Gin + gin-contrib/cors + gin-contrib/requestid |
-| HTTP Client | Resty v3 (outbound APIs + CLI→server) |
-| CLI | Cobra + Viper |
+| HTTP Client | Resty v3 (outbound APIs) |
 | AST | smacker/go-tree-sitter (CGO) |
 
 ## Architecture
 
-Streamable HTTP client-server. Server (`commit0 serve`) owns all adapters. CLI is a thin HTTP client via `internal/adapters/client/`.
+Streamable HTTP client-server. Server (`commit0 serve`) owns all adapters. The standalone CLI client lives in `github.com/commit0-dev/commit0-cli`.
 
 - **Unary**: POST → JSON (query, trace, blast, repo, api)
 - **Streaming**: POST → SSE (agent chat, find-root)
@@ -62,12 +61,10 @@ Server is ready when `curl http://localhost:8080/health` returns `{"status":"ok"
 ```bash
 # Build (for local dev / CI — server itself runs in Docker)
 make build-server   # CGO_ENABLED=1 go build ./server (produces bin/commit0)
-make build-cli      # CGO_ENABLED=0 go build ./cli     (produces bin/commit0-cli)
-make build          # both
+make build          # alias for build-server
 
-# Tests (run per sub-module — repo uses go.work workspace)
+# Tests (run from server sub-module — repo uses go.work workspace)
 cd server && go test -count=1 -timeout=5m ./...
-cd cli    && go test -count=1 -timeout=5m ./...
 
 make lint           # golangci-lint
 ```

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 func TestTraceServiceTraceSuccess(t *testing.T) {

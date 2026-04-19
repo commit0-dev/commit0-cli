@@ -76,12 +76,12 @@ func (a *SurrealAdapter) ExportManifest(ctx context.Context, repoSlug string) (*
 	}
 
 	return &types.SyncManifest{
-		RepoSlug:  repo.Slug,
-		RemoteURL: repo.RemoteURL,
+		RepoSlug:   repo.Slug,
+		RemoteURL:  repo.RemoteURL,
 		LastCommit: repo.LastCommit,
-		NodeCount: len(nodeIDs),
-		EdgeCount: len(edges),
-		UpdatedAt: updatedAt,
+		NodeCount:  len(nodeIDs),
+		EdgeCount:  len(edges),
+		UpdatedAt:  updatedAt,
 	}, nil
 }
 

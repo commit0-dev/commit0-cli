@@ -8,8 +8,8 @@ import (
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // Field-level data flow traversal methods on SurrealAdapter.
@@ -105,16 +105,16 @@ func (a *SurrealAdapter) traceFieldFlowRecursive(
 	q += ` LIMIT 50;`
 
 	type flowEdgeRow struct {
-		In        *models.RecordID `json:"in"`
-		Out       *models.RecordID `json:"out"`
-		CallSite  string           `json:"call_site"`
-		FieldPath string           `json:"field_path"`
+		In        *models.RecordID  `json:"in"`
+		Out       *models.RecordID  `json:"out"`
+		CallSite  string            `json:"call_site"`
+		FieldPath string            `json:"field_path"`
 		Metadata  map[string]string `json:"metadata"`
 	}
 
 	results, err := surrealdb.Query[[]flowEdgeRow](ctx, a.readDB(), q, params)
 	if err != nil {
-		return nil // non-fatal: stop traversal at this branch
+		return nil //nolint:nilerr // non-fatal: stop traversal at this branch
 	}
 	if results == nil || len(*results) == 0 {
 		return nil

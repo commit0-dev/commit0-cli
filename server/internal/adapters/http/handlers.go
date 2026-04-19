@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/app"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // handleHealth returns liveness check with server state (idle/indexing).

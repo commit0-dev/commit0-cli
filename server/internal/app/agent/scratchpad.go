@@ -31,9 +31,9 @@ type Scratchpad struct {
 	Hypotheses []Hypothesis `json:"hypotheses"`
 
 	// Convergence tracking.
-	DelegationCount int   `json:"delegation_count"`
-	NovelFindings   []int `json:"novel_findings"` // novel count per delegation
-	UpdatedSinceDelegation bool `json:"updated_since_delegation"`
+	DelegationCount        int   `json:"delegation_count"`
+	NovelFindings          []int `json:"novel_findings"` // novel count per delegation
+	UpdatedSinceDelegation bool  `json:"updated_since_delegation"`
 
 	// Budget.
 	TokenBudget    int     `json:"token_budget"`    // max tokens for read output (default: 4000)
@@ -44,9 +44,9 @@ type Scratchpad struct {
 	// Contradictions detected.
 	Contradictions []Contradiction `json:"contradictions"`
 
-	mu              sync.Mutex `json:"-"` // protects all fields from concurrent access
-	nextEvidenceID  int
-	nextQuestionID  int
+	mu             sync.Mutex `json:"-"` // protects all fields from concurrent access
+	nextEvidenceID int
+	nextQuestionID int
 }
 
 // NewScratchpad creates a scratchpad with default budgets.
@@ -68,9 +68,9 @@ type PlanStep struct {
 
 // Evidence is a scored finding with provenance.
 type Evidence struct {
-	ID        string `json:"id"`
-	Content   string `json:"content"`
-	Source    string `json:"source"`      // tool or delegation that produced it
+	ID         string `json:"id"`
+	Content    string `json:"content"`
+	Source     string `json:"source"` // tool or delegation that produced it
 	SourceArgs string `json:"source_args"`
 
 	// Scores (0.0-1.0) — proposed by agent, validated by server.

@@ -140,7 +140,6 @@ func (nb *Neighborhood) IsEmpty() bool {
 		len(nb.Reads) == 0 && len(nb.Writes) == 0
 }
 
-
 // Embedder converts text and images to embeddings.
 type Embedder interface {
 	EmbedBatch(ctx context.Context, inputs []EmbedInput) ([]EmbedResult, error)
@@ -186,7 +185,6 @@ type TemporalStore interface {
 	NodeHistory(ctx context.Context, nodeID string) ([]types.TemporalChange, error)
 	EdgesIntroducedAt(ctx context.Context, repoSlug, commitHash string) ([]types.CodeEdge, error)
 }
-
 
 // ---------------------------------------------------------------------------
 // Memory Store — three-tier persistent memory

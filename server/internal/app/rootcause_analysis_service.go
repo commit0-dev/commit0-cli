@@ -9,9 +9,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // RootCauseRequest configures a commit zero detection run.
@@ -25,12 +25,12 @@ type RootCauseRequest struct {
 
 // RootCauseAnalysisService orchestrates the 6-step commit zero detection algorithm:
 //
-//	1. LOCATE  — find bug-related functions via semantic search
-//	2. TRACE   — follow field-level data flow backward to find mutations
-//	3. TIMELINE — query temporal graph for when mutations were introduced
-//	4. CORRELATE — score candidate commits
-//	5. VERIFY  — LLM analyzes suspect commit's diff
-//	6. REPORT  — assemble RootCauseReport
+//  1. LOCATE  — find bug-related functions via semantic search
+//  2. TRACE   — follow field-level data flow backward to find mutations
+//  3. TIMELINE — query temporal graph for when mutations were introduced
+//  4. CORRELATE — score candidate commits
+//  5. VERIFY  — LLM analyzes suspect commit's diff
+//  6. REPORT  — assemble RootCauseReport
 type RootCauseAnalysisService struct {
 	querySvc  *QueryService
 	flowSvc   *FieldFlowService

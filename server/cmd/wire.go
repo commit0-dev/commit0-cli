@@ -9,21 +9,21 @@ import (
 	"google.golang.org/genai"
 
 	einoembedopenai "github.com/cloudwego/eino-ext/components/embedding/openai"
-	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 
+	consuladapter "github.com/commit0-dev/commit0/server/internal/adapters/consul"
 	"github.com/commit0-dev/commit0/server/internal/adapters/eino"
-	unslothadapter "github.com/commit0-dev/commit0/server/internal/adapters/unsloth"
 	"github.com/commit0-dev/commit0/server/internal/adapters/gemini"
 	gitadapter "github.com/commit0-dev/commit0/server/internal/adapters/git"
 	localadapter "github.com/commit0-dev/commit0/server/internal/adapters/local"
-	consuladapter "github.com/commit0-dev/commit0/server/internal/adapters/consul"
 	mdnsadapter "github.com/commit0-dev/commit0/server/internal/adapters/mdns"
 	quicadapter "github.com/commit0-dev/commit0/server/internal/adapters/quic"
-	syncadapter "github.com/commit0-dev/commit0/server/internal/adapters/sync"
 	"github.com/commit0-dev/commit0/server/internal/adapters/surreal"
+	syncadapter "github.com/commit0-dev/commit0/server/internal/adapters/sync"
 	"github.com/commit0-dev/commit0/server/internal/adapters/treesitter"
+	unslothadapter "github.com/commit0-dev/commit0/server/internal/adapters/unsloth"
 	"github.com/commit0-dev/commit0/server/internal/adapters/voyage"
 	"github.com/commit0-dev/commit0/server/internal/adapters/walker"
 	"github.com/commit0-dev/commit0/server/internal/app"
@@ -77,7 +77,7 @@ func wireDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
-			return nil, nil, fmt.Errorf("surreal: startup cancelled: %w", ctx.Err())
+			return nil, nil, fmt.Errorf("surreal: startup canceled: %w", ctx.Err())
 		}
 	}
 
@@ -413,7 +413,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		trace:      traceSvc,
 		blast:      blastSvc,
 		repo:       app.NewRepoService(graph),
-		graph:       graph,
+		graph:      graph,
 		agent:      agentRunner,
 		flow:       flowSvc,
 		rootCause:  rootCauseSvc,

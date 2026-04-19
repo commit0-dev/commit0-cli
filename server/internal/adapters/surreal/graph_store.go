@@ -11,9 +11,9 @@ import (
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/server/internal/infra/retry"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -21,19 +21,19 @@ import (
 // ---------------------------------------------------------------------------
 
 type nodeRow struct {
-	ID          *models.RecordID `json:"id"`
-	Docstring   string           `json:"docstring"`
-	Signature   string           `json:"signature"`
-	FilePath    string           `json:"file_path"`
-	RepoSlug    string           `json:"repo_slug"`
-	Language    string           `json:"language"`
-	Visibility  string           `json:"visibility"`
-	ContentHash string           `json:"content_hash"`
-	Qualified   string           `json:"qualified"`
-	Name        string           `json:"name"`
-	Body        string           `json:"body"`
-	Summary     string           `json:"summary"`
-	Concepts    []string         `json:"concepts"`
+	ID                 *models.RecordID `json:"id"`
+	Docstring          string           `json:"docstring"`
+	Signature          string           `json:"signature"`
+	FilePath           string           `json:"file_path"`
+	RepoSlug           string           `json:"repo_slug"`
+	Language           string           `json:"language"`
+	Visibility         string           `json:"visibility"`
+	ContentHash        string           `json:"content_hash"`
+	Qualified          string           `json:"qualified"`
+	Name               string           `json:"name"`
+	Body               string           `json:"body"`
+	Summary            string           `json:"summary"`
+	Concepts           []string         `json:"concepts"`
 	Embedding          []float32        `json:"embedding"`
 	EndLine            int              `json:"end_line"`
 	StartLine          int              `json:"start_line"`
@@ -67,18 +67,18 @@ func rowToCodeNode(r nodeRow, kind types.NodeKind) types.CodeNode {
 		id = fmt.Sprintf("%s:%v", r.ID.Table, r.ID.ID)
 	}
 	return types.CodeNode{
-		ID:          id,
-		Kind:        kind,
-		Name:        r.Name,
-		Qualified:   r.Qualified,
-		FilePath:    r.FilePath,
-		RepoSlug:    r.RepoSlug,
-		Language:    r.Language,
-		StartLine:   r.StartLine,
-		EndLine:     r.EndLine,
-		Signature:   r.Signature,
-		Docstring:   r.Docstring,
-		Body:        r.Body,
+		ID:                 id,
+		Kind:               kind,
+		Name:               r.Name,
+		Qualified:          r.Qualified,
+		FilePath:           r.FilePath,
+		RepoSlug:           r.RepoSlug,
+		Language:           r.Language,
+		StartLine:          r.StartLine,
+		EndLine:            r.EndLine,
+		Signature:          r.Signature,
+		Docstring:          r.Docstring,
+		Body:               r.Body,
 		Summary:            r.Summary,
 		Concepts:           r.Concepts,
 		ContentHash:        r.ContentHash,
@@ -229,15 +229,6 @@ func genericEdgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
 		"to":    models.NewRecordID(toTable, toID),
 		"props": props,
 	}
-}
-
-// optionalMeta returns models.None when a metadata key is absent, so SurrealDB
-// strict mode receives NONE for option<T> fields instead of an empty string.
-func optionalMeta(meta map[string]string, key string) any {
-	if v, ok := meta[key]; ok && v != "" {
-		return v
-	}
-	return models.None
 }
 
 // kindFromTable converts a DB table name back to a NodeKind.
@@ -565,7 +556,6 @@ FROM $start.{1..%d}(%s);`, maxDepth, arrow)
 	return buildTraceHops((*results)[0].Result, label), nil
 }
 
-
 // buildTraceHops converts flat traversal rows into a slice of TraceHop.
 // SurrealDB path traversal returns results in BFS order; we build a flat
 // list and assign depths by index since graph depth tracking in SurrealQL
@@ -605,7 +595,6 @@ func buildTraceHops(rows []traceRow, _ string) []types.TraceHop {
 
 // BlastRadius is deprecated — use TraverseGraph with direction="reverse".
 // Kept only for test stub compat.
-
 
 // ---------------------------------------------------------------------------
 // GraphStore — Neighborhood & data-flow queries
@@ -863,18 +852,18 @@ func (a *SurrealAdapter) ListAllNodes(ctx context.Context, repoSlug string) ([]t
 // ListAllEdges returns all edges for a repo. Used by GraphExporter for building sync bundles.
 func (a *SurrealAdapter) ListAllEdges(ctx context.Context, repoSlug string) ([]types.CodeEdge, error) {
 	type edgeRow struct {
-		In               *models.RecordID  `json:"in"`
-		Out              *models.RecordID  `json:"out"`
-		CallSite         string            `json:"call_site"`
-		CallType         string            `json:"call_type"`
-		IsDynamic        bool              `json:"is_dynamic"`
-		ParamName        string            `json:"param_name"`
-		ArgExpr          string            `json:"arg_expr"`
-		ArgType          string            `json:"arg_type"`
-		FieldName        string            `json:"field_name"`
-		IntroducedCommit string            `json:"introduced_commit"`
-		IntroducedAt     *string           `json:"introduced_at"`
-		RemovedCommit    string            `json:"removed_commit"`
+		In               *models.RecordID `json:"in"`
+		Out              *models.RecordID `json:"out"`
+		CallSite         string           `json:"call_site"`
+		CallType         string           `json:"call_type"`
+		IsDynamic        bool             `json:"is_dynamic"`
+		ParamName        string           `json:"param_name"`
+		ArgExpr          string           `json:"arg_expr"`
+		ArgType          string           `json:"arg_type"`
+		FieldName        string           `json:"field_name"`
+		IntroducedCommit string           `json:"introduced_commit"`
+		IntroducedAt     *string          `json:"introduced_at"`
+		RemovedCommit    string           `json:"removed_commit"`
 	}
 
 	// With SCHEMALESS edge tables, all edges store repo as a plain string prop.

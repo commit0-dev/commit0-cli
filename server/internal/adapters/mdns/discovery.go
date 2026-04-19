@@ -70,7 +70,7 @@ func (d *Discovery) Discover(ctx context.Context) ([]types.PeerInfo, error) {
 		return nil, fmt.Errorf("listen multicast: %w", err)
 	}
 	defer conn.Close()
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 
 	var peers []types.PeerInfo
 	buf := make([]byte, 4096)
@@ -124,5 +124,5 @@ func (d *Discovery) sendAnnouncement() {
 	}
 	defer conn.Close()
 	msg := fmt.Sprintf("commit0|%s|%d|%d|%s", d.instanceName, d.quicPort, d.httpPort, ServiceType)
-	conn.Write([]byte(msg))
+	_, _ = conn.Write([]byte(msg))
 }

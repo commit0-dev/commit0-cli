@@ -1,11 +1,10 @@
 BINARY_SERVER := commit0
-BINARY_CLI    := commit0-cli
 PKG           := github.com/commit0-dev/commit0
 VERSION       ?= dev
 COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS       := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: all build build-server build-cli run clean \
+.PHONY: all build build-server run clean \
         fmt vet lint \
         test test-cover test-race \
         install-hooks uninstall-hooks hooks-run \
@@ -15,22 +14,18 @@ LDFLAGS       := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 all: build
 
 # ── Build ──────────────────────────────────────────────────────────────────
-## build: build both server (CGO) and CLI (pure Go) binaries
-build: build-server build-cli
+## build: build the commit0 server binary (requires CGO for tree-sitter)
+build: build-server
 
 ## build-server: build the commit0 server binary (requires CGO for tree-sitter)
 build-server:
 	CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY_SERVER) ./server
 
-## build-cli: build the commit0-cli binary (no CGO, cross-compiles trivially)
-build-cli:
-	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY_CLI) ./cli
-
 run: build-server
 	./bin/$(BINARY_SERVER) serve
 
 clean:
-	rm -f bin/$(BINARY_SERVER) bin/$(BINARY_CLI) coverage.out coverage.html
+	rm -f bin/$(BINARY_SERVER) coverage.out coverage.html
 	rm -rf dist/
 
 # ── Code quality ───────────────────────────────────────────────────────────

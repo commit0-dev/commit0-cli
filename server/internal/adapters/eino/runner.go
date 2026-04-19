@@ -162,7 +162,7 @@ func (r *Runner) Run(ctx context.Context, config agent.AgentConfig, userMessage 
 	return ch, nil
 }
 
-// compile-time check
+// compile-time check.
 var _ agent.AgentRunnerPort = (*Runner)(nil)
 
 // NewSubRunnerFactory creates a SubRunnerFactory that produces isolated runners.
@@ -216,6 +216,6 @@ func (a *toolAdapter) InvokableRun(ctx context.Context, argumentsInJSON string, 
 	return a.inner.Invoke(ctx, argumentsInJSON)
 }
 
-// compile-time checks
+// compile-time checks.
 var _ tool.InvokableTool = (*toolAdapter)(nil)
 var _ tool.BaseTool = (*toolAdapter)(nil)

@@ -71,7 +71,7 @@ func (e *EinoEmbedder) EmbedQuery(ctx context.Context, query string) ([]float32,
 	return normalizeVec(toFloat32(vecs[0]), e.dim), nil
 }
 
-// compile-time check
+// compile-time check.
 var _ domain.Embedder = (*EinoEmbedder)(nil)
 
 // toFloat32 converts []float64 to []float32.

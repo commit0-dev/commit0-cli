@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 // BlastRequest represents a blast radius analysis request.

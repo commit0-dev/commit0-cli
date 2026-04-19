@@ -3,8 +3,8 @@ package linkers
 import (
 	"strings"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // CallLinker resolves call-type edges (calls, constructs, tests) against
@@ -20,7 +20,7 @@ import (
 // naturally follows only "calls" edges without construction/test noise.
 type CallLinker struct{}
 
-func (l *CallLinker) Name() string            { return "call" }
+func (l *CallLinker) Name() string             { return "call" }
 func (l *CallLinker) Labels() []types.EdgeKind { return []types.EdgeKind{types.EdgeCalls} }
 
 func (l *CallLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([]types.CodeEdge, domain.LinkStats) {

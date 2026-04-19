@@ -8,8 +8,8 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/commit0-dev/commit0/server/internal/domain"
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
 // ParseGoMod extracts module nodes from a go.mod file. It parses the module

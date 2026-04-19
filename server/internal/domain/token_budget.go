@@ -52,10 +52,10 @@ func DefaultSummarizeBudget(contextTokens int) TokenBudget {
 	return TokenBudget{
 		Total:     total,
 		Prefix:    200,
-		Summary:   0,   // no existing summary in input (that's the output)
-		Concepts:  0,   // no existing concepts in input
+		Summary:   0, // no existing summary in input (that's the output)
+		Concepts:  0, // no existing concepts in input
 		Signature: 500,
-		Neighbors: 0,   // not used for summarization
+		Neighbors: 0,           // not used for summarization
 		Body:      total - 700, // code body is the main input
 	}
 }

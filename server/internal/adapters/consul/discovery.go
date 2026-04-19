@@ -100,7 +100,7 @@ func (d *Discovery) Discover(ctx context.Context) ([]types.PeerInfo, error) {
 }
 
 // Watch continuously monitors for peer changes using Consul blocking queries (long-poll).
-// Calls handler whenever the peer list changes. Blocks until ctx is cancelled.
+// Calls handler whenever the peer list changes. Blocks until ctx is canceled.
 func (d *Discovery) Watch(ctx context.Context, handler func([]types.PeerInfo)) error {
 	var lastIndex uint64
 

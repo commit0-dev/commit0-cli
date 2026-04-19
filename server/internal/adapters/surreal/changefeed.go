@@ -10,8 +10,8 @@ import (
 
 // ChangefeedEntry represents a single change from SurrealDB's SHOW CHANGES command.
 type ChangefeedEntry struct {
-	Versionstamp int    `json:"versionstamp"`
-	Changes      []any  `json:"changes"`
+	Versionstamp int   `json:"versionstamp"`
+	Changes      []any `json:"changes"`
 }
 
 // ReadChangefeed returns changes to a table since the given timestamp.

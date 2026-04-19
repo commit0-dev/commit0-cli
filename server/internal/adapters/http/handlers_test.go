@@ -13,10 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/app"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
-	"github.com/commit0-dev/commit0/pkg/types"
 )
 
 func init() {
@@ -37,7 +37,6 @@ type httpTestGraphStore struct {
 	deleteErr error
 	blastErr  error
 	traceHops []types.TraceHop
-	affected  []types.AffectedNode
 }
 
 func (s *httpTestGraphStore) UpsertNode(_ context.Context, _ *types.CodeNode) error {
@@ -57,8 +56,8 @@ func (s *httpTestGraphStore) DeleteNodesByRepo(_ context.Context, _ string) erro
 	return s.deleteErr
 }
 func (s *httpTestGraphStore) DeleteNodesByFile(_ context.Context, _, _ string) error { return nil }
-func (s *httpTestGraphStore) UpsertEdge(_ context.Context, _ *types.CodeEdge) error { return nil }
-func (s *httpTestGraphStore) DeleteEdgesForNode(_ context.Context, _ string) error  { return nil }
+func (s *httpTestGraphStore) UpsertEdge(_ context.Context, _ *types.CodeEdge) error  { return nil }
+func (s *httpTestGraphStore) DeleteEdgesForNode(_ context.Context, _ string) error   { return nil }
 
 func (s *httpTestGraphStore) UpsertFileBatch(_ context.Context, _ []types.CodeNode, _ []types.CodeEdge) error {
 	return nil
@@ -130,13 +129,13 @@ func (s *httpTestGraphStore) PutNode(ctx context.Context, node *types.CodeNode) 
 func (s *httpTestGraphStore) FindNode(ctx context.Context, repo, q string) (*types.CodeNode, error) {
 	return s.GetNodeByQualified(ctx, repo, q)
 }
-func (s *httpTestGraphStore) PutEdge(_ context.Context, _ *types.CodeEdge) error   { return nil }
-func (s *httpTestGraphStore) DeleteEdgesFrom(_ context.Context, _ string) error     { return nil }
+func (s *httpTestGraphStore) PutEdge(_ context.Context, _ *types.CodeEdge) error { return nil }
+func (s *httpTestGraphStore) DeleteEdgesFrom(_ context.Context, _ string) error  { return nil }
 func (s *httpTestGraphStore) PutBatch(_ context.Context, _ []types.CodeNode, _ []types.CodeEdge) error {
 	return nil
 }
-func (s *httpTestGraphStore) DeleteByRepo(_ context.Context, _ string) error        { return nil }
-func (s *httpTestGraphStore) DeleteByFile(_ context.Context, _, _ string) error     { return nil }
+func (s *httpTestGraphStore) DeleteByRepo(_ context.Context, _ string) error    { return nil }
+func (s *httpTestGraphStore) DeleteByFile(_ context.Context, _, _ string) error { return nil }
 func (s *httpTestGraphStore) Neighbors(_ context.Context, _ string) (*domain.Neighborhood, error) {
 	return &domain.Neighborhood{}, nil
 }
@@ -155,7 +154,7 @@ func (s *httpTestGraphStore) ListEdges(_ context.Context, _ string, _ []string) 
 func (s *httpTestGraphStore) PutRepo(ctx context.Context, repo *types.Repo) error {
 	return s.UpsertRepo(ctx, repo)
 }
-func (s *httpTestGraphStore) DeleteRepo(_ context.Context, _ string) error          { return nil }
+func (s *httpTestGraphStore) DeleteRepo(_ context.Context, _ string) error { return nil }
 
 type httpTestEmbedder struct {
 	err error

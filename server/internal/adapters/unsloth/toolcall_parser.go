@@ -11,10 +11,10 @@ import (
 
 // Patterns for tool call extraction, tried in priority order.
 var (
-	// Format 1: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+	// Format 1: <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
 	xmlToolCallPattern = regexp.MustCompile(`<tool_call>\s*(\{.*?\})\s*</tool_call>`)
 
-	// Format 2: Gemma native <|tool_call>call:name{args}<tool_call|>
+	// Format 2: Gemma native <|tool_call>call:name{args}<tool_call|>.
 	gemmaToolCallPattern = regexp.MustCompile(`<\|tool_call>call:(\w+)\{(.*?)\}<tool_call\|>`)
 
 	// thinkPattern matches <think>...</think> blocks.
