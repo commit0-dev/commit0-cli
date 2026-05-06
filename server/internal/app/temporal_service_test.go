@@ -448,3 +448,167 @@ func TestQueryHistory_ByRange_Error(t *testing.T) {
 		t.Error("expected range query error")
 	}
 }
+
+// ==========================================================================
+// Additional IndexCommitRange tests for coverage of branches
+// ==========================================================================
+
+func TestIndexCommitRange_WithAddedFiles_CoversAddedBranch(t *testing.T) {
+	// Exercise the diff.Status == "added" branch at line 111.
+	gitWalker := &fakeGitWalker{
+		commits: []domain.GitCommit{
+			{Hash: "abc12345", Timestamp: time.Now(), Author: "test", Message: "add file"},
+		},
+		diffs: []domain.GitFileDiff{
+			{Path: "new.go", Status: "added"},
+		},
+		fileData: []byte("package foo\n\nfunc New() {}"),
+	}
+	store := &fakeTemporalStore{}
+	parser := &fakeParser{
+		result: &domain.ParsedFile{
+			Nodes: []types.CodeNode{
+				{ID: "fn:foo.New", Qualified: "foo.New", Kind: types.NodeFunction},
+			},
+		},
+	}
+
+	svc := newTemporalService(newStubGraphStore(), store, gitWalker, parser)
+	err := svc.IndexCommitRange(context.Background(), TemporalIndexRequest{
+		RepoSlug:   "r",
+		RepoPath:   ".",
+		FromCommit: "abc",
+		ToCommit:   "def",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIndexCommitRange_WithModifiedFilesAndNewNode_CoversNewNodeBranch(t *testing.T) {
+	// Exercise the existing == nil branch at line 119 for modified files.
+	gitWalker := &fakeGitWalker{
+		commits: []domain.GitCommit{
+			{Hash: "abc12345", Timestamp: time.Now(), Author: "test", Message: "modify file"},
+		},
+		diffs: []domain.GitFileDiff{
+			{Path: "existing.go", Status: "modified"},
+		},
+		fileData: []byte("package foo\n\nfunc New() {}\nfunc NewNode() {}"),
+	}
+	store := &fakeTemporalStore{}
+	graphStore := newStubGraphStore()
+	parser := &fakeParser{
+		result: &domain.ParsedFile{
+			Nodes: []types.CodeNode{
+				{ID: "fn:foo.NewNode", Qualified: "foo.NewNode", Kind: types.NodeFunction},
+			},
+		},
+	}
+
+	svc := newTemporalService(graphStore, store, gitWalker, parser)
+	err := svc.IndexCommitRange(context.Background(), TemporalIndexRequest{
+		RepoSlug:   "r",
+		RepoPath:   ".",
+		FromCommit: "abc",
+		ToCommit:   "def",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIndexCommitRange_WithModifiedNodeContent_CoversContentHashBranch(t *testing.T) {
+	// Exercise the existing.ContentHash != node.ContentHash branch at line 124.
+	existingNode := &types.CodeNode{
+		ID:          "fn:foo.Handler",
+		Qualified:   "foo.Handler",
+		Kind:        types.NodeFunction,
+		ContentHash: "old_hash",
+	}
+	gitWalker := &fakeGitWalker{
+		commits: []domain.GitCommit{
+			{Hash: "def67890", Timestamp: time.Now(), Author: "test", Message: "modify func"},
+		},
+		diffs: []domain.GitFileDiff{
+			{Path: "handler.go", Status: "modified"},
+		},
+		fileData: []byte("package foo\n\nfunc Handler() { /* modified */ }"),
+	}
+	store := &fakeTemporalStore{}
+	graphStore := newStubGraphStore()
+	graphStore.nodesByQ["r::foo.Handler"] = existingNode
+
+	parser := &fakeParser{
+		result: &domain.ParsedFile{
+			Nodes: []types.CodeNode{
+				{
+					ID:          "fn:foo.Handler",
+					Qualified:   "foo.Handler",
+					Kind:        types.NodeFunction,
+					ContentHash: "new_hash",
+				},
+			},
+		},
+	}
+
+	svc := newTemporalService(graphStore, store, gitWalker, parser)
+	err := svc.IndexCommitRange(context.Background(), TemporalIndexRequest{
+		RepoSlug:   "r",
+		RepoPath:   ".",
+		FromCommit: "abc",
+		ToCommit:   "def",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIndexCommitRange_DiffCommitError_ContinuesLoop(t *testing.T) {
+	// Exercise the error handling at line 79 (diff failed, continue).
+	gitWalker := &fakeGitWalker{
+		commits: []domain.GitCommit{
+			{Hash: "abc12345", Timestamp: time.Now(), Author: "test", Message: "commit"},
+		},
+		diffErr: errors.New("diff error"),
+	}
+	store := &fakeTemporalStore{}
+	parser := &fakeParser{}
+
+	svc := newTemporalService(newStubGraphStore(), store, gitWalker, parser)
+	err := svc.IndexCommitRange(context.Background(), TemporalIndexRequest{
+		RepoSlug:   "r",
+		RepoPath:   ".",
+		FromCommit: "abc",
+		ToCommit:   "def",
+	})
+	if err != nil {
+		// Should succeed despite diff error
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIndexCommitRange_DeletedFiles_Skipped(t *testing.T) {
+	// Exercise the diff.Status == "deleted" branch at line 86 (continue).
+	gitWalker := &fakeGitWalker{
+		commits: []domain.GitCommit{
+			{Hash: "abc12345", Timestamp: time.Now(), Author: "test", Message: "delete file"},
+		},
+		diffs: []domain.GitFileDiff{
+			{Path: "deleted.go", Status: "deleted"},
+		},
+	}
+	store := &fakeTemporalStore{}
+	parser := &fakeParser{}
+
+	svc := newTemporalService(newStubGraphStore(), store, gitWalker, parser)
+	err := svc.IndexCommitRange(context.Background(), TemporalIndexRequest{
+		RepoSlug:   "r",
+		RepoPath:   ".",
+		FromCommit: "abc",
+		ToCommit:   "def",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

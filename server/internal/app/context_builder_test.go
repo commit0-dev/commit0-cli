@@ -607,3 +607,99 @@ func TestNodeLabel_AllKinds(t *testing.T) {
 		})
 	}
 }
+
+// ==========================================================================
+// Additional ForNode tests for coverage of different node kinds
+// ==========================================================================
+
+func TestForNode_FileKind_IncludesFilePath(t *testing.T) {
+	// Exercise ForNode with NodeFile kind
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
+	node := &types.CodeNode{
+		Kind:     types.NodeFile,
+		FilePath: "/path/to/main.go",
+		Summary:  "Main entry point",
+	}
+
+	result := cb.ForNode(node)
+	if !strings.Contains(result, "/path/to/main.go") {
+		t.Errorf("result should include file path, got: %q", result)
+	}
+}
+
+func TestForNode_ClassKind_IncludesStructInfo(t *testing.T) {
+	// Exercise ForNode with NodeClass kind
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
+	node := &types.CodeNode{
+		Kind:      types.NodeClass,
+		Qualified: "pkg.UserHandler",
+		Language:  "go",
+		FilePath:  "user.go",
+		Signature: "type UserHandler struct { /* fields */ }",
+		Docstring: "User request handler",
+	}
+
+	result := cb.ForNode(node)
+	if !strings.Contains(result, "pkg.UserHandler") {
+		t.Errorf("result should include class name, got: %q", result)
+	}
+}
+
+func TestForNode_ModuleKind_IncludesModuleName(t *testing.T) {
+	// Exercise ForNode with NodeModule kind
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
+	node := &types.CodeNode{
+		Kind:      types.NodeModule,
+		Name:      "authentication",
+		Qualified: "pkg.auth",
+		Language:  "go",
+	}
+
+	result := cb.ForNode(node)
+	if !strings.Contains(result, "authentication") {
+		t.Errorf("result should include module name, got: %q", result)
+	}
+}
+
+func TestForNode_WithBigLanguageBody_RespectsBudget(t *testing.T) {
+	// Test that large bodies are truncated to respect budget
+	smallBudget := domain.DefaultEmbedBudget(100)
+	cb := NewContextBuilder(smallBudget)
+
+	largeBody := strings.Repeat("x", 500)
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "pkg.BigFunc",
+		Language:  "go",
+		FilePath:  "big.go",
+		Body:      largeBody,
+	}
+
+	result := cb.ForNode(node)
+	if len(result) > smallBudget.Total*3 {
+		t.Errorf("result exceeds budget limits, got length %d for budget %d", len(result), smallBudget.Total)
+	}
+}
+
+func TestForNode_WithConceptsAndSignature_IncludesMetadata(t *testing.T) {
+	// Exercise including concepts and signature
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "auth.Verify",
+		Language:  "go",
+		FilePath:  "auth.go",
+		Concepts:  []string{"security", "token", "validation"},
+		Signature: "func(token string) (bool, error)",
+		Docstring: "Verifies JWT tokens",
+		Body:      "func Verify(token string) (bool, error) { }",
+	}
+
+	result := cb.ForNode(node)
+	if !strings.Contains(result, "auth.Verify") {
+		t.Errorf("result should include qualified name")
+	}
+	if !strings.Contains(result, "Concepts:") || !strings.Contains(result, "security") {
+		t.Errorf("result should include concepts")
+	}
+}
