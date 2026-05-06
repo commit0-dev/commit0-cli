@@ -120,7 +120,7 @@ jobs:
       # provenance=mode=max attaches a SLSA level 3 in-toto provenance statement.
       # sbom=true attaches a Syft-generated SBOM as an OCI artifact.
       # Both are stored as image attestations in the registry (no side files).
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         id: build
         with:
           context: .
