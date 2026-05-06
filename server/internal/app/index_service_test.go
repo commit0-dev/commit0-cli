@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/config"
@@ -3363,5 +3364,123 @@ func TestIndex_StoreContextCancellationFatal(t *testing.T) {
 	}
 	if result == nil {
 		t.Error("result should not be nil")
+	}
+}
+
+// ── Index — git-metadata branches via injected extractGit ─────────────────
+
+// indexBaseCfg returns a minimal config used by the git-branch tests below.
+func indexBaseCfg() *config.Config {
+	return &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 1,
+	}
+}
+
+func indexBaseDeps() (*stubFileWalker, *stubParser, *stubEmbedder) {
+	walker := &stubFileWalker{files: []domain.FileEntry{
+		{Path: "main.go", Language: "go", Content: []byte("package main")},
+	}}
+	parser := &stubParser{result: &domain.ParsedFile{
+		Path: "main.go", Language: "go",
+		Nodes: []types.CodeNode{{ID: "f1", Qualified: "main", Kind: types.NodeFunction}},
+		Edges: []types.CodeEdge{},
+	}}
+	embedder := &stubEmbedder{batchRes: []domain.EmbedResult{{ID: "f1", Vector: []float32{0.1, 0.2}}}}
+	return walker, parser, embedder
+}
+
+func TestIndex_GitDetected_AdoptsCanonicalSlug(t *testing.T) {
+	walker, parser, embedder := indexBaseDeps()
+	store := newStubGraphStore()
+	svc := NewIndexService(walker, parser, embedder, store, nil, indexBaseCfg())
+	svc.extractGit = func(string) GitMetadata {
+		return GitMetadata{Slug: "owner/repo", RemoteURL: "https://github.com/owner/repo", Branch: "main", CommitHash: "abc1234"}
+	}
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/repo", RepoSlug: "passed-in"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	if _, ok := store.repos["owner/repo"]; !ok {
+		t.Errorf("expected canonical slug owner/repo to be persisted, got repos=%+v", store.repos)
+	}
+}
+
+func TestIndex_GitDetected_DedupReusesExistingSlug(t *testing.T) {
+	walker, parser, embedder := indexBaseDeps()
+	store := newStubGraphStore()
+	// Pre-seed an existing repo with a different slug but the same remote.
+	store.repos["pre-existing/slug"] = &types.Repo{Slug: "pre-existing/slug", RemoteURL: "https://github.com/owner/repo"}
+	store.findRepoByRemoteURLFn = func(_ context.Context, url string) (*types.Repo, error) {
+		if url == "https://github.com/owner/repo" {
+			return store.repos["pre-existing/slug"], nil
+		}
+		return nil, nil
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, indexBaseCfg())
+	svc.extractGit = func(string) GitMetadata {
+		return GitMetadata{Slug: "owner/repo", RemoteURL: "https://github.com/owner/repo"}
+	}
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/repo", RepoSlug: "passed-in"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	if _, ok := store.repos["pre-existing/slug"]; !ok {
+		t.Errorf("dedup should reuse pre-existing slug, repos=%+v", store.repos)
+	}
+}
+
+func TestIndex_GitDetected_ExistingRepoMergesFields(t *testing.T) {
+	walker, parser, embedder := indexBaseDeps()
+	store := newStubGraphStore()
+	earlier := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	store.repos["owner/repo"] = &types.Repo{
+		Slug:          "owner/repo",
+		LastIndexedAt: &earlier,
+		CreatedAt:     earlier,
+		Languages:     []string{"go", "ts"},
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, indexBaseCfg())
+	svc.extractGit = func(string) GitMetadata {
+		return GitMetadata{Slug: "owner/repo", RemoteURL: "https://github.com/owner/repo"}
+	}
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/repo", RepoSlug: "owner/repo"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	got := store.repos["owner/repo"]
+	if got == nil || got.LastIndexedAt == nil || !got.LastIndexedAt.Equal(earlier) {
+		t.Errorf("merge should preserve existing LastIndexedAt, got %+v", got)
+	}
+	if len(got.Languages) != 2 {
+		t.Errorf("merge should preserve existing Languages, got %v", got.Languages)
+	}
+}
+
+func TestIndex_GitNoSlug_FallsBackToRequestSlug(t *testing.T) {
+	walker, parser, embedder := indexBaseDeps()
+	store := newStubGraphStore()
+	svc := NewIndexService(walker, parser, embedder, store, nil, indexBaseCfg())
+	svc.extractGit = func(string) GitMetadata { return GitMetadata{} } // no git detected
+
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/repo", RepoSlug: "my-passed-slug"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	if _, ok := store.repos["my-passed-slug"]; !ok {
+		t.Errorf("when git returns no slug, request slug should be canonical: %+v", store.repos)
+	}
+}
+
+func TestIndex_GitDedup_FindRepoErrorIgnored(t *testing.T) {
+	walker, parser, embedder := indexBaseDeps()
+	store := newStubGraphStore()
+	store.findRepoByRemoteURLFn = func(_ context.Context, _ string) (*types.Repo, error) {
+		return nil, domain.NotFound("not in db")
+	}
+	svc := NewIndexService(walker, parser, embedder, store, nil, indexBaseCfg())
+	svc.extractGit = func(string) GitMetadata {
+		return GitMetadata{Slug: "owner/repo", RemoteURL: "https://github.com/owner/repo"}
+	}
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/repo", RepoSlug: "owner/repo"}); err != nil {
+		t.Fatalf("Index should swallow FindRepoByRemoteURL errors: %v", err)
 	}
 }

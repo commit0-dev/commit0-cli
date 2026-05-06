@@ -51,6 +51,11 @@ type IndexService struct {
 	embedChBuf  int                 // channel buffer override: <0 = unbuffered, 0 = default (32), >0 = exact size
 	temporalSvc *TemporalService    // optional: set via SetTemporalService for commit-aware indexing
 	linkers     []domain.EdgeLinker // global cross-file edge resolution chain
+
+	// extractGit is the injected git-metadata extractor. Defaults to the
+	// real ExtractGitMetadata; tests overwrite this field to feed canned
+	// metadata so Index can be exercised without a real git repo.
+	extractGit func(repoPath string) GitMetadata
 }
 
 // NewIndexService creates a new index service.
@@ -72,6 +77,7 @@ func NewIndexService(
 		summarizer: NewSummarizer(explainer, log),
 		cfg:        cfg,
 		log:        log,
+		extractGit: ExtractGitMetadata,
 	}
 }
 
@@ -109,7 +115,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	}
 
 	// Extract git metadata for repo identity and deduplication.
-	git := ExtractGitMetadata(req.RepoPath)
+	git := is.extractGit(req.RepoPath)
 	canonicalSlug := req.RepoSlug
 	if git.Slug != "" {
 		canonicalSlug = git.Slug
