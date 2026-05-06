@@ -8,11 +8,11 @@ FROM golang:${GO_VERSION}-bookworm AS builder
 WORKDIR /src
 
 # Copy workspace definition and all module descriptors first for layer caching.
+# cli/ and sdk/ moved to standalone repos in c00ce58 — only server + pkg/types
+# remain in this workspace.
 COPY go.work go.work.sum ./
 COPY server/go.mod  server/go.sum  ./server/
-COPY cli/go.mod     cli/go.sum     ./cli/
 COPY pkg/types/go.mod              ./pkg/types/
-COPY sdk/go.mod     sdk/go.sum     ./sdk/
 
 RUN go mod download
 

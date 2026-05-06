@@ -25,22 +25,28 @@ env:
 jobs:
   # ── Lint ──────────────────────────────────────────────────────────────────
   # Safety net for the merge commit — catches issues that slipped through
-  # (admin bypass, merge conflict resolution, etc.).
+  # (admin bypass, merge conflict resolution, etc.). Workspace layout: lint
+  # each member module independently.
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [server, pkg/types]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: ${{ matrix.module }}/go.mod
           cache: false
 
       - uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
           install-mode: goinstall
+          working-directory: ${{ matrix.module }}
           args: --timeout=5m
 
   # ── Unit tests + coverage publishing ──────────────────────────────────────
@@ -54,10 +60,15 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: server/go.mod
           cache: true
 
-      - name: Run tests with coverage
+      - name: Test pkg/types
+        working-directory: pkg/types
+        run: go test -race -count=1 -timeout=2m ./...
+
+      - name: Run server tests with coverage
+        working-directory: server
         run: |
           go test -race -count=1 -timeout=5m \
             -coverprofile=coverage.out \
@@ -67,11 +78,12 @@ jobs:
 
       - name: Write coverage summary
         if: always()
+        working-directory: server
         run: |
           COVERAGE=$(go tool cover -func=coverage.out \
             | grep -E "^total:" | awk '{print $3}' | tr -d '%')
           {
-            echo "## Coverage report — \`internal/app\`"
+            echo "## Coverage report — \`server/internal/app\`"
             echo ""
             echo "| | |"
             echo "|---|---|"
@@ -88,13 +100,13 @@ jobs:
         if: always()
         with:
           name: coverage
-          path: coverage.out
+          path: server/coverage.out
           retention-days: 14
 
       # Publish coverage report + trend chart to the repo Wiki.
       - uses: ncruces/go-coverage-report@v0
         with:
-          coverage-file: coverage.out
+          coverage-file: server/coverage.out
           report: true
           chart: true
           amend: true
@@ -109,12 +121,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: server/go.mod
           cache: true
 
       - uses: golang/govulncheck-action@v1
         with:
-          go-version-file: go.mod
+          go-version-file: server/go.mod
+          work-dir: server
           go-package: ./...
 
   # ── GoReleaser snapshot ───────────────────────────────────────────────────
@@ -131,7 +144,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: server/go.mod
           cache: true
 
       - name: Install arm64 cross-compiler

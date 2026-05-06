@@ -37,7 +37,7 @@ jobs:
       # reuse them via the mount below.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: server/go.mod
           cache: true
 
       # Write registry credentials to a temp Docker config so goreleaser-cross
