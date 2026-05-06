@@ -1802,3 +1802,50 @@ func TestIndex_NolinkersMultipleFiles(t *testing.T) {
 	}
 }
 
+// ── Additional tests for Index() coverage: Reparse with missing node ────────────
+
+func TestIndex_ReparseWithMissingNode(t *testing.T) {
+	// Covers: reparse mode when FindNode fails (line 225)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "main.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "main"}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	// Don't pre-populate nodes, so FindNode will fail
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Reparse:  true,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with reparse (missing node) failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+

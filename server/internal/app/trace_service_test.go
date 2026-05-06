@@ -437,3 +437,25 @@ func TestTraceServiceResolveSymbolNoVectorIdx(t *testing.T) {
 		t.Errorf("Trace should fail with no vectorIdx and symbol not in store")
 	}
 }
+
+func TestDedupHops_RecursiveDedup(t *testing.T) {
+	hops := []types.TraceHop{
+		{
+			Node: types.CodeNode{Qualified: "a"},
+			Children: []types.TraceHop{
+				{Node: types.CodeNode{Qualified: "b"}},
+				{Node: types.CodeNode{Qualified: "b"}}, // duplicate child
+				{Node: types.CodeNode{Qualified: "c"}},
+			},
+		},
+		{Node: types.CodeNode{Qualified: "a"}}, // duplicate top-level
+		{Node: types.CodeNode{ID: "id-only"}},  // empty Qualified, falls back to ID
+	}
+	out := dedupHops(hops)
+	if len(out) != 2 {
+		t.Fatalf("top-level should dedupe to 2, got %d", len(out))
+	}
+	if len(out[0].Children) != 2 {
+		t.Errorf("nested children should dedupe to 2, got %d", len(out[0].Children))
+	}
+}

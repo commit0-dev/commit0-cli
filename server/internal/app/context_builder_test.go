@@ -584,3 +584,26 @@ func TestContextBuilderForNodeWithNeighborhood_DataFlowVariations(t *testing.T) 
 		t.Error("should include all DataSources")
 	}
 }
+
+func TestNodeLabel_AllKinds(t *testing.T) {
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(2048))
+
+	cases := []struct {
+		name string
+		node *types.CodeNode
+		want string
+	}{
+		{"file", &types.CodeNode{Kind: types.NodeFile, FilePath: "/a/b.go"}, "/a/b.go"},
+		{"module_with_name", &types.CodeNode{Kind: types.NodeModule, Name: "pkgname", Qualified: "ignored"}, "pkgname"},
+		{"module_no_name", &types.CodeNode{Kind: types.NodeModule, Qualified: "fallback"}, "fallback"},
+		{"function", &types.CodeNode{Kind: types.NodeFunction, Qualified: "p.F"}, "p.F"},
+		{"class", &types.CodeNode{Kind: types.NodeClass, Qualified: "p.T"}, "p.T"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cb.nodeLabel(tc.node); got != tc.want {
+				t.Errorf("nodeLabel(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+}
