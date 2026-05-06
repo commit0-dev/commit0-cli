@@ -151,13 +151,13 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
 
       - name: Validate .goreleaser.yaml
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: check
 
       - name: Snapshot build (linux/amd64 + linux/arm64)
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: build --snapshot --clean --id linux
