@@ -158,10 +158,10 @@ func TestDataFlowLinker_Link(t *testing.T) {
 	sym := buildTable(caller, target)
 
 	in := []types.CodeEdge{
-		{Kind: types.EdgeDataFlow, FromID: caller.ID, ToID: "Bar"},                                      // resolves
-		{Kind: types.EdgeDataFlow, FromID: caller.ID, ToID: "function:app.Bar"},                          // already resolved → skipped
-		{Kind: types.EdgeDataFlow, FromID: caller.ID, ToID: "Nope"},                                      // unresolved
-		{Kind: types.EdgeCalls, FromID: caller.ID, ToID: "Bar"},                                          // wrong kind → skipped
+		{Kind: types.EdgeDataFlow, FromID: caller.ID, ToID: "Bar"},              // resolves
+		{Kind: types.EdgeDataFlow, FromID: caller.ID, ToID: "function:app.Bar"}, // already resolved → skipped
+		{Kind: types.EdgeDataFlow, FromID: caller.ID, ToID: "Nope"},             // unresolved
+		{Kind: types.EdgeCalls, FromID: caller.ID, ToID: "Bar"},                 // wrong kind → skipped
 	}
 	out, stats := l.Link(in, sym)
 	if stats.Processed != 2 || stats.Resolved != 1 || stats.Unresolved != 1 {
@@ -365,11 +365,11 @@ func TestRouteLinker_Link(t *testing.T) {
 	sym := buildTable(handler, caller)
 
 	in := []types.CodeEdge{
-		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: "Handler"},                  // resolves
-		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: handler.ID},                  // already resolved
-		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: "function:not-in-symbols"},   // pre-resolved-shape but missing → falls through to Resolve
-		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: "Nonsense"},                  // unresolved
-		{Kind: types.EdgeImports, FromID: caller.ID, ToID: "x"},                        // wrong kind
+		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: "Handler"},                 // resolves
+		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: handler.ID},                // already resolved
+		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: "function:not-in-symbols"}, // pre-resolved-shape but missing → falls through to Resolve
+		{Kind: types.EdgeRoute, FromID: caller.ID, ToID: "Nonsense"},                // unresolved
+		{Kind: types.EdgeImports, FromID: caller.ID, ToID: "x"},                     // wrong kind
 	}
 	out, stats := l.Link(in, sym)
 

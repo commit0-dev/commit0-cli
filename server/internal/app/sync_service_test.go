@@ -139,7 +139,7 @@ type fakeScopeStore struct {
 	err     error
 }
 
-func (f *fakeScopeStore) AddToScope(_ context.Context, _ string) error    { return nil }
+func (f *fakeScopeStore) AddToScope(_ context.Context, _ string) error      { return nil }
 func (f *fakeScopeStore) RemoveFromScope(_ context.Context, _ string) error { return nil }
 func (f *fakeScopeStore) ListScope(_ context.Context) ([]types.SyncScope, error) {
 	return nil, nil
@@ -180,7 +180,7 @@ func (f *fakeTransport) PushBundle(_ context.Context, _ *types.PeerInfo, bundle 
 	return &types.SyncResult{RepoSlug: bundle.RepoSlug}, nil
 }
 func (f *fakeTransport) Serve(_ context.Context, _ string, _ domain.PeerHandler) error { return nil }
-func (f *fakeTransport) Close() error                                                   { return nil }
+func (f *fakeTransport) Close() error                                                  { return nil }
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -671,11 +671,11 @@ func TestImportBundle_ReEmbedTriggeredWhenNodesImported(t *testing.T) {
 	codec := &fakeCodec{hash: "testhash"}
 	importer := &fakeImporter{
 		result: &types.SyncResult{
-			RepoSlug:       "owner/repo",
-			NodesImported:  5,
-			NodesSkipped:   0,
-			EdgesImported:  2,
-			ReEmbedQueued:  false,
+			RepoSlug:      "owner/repo",
+			NodesImported: 5,
+			NodesSkipped:  0,
+			EdgesImported: 2,
+			ReEmbedQueued: false,
 		},
 	}
 	// Build a fully-stubbed IndexService so the async re-embed goroutine
@@ -709,11 +709,11 @@ func TestImportBundle_NodesZero_ReEmbedNotQueued(t *testing.T) {
 	codec := &fakeCodec{hash: "testhash"}
 	importer := &fakeImporter{
 		result: &types.SyncResult{
-			RepoSlug:       "owner/repo",
-			NodesImported:  0,
-			NodesSkipped:   0,
-			EdgesImported:  0,
-			ReEmbedQueued:  false,
+			RepoSlug:      "owner/repo",
+			NodesImported: 0,
+			NodesSkipped:  0,
+			EdgesImported: 0,
+			ReEmbedQueued: false,
 		},
 	}
 	indexSvc := &IndexService{}
@@ -856,9 +856,9 @@ func TestPull_NoLocalManifest_FetchesRemote(t *testing.T) {
 		&fakeExporter{manifest: nil}, // no local manifest
 		&fakeImporter{
 			result: &types.SyncResult{
-				NodesImported:  1,
-				EdgesImported:  0,
-				ReEmbedQueued:  false,
+				NodesImported: 1,
+				EdgesImported: 0,
+				ReEmbedQueued: false,
 			},
 		},
 		&fakeCodec{hash: "remotehash"},

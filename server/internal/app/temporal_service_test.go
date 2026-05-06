@@ -40,13 +40,13 @@ func (g *fakeGitWalker) CommitInfo(_ context.Context, _, _ string) (*domain.GitC
 }
 
 type fakeTemporalStore struct {
-	upsertNodeErr   error
-	upsertEdgeErr   error
-	nodeHistory     []types.TemporalChange
-	nodeHistoryErr  error
-	queryRangeRes   []types.TemporalChange
-	queryRangeErr   error
-	edgesAtCommit   []types.CodeEdge
+	upsertNodeErr  error
+	upsertEdgeErr  error
+	nodeHistory    []types.TemporalChange
+	nodeHistoryErr error
+	queryRangeRes  []types.TemporalChange
+	queryRangeErr  error
+	edgesAtCommit  []types.CodeEdge
 }
 
 func (s *fakeTemporalStore) UpsertNodeTemporal(_ context.Context, _ *types.CodeNode, _ string, _ time.Time) error {

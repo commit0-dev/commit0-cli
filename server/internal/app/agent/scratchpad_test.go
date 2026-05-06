@@ -41,13 +41,13 @@ func (f *padFakeGraph) GetNode(_ context.Context, _ string) (*types.CodeNode, er
 func (f *padFakeGraph) FindNode(_ context.Context, _, _ string) (*types.CodeNode, error) {
 	return nil, nil
 }
-func (f *padFakeGraph) DeleteNode(_ context.Context, _ string) error             { return nil }
-func (f *padFakeGraph) PutEdge(_ context.Context, _ *types.CodeEdge) error       { return nil }
-func (f *padFakeGraph) DeleteEdgesFrom(_ context.Context, _ string) error        { return nil }
+func (f *padFakeGraph) DeleteNode(_ context.Context, _ string) error       { return nil }
+func (f *padFakeGraph) PutEdge(_ context.Context, _ *types.CodeEdge) error { return nil }
+func (f *padFakeGraph) DeleteEdgesFrom(_ context.Context, _ string) error  { return nil }
 func (f *padFakeGraph) PutBatch(_ context.Context, _ []types.CodeNode, _ []types.CodeEdge) error {
 	return nil
 }
-func (f *padFakeGraph) DeleteByRepo(_ context.Context, _ string) error   { return nil }
+func (f *padFakeGraph) DeleteByRepo(_ context.Context, _ string) error    { return nil }
 func (f *padFakeGraph) DeleteByFile(_ context.Context, _, _ string) error { return nil }
 func (f *padFakeGraph) TraverseGraph(_ context.Context, _ string, _ []string, _ string, _ int) ([]types.TraceHop, error) {
 	return nil, nil
@@ -62,9 +62,9 @@ func (f *padFakeGraph) TextSearch(_ context.Context, _ string, _ domain.TextSear
 	return nil, nil
 }
 func (f *padFakeGraph) ListFilePaths(_ context.Context, _ string) ([]string, error) { return nil, nil }
-func (f *padFakeGraph) PutRepo(_ context.Context, _ *types.Repo) error               { return nil }
-func (f *padFakeGraph) GetRepo(_ context.Context, _ string) (*types.Repo, error)     { return nil, nil }
-func (f *padFakeGraph) DeleteRepo(_ context.Context, _ string) error                 { return nil }
+func (f *padFakeGraph) PutRepo(_ context.Context, _ *types.Repo) error              { return nil }
+func (f *padFakeGraph) GetRepo(_ context.Context, _ string) (*types.Repo, error)    { return nil, nil }
+func (f *padFakeGraph) DeleteRepo(_ context.Context, _ string) error                { return nil }
 func (f *padFakeGraph) FindRepoByRemoteURL(_ context.Context, _ string) (*types.Repo, error) {
 	return nil, nil
 }

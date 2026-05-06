@@ -344,3 +344,242 @@ func TestDataFlowServiceBuildFlowContextWithNeighborhood(t *testing.T) {
 		t.Error("expected Called by:")
 	}
 }
+
+// ── forNodeWithNeighborhood tests ────────────────────────────────────────────────
+
+func TestContextBuilderForNodeWithNeighborhood_AllFieldsPopulated(t *testing.T) {
+	// Exercise all branches in forNodeWithNeighborhood (lines 67-128)
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(2000))
+
+	node := &types.CodeNode{
+		ID:        "fn:auth⋅validateToken",
+		Kind:      types.NodeFunction,
+		Qualified: "auth.validateToken",
+		Language:  "go",
+		FilePath:  "auth.go",
+		StartLine: 42,
+		EndLine:   88,
+		Summary:   "Validates JWT token",
+		Docstring: "Validates JWT tokens using RS256 signature",
+		Signature: "func(token string) (bool, error)",
+		Concepts:  []string{"security", "jwt", "cryptography"},
+		Body:      "func validateToken(token string) (bool, error) { ... }",
+	}
+
+	nb := &domain.Neighborhood{
+		Callers: []domain.NeighborNode{
+			{Qualified: "api.Handler"},
+			{Qualified: "middleware.Auth"},
+		},
+		Callees: []domain.NeighborNode{
+			{Qualified: "jwt.Verify", Signature: "(token string, key []byte) bool"},
+			{Qualified: "log.Error", Signature: "(msg string)"},
+		},
+		DataSinks: []domain.NeighborNode{
+			{Qualified: "db.LogAttempt", ParamName: "userId"},
+			{Qualified: "cache.Set", ParamName: "token"},
+		},
+		DataSources: []domain.NeighborNode{
+			{Qualified: "http.Header", ArgExpr: "r.Header.Get(\"Authorization\")"},
+		},
+		Reads:  []string{"User.LastLogin", "Config.JWTSecret"},
+		Writes: []string{"AuditLog.Entry", "Cache.TokenSet"},
+	}
+
+	result := cb.forNodeWithNeighborhood(node, nb)
+
+	// Verify all sections are present
+	if !strings.Contains(result, defaultDocPrefix) {
+		t.Error("missing document prefix")
+	}
+	if !strings.Contains(result, "[FUNCTION]") {
+		t.Error("missing FUNCTION kind")
+	}
+	if !strings.Contains(result, "auth.validateToken") {
+		t.Error("missing qualified name")
+	}
+	if !strings.Contains(result, "Validates JWT token") {
+		t.Error("missing summary")
+	}
+	if !strings.Contains(result, "Concepts:") {
+		t.Error("missing Concepts section")
+	}
+	if !strings.Contains(result, "security, jwt, cryptography") {
+		t.Error("missing concept values")
+	}
+	if !strings.Contains(result, "Signature:") {
+		t.Error("missing Signature section")
+	}
+	if !strings.Contains(result, "Callers:") {
+		t.Error("missing Callers section")
+	}
+	if !strings.Contains(result, "api.Handler") {
+		t.Error("missing caller name")
+	}
+	if !strings.Contains(result, "Callees:") {
+		t.Error("missing Callees section")
+	}
+	if !strings.Contains(result, "jwt.Verify") {
+		t.Error("missing callee name")
+	}
+	if !strings.Contains(result, "Data flows to:") {
+		t.Error("missing data sink section")
+	}
+	if !strings.Contains(result, "param") && !strings.Contains(result, "userId") {
+		t.Error("missing param name in sink")
+	}
+	if !strings.Contains(result, "Data flows from:") {
+		t.Error("missing data source section")
+	}
+	if !strings.Contains(result, `Authorization`) {
+		t.Error("missing arg expr in source")
+	}
+	if !strings.Contains(result, "Reads:") {
+		t.Error("missing Reads section")
+	}
+	if !strings.Contains(result, "User.LastLogin") {
+		t.Error("missing read field")
+	}
+	if !strings.Contains(result, "Writes:") {
+		t.Error("missing Writes section")
+	}
+	if !strings.Contains(result, "AuditLog.Entry") {
+		t.Error("missing written field")
+	}
+	if !strings.Contains(result, "---") {
+		t.Error("missing body separator")
+	}
+	if !strings.Contains(result, "func validateToken") {
+		t.Error("missing body content")
+	}
+}
+
+func TestContextBuilderForNodeWithNeighborhood_PartialNeighborhood(t *testing.T) {
+	// Test with only some neighborhood fields populated
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(1000))
+
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "util.Parse",
+		Language:  "go",
+		FilePath:  "util.go",
+		Body:      "func Parse() {}",
+	}
+
+	nb := &domain.Neighborhood{
+		Callees: []domain.NeighborNode{{Qualified: "json.Unmarshal"}},
+		Writes:  []string{"buffer"},
+	}
+
+	result := cb.forNodeWithNeighborhood(node, nb)
+
+	if !strings.Contains(result, "Callees:") {
+		t.Error("should include Callees")
+	}
+	if !strings.Contains(result, "Writes:") {
+		t.Error("should include Writes")
+	}
+	if strings.Contains(result, "Callers:") {
+		t.Error("should not include Callers when empty")
+	}
+	if strings.Contains(result, "Reads:") {
+		t.Error("should not include Reads when empty")
+	}
+}
+
+func TestContextBuilderForNodeWithNeighborhood_BudgetEnforced(t *testing.T) {
+	// Test that total budget is enforced (line 139-141)
+	smallBudget := domain.TokenBudget{
+		Prefix:    50,
+		Summary:   50,
+		Signature: 50,
+		Neighbors: 50,
+		Body:      50,
+		Total:     150, // Very small total
+	}
+	cb := NewContextBuilder(smallBudget)
+
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "pkg.VeryLongFunctionNameWithLotsOfDetails",
+		Summary:   strings.Repeat("summary ", 100),
+		Signature: strings.Repeat("sig ", 100),
+		Body:      strings.Repeat("body ", 100),
+	}
+
+	nb := &domain.Neighborhood{
+		Callers: []domain.NeighborNode{
+			{Qualified: strings.Repeat("caller", 50)},
+		},
+	}
+
+	result := cb.forNodeWithNeighborhood(node, nb)
+
+	// Total length should not exceed budget
+	if len(result) > smallBudget.Total {
+		t.Errorf("result length (%d) exceeds total budget (%d)", len(result), smallBudget.Total)
+	}
+}
+
+func TestContextBuilderForNodeWithNeighborhood_EmptyNeighborhoodFields(t *testing.T) {
+	// Test when neighborhood exists but all fields are empty
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(500))
+
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "empty.Func",
+		Language:  "go",
+		FilePath:  "empty.go",
+		Body:      "func Func() {}",
+	}
+
+	nb := &domain.Neighborhood{}
+
+	result := cb.forNodeWithNeighborhood(node, nb)
+
+	// Should not error; should just have basic node info
+	if !strings.Contains(result, "empty.Func") {
+		t.Error("should include qualified name even with empty neighborhood")
+	}
+}
+
+func TestContextBuilderForNodeWithNeighborhood_DataFlowVariations(t *testing.T) {
+	// Test different combinations of DataSinks/DataSources with/without metadata
+	cb := NewContextBuilder(domain.DefaultEmbedBudget(1000))
+
+	node := &types.CodeNode{
+		Kind:      types.NodeFunction,
+		Qualified: "handler.POST",
+		Language:  "go",
+		FilePath:  "handler.go",
+		Body:      "func POST() {}",
+	}
+
+	nb := &domain.Neighborhood{
+		DataSinks: []domain.NeighborNode{
+			{Qualified: "db.Save", ParamName: "user"}, // with param
+			{Qualified: "api.Call", ParamName: ""},    // empty param
+			{Qualified: "log.Print"},                  // no param at all
+		},
+		DataSources: []domain.NeighborNode{
+			{Qualified: "request.Parse", ArgExpr: "body"}, // with arg
+			{Qualified: "cache.Get", ArgExpr: ""},         // empty arg
+			{Qualified: "env.Var"},                        // no arg
+		},
+	}
+
+	result := cb.forNodeWithNeighborhood(node, nb)
+
+	if !strings.Contains(result, "Data flows to:") {
+		t.Error("should include Data flows to:")
+	}
+	if !strings.Contains(result, "db.Save") {
+		t.Error("should include all DataSinks")
+	}
+	if !strings.Contains(result, "Data flows from:") {
+		t.Error("should include Data flows from:")
+	}
+	if !strings.Contains(result, "request.Parse") {
+		t.Error("should include all DataSources")
+	}
+}

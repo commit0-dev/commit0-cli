@@ -45,14 +45,14 @@ func (g *fakeFieldFlowGraph) FindNode(_ context.Context, _, qualified string) (*
 	}
 	return nil, domain.NotFound("not found")
 }
-func (g *fakeFieldFlowGraph) DeleteNode(_ context.Context, _ string) error            { return nil }
-func (g *fakeFieldFlowGraph) PutEdge(_ context.Context, _ *types.CodeEdge) error      { return nil }
-func (g *fakeFieldFlowGraph) DeleteEdgesFrom(_ context.Context, _ string) error       { return nil }
+func (g *fakeFieldFlowGraph) DeleteNode(_ context.Context, _ string) error       { return nil }
+func (g *fakeFieldFlowGraph) PutEdge(_ context.Context, _ *types.CodeEdge) error { return nil }
+func (g *fakeFieldFlowGraph) DeleteEdgesFrom(_ context.Context, _ string) error  { return nil }
 func (g *fakeFieldFlowGraph) PutBatch(_ context.Context, _ []types.CodeNode, _ []types.CodeEdge) error {
 	return nil
 }
-func (g *fakeFieldFlowGraph) DeleteByRepo(_ context.Context, _ string) error            { return nil }
-func (g *fakeFieldFlowGraph) DeleteByFile(_ context.Context, _, _ string) error         { return nil }
+func (g *fakeFieldFlowGraph) DeleteByRepo(_ context.Context, _ string) error    { return nil }
+func (g *fakeFieldFlowGraph) DeleteByFile(_ context.Context, _, _ string) error { return nil }
 func (g *fakeFieldFlowGraph) TraverseGraph(_ context.Context, _ string, _ []string, _ string, _ int) ([]types.TraceHop, error) {
 	return g.hops, g.traverseErr
 }
@@ -74,10 +74,12 @@ func (g *fakeFieldFlowGraph) ListEdges(_ context.Context, _ string, _ []string) 
 func (g *fakeFieldFlowGraph) ListFilePaths(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
-func (g *fakeFieldFlowGraph) PutRepo(_ context.Context, _ *types.Repo) error            { return nil }
-func (g *fakeFieldFlowGraph) GetRepo(_ context.Context, _ string) (*types.Repo, error)  { return nil, nil }
-func (g *fakeFieldFlowGraph) ListRepos(_ context.Context) ([]types.Repo, error)         { return nil, nil }
-func (g *fakeFieldFlowGraph) DeleteRepo(_ context.Context, _ string) error              { return nil }
+func (g *fakeFieldFlowGraph) PutRepo(_ context.Context, _ *types.Repo) error { return nil }
+func (g *fakeFieldFlowGraph) GetRepo(_ context.Context, _ string) (*types.Repo, error) {
+	return nil, nil
+}
+func (g *fakeFieldFlowGraph) ListRepos(_ context.Context) ([]types.Repo, error) { return nil, nil }
+func (g *fakeFieldFlowGraph) DeleteRepo(_ context.Context, _ string) error      { return nil }
 func (g *fakeFieldFlowGraph) FindRepoByRemoteURL(_ context.Context, _ string) (*types.Repo, error) {
 	return nil, nil
 }

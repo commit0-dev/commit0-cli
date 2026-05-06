@@ -16,16 +16,6 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Type aliases for pre-existing test files that reference unexported types
-// by their non-prefixed names (scratchpad_test.go references fakeMemStore
-// without the pad- prefix, so we add the alias here to satisfy compilation).
-// ---------------------------------------------------------------------------
-
-// fakeMemStore is an alias for padFakeMemStore defined in scratchpad_test.go.
-// It exists only to satisfy the compile-time reference at scratchpad_test.go:1708.
-type fakeMemStore = padFakeMemStore
-
-// ---------------------------------------------------------------------------
 // Inline fakes
 // ---------------------------------------------------------------------------
 
@@ -498,7 +488,7 @@ func TestDelegateExecute_TracksToolLog(t *testing.T) {
 			{Type: "tool_call", ToolName: "trace_calls"},
 			{Type: "tool_result", ToolName: "trace_calls"},
 			{Type: "tool_call", ToolName: "get_neighborhood"},
-			{Type: "tool_result", ToolName: ""},       // empty name, falls back to currentToolName
+			{Type: "tool_result", ToolName: ""}, // empty name, falls back to currentToolName
 			{Type: "message", Content: strings.Repeat("trace result with sufficient length ", 3)},
 		},
 	}

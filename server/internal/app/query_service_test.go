@@ -545,15 +545,15 @@ func TestConceptRerank_ConceptMatchBoost(t *testing.T) {
 	input := []types.ScoredNode{
 		{
 			Node: types.CodeNode{
-				ID:        "n1",
-				Concepts:  []string{"authentication", "login"},
+				ID:       "n1",
+				Concepts: []string{"authentication", "login"},
 			},
 			FusedScore: 1.0,
 		},
 		{
 			Node: types.CodeNode{
-				ID:        "n2",
-				Concepts:  []string{"storage", "database"},
+				ID:       "n2",
+				Concepts: []string{"storage", "database"},
 			},
 			FusedScore: 0.9,
 		},
@@ -575,8 +575,8 @@ func TestConceptRerank_ConceptMatchHyphenated(t *testing.T) {
 	input := []types.ScoredNode{
 		{
 			Node: types.CodeNode{
-				ID:        "n1",
-				Concepts:  []string{"request-handler", "http-service"},
+				ID:       "n1",
+				Concepts: []string{"request-handler", "http-service"},
 			},
 			FusedScore: 1.0,
 		},
@@ -597,8 +597,8 @@ func TestConceptRerank_SkipsShortWords(t *testing.T) {
 	input := []types.ScoredNode{
 		{
 			Node: types.CodeNode{
-				ID:        "n1",
-				Concepts:  []string{"a", "is", "in"},
+				ID:       "n1",
+				Concepts: []string{"a", "is", "in"},
 			},
 			FusedScore: 1.0,
 		},
@@ -619,11 +619,11 @@ func TestConceptRerank_CentralityBoost(t *testing.T) {
 	input := []types.ScoredNode{
 		{
 			Node: types.CodeNode{
-				ID:        "n1",
-				Concepts:  []string{},
+				ID:       "n1",
+				Concepts: []string{},
 			},
-			FusedScore:  1.0,
-			Centrality:  10, // Well-connected node
+			FusedScore: 1.0,
+			Centrality: 10, // Well-connected node
 		},
 	}
 
@@ -644,11 +644,11 @@ func TestConceptRerank_CentralityBoostCapped(t *testing.T) {
 	input := []types.ScoredNode{
 		{
 			Node: types.CodeNode{
-				ID:        "n1",
-				Concepts:  []string{},
+				ID:       "n1",
+				Concepts: []string{},
 			},
-			FusedScore:  1.0,
-			Centrality:  100, // Very well-connected
+			FusedScore: 1.0,
+			Centrality: 100, // Very well-connected
 		},
 	}
 
@@ -667,11 +667,11 @@ func TestConceptRerank_CombinedBoosts(t *testing.T) {
 	input := []types.ScoredNode{
 		{
 			Node: types.CodeNode{
-				ID:        "n1",
-				Concepts:  []string{"authentication"},
+				ID:       "n1",
+				Concepts: []string{"authentication"},
 			},
-			FusedScore:  1.0,
-			Centrality:  10, // Also well-connected
+			FusedScore: 1.0,
+			Centrality: 10, // Also well-connected
 		},
 	}
 
@@ -722,8 +722,8 @@ func TestConceptRerank_NoConcepts(t *testing.T) {
 	input := []types.ScoredNode{
 		{
 			Node: types.CodeNode{
-				ID:        "n1",
-				Concepts:  []string{},
+				ID:       "n1",
+				Concepts: []string{},
 			},
 			FusedScore: 1.0,
 		},

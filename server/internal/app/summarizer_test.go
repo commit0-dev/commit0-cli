@@ -264,9 +264,9 @@ func TestSummarizeNodes_BatchFallbackOnError(t *testing.T) {
 	// Swap to per-call behaviour: first call fails (batch), subsequent succeed.
 	fe2 := &mockExplainer{
 		responses: []mockResponse{
-			{err: errors.New("batch fail")},          // batch attempt
-			{data: single},                            // single for A
-			{data: single},                            // single for B
+			{err: errors.New("batch fail")}, // batch attempt
+			{data: single},                  // single for A
+			{data: single},                  // single for B
 		},
 	}
 	s2 := &Summarizer{explainer: fe2, log: slog.Default().With("component", "summarizer")}
@@ -388,8 +388,8 @@ func TestSummarizeBatch_BadJSON_FallsBackToSingle(t *testing.T) {
 	single, _ := json.Marshal(SummaryResult{Summary: "fallback"})
 	responses := []mockResponse{
 		{data: []byte(`{{{bad`), err: nil}, // batch returns bad JSON
-		{data: single},                      // single for n1
-		{data: single},                      // single for n2
+		{data: single},                     // single for n1
+		{data: single},                     // single for n2
 	}
 	fe := &mockExplainer{responses: responses}
 	s := &Summarizer{explainer: fe, log: slog.Default().With("component", "summarizer")}
