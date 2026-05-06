@@ -105,6 +105,42 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	startTime := time.Now()
 	run := &indexRun{onProgress: is.progressFn}
 
+	repo, err := is.runSetup(ctx, &req, run)
+	if err != nil {
+		return nil, err
+	}
+	_ = repo // repo record is upserted; slug is now canonical in req
+
+	fileCh, walkErrCh := is.startWalk(ctx, req)
+
+	parsedCh := is.runParse(ctx, fileCh, req, run)
+
+	allParsed := is.runLinkAndSummarize(ctx, parsedCh, run)
+
+	if err := is.runEmbedAndStore(ctx, allParsed, req, run); err != nil {
+		return nil, err
+	}
+
+	// Drain walker errors (fatal if any).
+	if err := <-walkErrCh; err != nil {
+		return nil, fmt.Errorf("walk failed: %w", err)
+	}
+
+	result := &IndexResult{
+		FilesIndexed: run.filesIndexed,
+		NodesCreated: run.nodesCreated,
+		EdgesCreated: run.edgesCreated,
+		Timing:       types.TimingInfo{TotalMS: time.Since(startTime).Milliseconds()},
+	}
+
+	is.runPostPipeline(ctx, req, run)
+
+	return result, nil
+}
+
+// runSetup handles force-delete, git metadata, repo dedup, and repo upsert.
+// It updates req.RepoSlug to the canonical slug before returning.
+func (is *IndexService) runSetup(ctx context.Context, req *IndexRequest, _ *indexRun) (*types.Repo, error) {
 	// Force re-index: cascade-delete all existing nodes via the repo record so
 	// stale records (functions/files removed from the codebase) don't persist.
 	if req.Force {
@@ -153,19 +189,27 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		return nil, fmt.Errorf("upsert repo: %w", err)
 	}
 
-	// Use canonical slug for all downstream operations.
+	// Propagate canonical slug to caller for all downstream operations.
 	req.RepoSlug = canonicalSlug
+	return repo, nil
+}
 
-	// Stage 1: Walk filesystem
+// startWalk kicks off the filesystem walk and returns its channels.
+// Tracker stage transitions (StartStage/CompleteStage for Walk) happen inside
+// the goroutine that drains fileCh (runParse), so the walk and parse stages
+// are always bookended in the same goroutine.
+func (is *IndexService) startWalk(ctx context.Context, req IndexRequest) (<-chan domain.FileEntry, <-chan error) {
 	is.log.Info("starting walk", "repo", req.RepoSlug, "path", req.RepoPath)
 	if is.tracker != nil {
 		is.tracker.StartStage(types.StageWalk)
 	}
-	fileCh, walkErrCh := is.walker.Walk(ctx, req.RepoPath, domain.WalkOpts{
-		Languages: req.Languages,
-	})
+	return is.walker.Walk(ctx, req.RepoPath, domain.WalkOpts{Languages: req.Languages})
+}
 
-	// Stage 2: Parse (CPU-bound, use GOMAXPROCS workers)
+// runParse drains fileCh through a bounded worker pool, stamps repo slugs, handles
+// incremental-skip and reparse-preserve logic, and sends results on the returned channel.
+// The channel is closed when all parse workers finish.
+func (is *IndexService) runParse(ctx context.Context, fileCh <-chan domain.FileEntry, req IndexRequest, run *indexRun) <-chan *domain.ParsedFile {
 	parseLimit := is.cfg.Index.MaxWorkersParse
 	if parseLimit <= 0 {
 		parseLimit = runtime.GOMAXPROCS(0)
@@ -203,13 +247,11 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 				}
 
 				// Incremental indexing: skip files whose content hasn't changed.
-				// Look up the file node by qualified name (= file path) and compare
-				// its stored content hash against the freshly parsed one.
 				if !req.Force && !req.Reparse && parsed.ContentHash != "" {
 					existingFile, err := is.graph.FindNode(parseCtx, req.RepoSlug, file.Path)
 					if err == nil && existingFile != nil && existingFile.ContentHash == parsed.ContentHash {
 						is.log.Debug("skipping unchanged file", "file", file.Path)
-						run.addFilesIndexed(1) // count for progress but don't re-process
+						run.addFilesIndexed(1)
 						if is.tracker != nil {
 							is.tracker.AddSkipped()
 						}
@@ -270,67 +312,73 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		}
 	}()
 
-	// ── Phase 2: LINK — global cross-file edge resolution ─────────────────
-	// Collect all parsed files, build a SymbolTable from ALL nodes,
-	// then run the EdgeLinker chain to resolve cross-file references.
+	return parsedCh
+}
 
+// runLinkAndSummarize collects all parsed files from parsedCh, runs the global
+// EdgeLinker chain to resolve cross-file references, and returns the complete
+// slice ready for the embed/store stage.
+func (is *IndexService) runLinkAndSummarize(_ context.Context, parsedCh <-chan *domain.ParsedFile, _ *indexRun) []*domain.ParsedFile {
 	var allParsed []*domain.ParsedFile
 	for parsed := range parsedCh {
 		allParsed = append(allParsed, parsed)
 	}
 
-	// Build global symbol table from ALL parsed nodes
-	if len(is.linkers) > 0 && len(allParsed) > 0 {
-		is.log.Info("building symbol table", "files", len(allParsed))
-		var allNodes []types.CodeNode
-		var allEdges []types.CodeEdge
-		for _, pf := range allParsed {
-			allNodes = append(allNodes, pf.Nodes...)
-			allEdges = append(allEdges, pf.Edges...)
-		}
+	if len(is.linkers) == 0 || len(allParsed) == 0 {
+		return allParsed
+	}
 
-		symbols := domain.BuildSymbolTable(allNodes)
+	// Build global symbol table from ALL parsed nodes.
+	is.log.Info("building symbol table", "files", len(allParsed))
+	var allNodes []types.CodeNode
+	var allEdges []types.CodeEdge
+	for _, pf := range allParsed {
+		allNodes = append(allNodes, pf.Nodes...)
+		allEdges = append(allEdges, pf.Edges...)
+	}
 
-		// Run each registered linker
-		for _, linker := range is.linkers {
-			var stats domain.LinkStats
-			allEdges, stats = linker.Link(allEdges, symbols)
-			is.log.Info("linker complete",
-				"linker", stats.LinkerName,
-				"processed", stats.Processed,
-				"resolved", stats.Resolved,
-				"unresolved", stats.Unresolved,
-			)
-			if is.tracker != nil {
-				is.tracker.AddCallEdgeResolution(stats.Processed, stats.Resolved)
-			}
-		}
+	symbols := domain.BuildSymbolTable(allNodes)
 
-		// Redistribute resolved edges back to per-file parsed data
-		edgesByFrom := make(map[string][]types.CodeEdge, len(allParsed))
-		for _, e := range allEdges {
-			edgesByFrom[e.FromID] = append(edgesByFrom[e.FromID], e)
-		}
-
-		// Rebuild per-file edge lists from the globally-resolved edges
-		nodeFileMap := make(map[string]int) // node ID → allParsed index
-		for i, pf := range allParsed {
-			for _, n := range pf.Nodes {
-				nodeFileMap[n.ID] = i
-			}
-			pf.Edges = nil // clear old edges, will be reassigned
-		}
-		for _, e := range allEdges {
-			if idx, ok := nodeFileMap[e.FromID]; ok {
-				allParsed[idx].Edges = append(allParsed[idx].Edges, e)
-			} else if len(allParsed) > 0 {
-				// Orphan edge (e.g., defines from global linker) → attach to first file
-				allParsed[0].Edges = append(allParsed[0].Edges, e)
-			}
+	// Run each registered linker.
+	for _, linker := range is.linkers {
+		var stats domain.LinkStats
+		allEdges, stats = linker.Link(allEdges, symbols)
+		is.log.Info("linker complete",
+			"linker", stats.LinkerName,
+			"processed", stats.Processed,
+			"resolved", stats.Resolved,
+			"unresolved", stats.Unresolved,
+		)
+		if is.tracker != nil {
+			is.tracker.AddCallEdgeResolution(stats.Processed, stats.Resolved)
 		}
 	}
 
-	// Feed resolved parsed files into the embed/store pipeline
+	// Rebuild per-file edge lists from the globally-resolved edges.
+	nodeFileMap := make(map[string]int, len(allParsed)) // node ID → allParsed index
+	for i, pf := range allParsed {
+		for _, n := range pf.Nodes {
+			nodeFileMap[n.ID] = i
+		}
+		pf.Edges = nil // clear old edges, will be reassigned
+	}
+	for _, e := range allEdges {
+		if idx, ok := nodeFileMap[e.FromID]; ok {
+			allParsed[idx].Edges = append(allParsed[idx].Edges, e)
+		} else {
+			// Orphan edge (e.g., defines from global linker) → attach to first file.
+			allParsed[0].Edges = append(allParsed[0].Edges, e)
+		}
+	}
+
+	return allParsed
+}
+
+// runEmbedAndStore drives the summarize → embed → store pipeline for the
+// resolved parsed-file slice. Returns a fatal error only when the store
+// errgroup propagates a context-cancellation error.
+func (is *IndexService) runEmbedAndStore(ctx context.Context, allParsed []*domain.ParsedFile, req IndexRequest, run *indexRun) error {
+	// Feed resolved parsed files into the embed/store pipeline.
 	resolvedCh := make(chan *domain.ParsedFile, len(allParsed))
 	go func() {
 		defer close(resolvedCh)
@@ -339,7 +387,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		}
 	}()
 
-	// Stage 3: Embed (API, limit to 4 concurrent)
+	// Stage 3: Embed (API-bound, limited concurrency).
 	if is.tracker != nil {
 		if req.Fast || req.Reparse {
 			is.tracker.SkipStage(types.StageSummarize)
@@ -367,7 +415,6 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 				// Summarize nodes before embedding (enriches Summary + Concepts).
 				// Skip in fast/reparse mode to avoid expensive LLM calls.
 				if is.summarizer != nil && !req.Fast && !req.Reparse {
-					// Count nodes that get summaries (before: empty, after: non-empty)
 					beforeSummary := 0
 					for _, n := range parsed.Nodes {
 						if n.Summary != "" {
@@ -387,14 +434,6 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 					}
 				}
 
-				// Count nodes that already have embeddings (will be skipped by batcher)
-				preEmbedded := 0
-				for _, n := range parsed.Nodes {
-					if len(n.Embedding) > 0 {
-						preEmbedded++
-					}
-				}
-
 				nodes, err := batcher.Process(embedCtx, parsed.Nodes, is.builder)
 				if err != nil {
 					is.log.Warn("embed failed", "file", parsed.Path, "err", err)
@@ -405,7 +444,6 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 					return nil // non-fatal
 				}
 
-				// Count how many nodes now have embeddings
 				newlyEmbedded := 0
 				for _, n := range nodes {
 					if len(n.Embedding) > 0 {
@@ -432,7 +470,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		}
 	}()
 
-	// Stage 4: Store (SurrealDB, limit to 8 concurrent)
+	// Stage 4: Store (SurrealDB, limited concurrency).
 	if is.tracker != nil {
 		is.tracker.StartStage(types.StageStore)
 	}
@@ -441,7 +479,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 
 	for embedded := range embedCh {
 		storeGroup.Go(func() error {
-			// Context cancellation is fatal — propagate for graceful shutdown
+			// Context cancellation is fatal — propagate for graceful shutdown.
 			if err := storeCtx.Err(); err != nil {
 				return err
 			}
@@ -463,29 +501,18 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	}
 
 	if err := storeGroup.Wait(); err != nil {
-		return nil, fmt.Errorf("store stage: %w", err)
+		return fmt.Errorf("store stage: %w", err)
 	}
 	if is.tracker != nil {
 		is.tracker.CompleteStage(types.StageStore)
 	}
+	return nil
+}
 
-	// Drain walker errors (fatal if any)
-	if err := <-walkErrCh; err != nil {
-		return nil, fmt.Errorf("walk failed: %w", err)
-	}
-
-	result := &IndexResult{
-		FilesIndexed: run.filesIndexed,
-		NodesCreated: run.nodesCreated,
-		EdgesCreated: run.edgesCreated,
-		Timing: types.TimingInfo{
-			TotalMS: time.Since(startTime).Milliseconds(),
-		},
-	}
-
-	// Neighborhood re-embedding pass: re-embed nodes whose edges changed this run
-	// so their embeddings include up-to-date graph context (callers, callees, data-flow).
-	// Skip on --reparse/--fast.
+// runPostPipeline runs the neighborhood reembed, temporal indexing, cleanup,
+// and LastIndexedAt update steps that follow the main store pipeline.
+func (is *IndexService) runPostPipeline(ctx context.Context, req IndexRequest, run *indexRun) {
+	// Neighborhood re-embedding pass.
 	if req.Reparse || req.Fast {
 		is.log.Info("skipping neighborhood re-embed (fast/reparse mode)", "repo", req.RepoSlug)
 		if is.tracker != nil {
@@ -505,8 +532,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		}
 	}
 
-	// Temporal indexing: walk recent git history to stamp introduced_commit /
-	// last_modified_commit on nodes and edges.
+	// Temporal indexing.
 	if is.temporalSvc != nil && req.RepoPath != "" {
 		if is.tracker != nil {
 			is.tracker.StartStage(types.StageTemporal)
@@ -515,7 +541,7 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 		if err := is.temporalSvc.IndexCommitRange(ctx, TemporalIndexRequest{
 			RepoPath:   req.RepoPath,
 			RepoSlug:   req.RepoSlug,
-			FromCommit: "HEAD~50", // last 50 commits for incremental
+			FromCommit: "HEAD~50",
 			ToCommit:   "HEAD",
 		}); err != nil {
 			is.log.Warn("temporal indexing failed", "repo", req.RepoSlug, "err", err)
@@ -546,8 +572,6 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	if err := is.graph.UpdateRepoIndexedAt(ctx, req.RepoSlug, time.Now()); err != nil {
 		is.log.Warn("failed to update LastIndexedAt", "repo", req.RepoSlug, "err", err)
 	}
-
-	return result, nil
 }
 
 // cleanupStaleNodes removes nodes for files that no longer exist on disk.
