@@ -202,7 +202,7 @@ jobs:
             type=raw,value=edge
             type=sha,prefix=sha-,format=short
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         id: build
         with:
           context: .
