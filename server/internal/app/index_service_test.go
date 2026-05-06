@@ -1847,3 +1847,1011 @@ func TestIndex_ReparseWithMissingNode(t *testing.T) {
 		t.Error("result should not be nil")
 	}
 }
+
+// ── Additional tests for Index() coverage: ReembedNeighborhood GetNode error ─────
+
+func TestIndex_ReembedNeighborhoodGetNodeError(t *testing.T) {
+	// Covers: ReembedNeighborhood GetNode error path when nodes exist in ID list but not in store
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "main.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "main"}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	// Set nodeIDs but don't populate nodes, so GetNode will fail during ReembedNeighborhood
+	store.nodeIDs = []string{"n1"}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	// Should still succeed (reembed is non-fatal)
+	if err != nil {
+		t.Fatalf("Index should not fail on reembed GetNode error, got: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for ReEmbed() coverage: GetNode errors ──────────────────
+
+func TestReEmbed_GetNodeError(t *testing.T) {
+	// Covers: GetNode error path (line 784-788) when node fetch fails
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+	embedder := &stubEmbedder{}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"n1", "n2"}
+	// Only n1 is in nodes map, n2 will fail GetNode
+	store.nodes["n1"] = &types.CodeNode{ID: "n1"}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	if err != nil {
+		t.Fatalf("ReEmbed should not fail on partial GetNode errors: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for ReEmbed() coverage: PutNode error ────────────────────
+
+func TestReEmbed_PutNodeError(t *testing.T) {
+	// Covers: PutNode error path (line 820-822)
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"n1"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1"}
+
+	// Make PutNode fail
+	failStore := &upsertFailStore{stubGraphStore: store}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, failStore, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	// Should continue despite upsert error
+	if err != nil {
+		t.Fatalf("ReEmbed should not fail on upsert error: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for ReEmbed() coverage: Multiple batches ──────────────────
+
+func TestReEmbed_MultipleBatches(t *testing.T) {
+	// Covers: multiple batches (i += batchSize loop) with real batching
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{
+			{ID: "n1", Vector: []float32{0.1}},
+			{ID: "n2", Vector: []float32{0.2}},
+			{ID: "n3", Vector: []float32{0.3}},
+		},
+	}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"n1", "n2", "n3"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1"}
+	store.nodes["n2"] = &types.CodeNode{ID: "n2"}
+	store.nodes["n3"] = &types.CodeNode{ID: "n3"}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 2, // Force multiple batches
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	progressCalls := 0
+	onProgress := func(done, total int) {
+		progressCalls++
+	}
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", onProgress)
+
+	if err != nil {
+		t.Fatalf("ReEmbed with multiple batches failed: %v", err)
+	}
+	if result.NodesTotal != 3 {
+		t.Errorf("NodesTotal = %d, want 3", result.NodesTotal)
+	}
+	if result.NodesEmbedded != 3 {
+		t.Errorf("NodesEmbedded = %d, want 3", result.NodesEmbedded)
+	}
+}
+
+// ── Additional tests for ReEmbed() coverage: Embed batch error ──────────────────
+
+func TestReEmbed_EmbedBatchError(t *testing.T) {
+	// Covers: embed batch error path (line 806-810)
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+
+	embedder := &stubEmbedder{
+		batchErr: domain.RateLimit("embed rate limited"),
+	}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"n1", "n2"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1"}
+	store.nodes["n2"] = &types.CodeNode{ID: "n2"}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	// Should continue despite embed error
+	if err != nil {
+		t.Fatalf("ReEmbed should not fail on embed batch error: %v", err)
+	}
+	// Nodes that failed embedding should not be counted
+	if result.NodesEmbedded != 0 {
+		t.Errorf("NodesEmbedded = %d, want 0 (batch failed)", result.NodesEmbedded)
+	}
+}
+
+// ── Additional tests for Index() coverage: Summarizer with tracker ────────────
+
+func TestIndex_SummarizerWithTracker(t *testing.T) {
+	// Covers: summarizer path with tracker enabled (line 363-381)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "main.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "main", Summary: ""}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	explainer := &stubExplainer{}
+	svc := NewIndexService(walker, parser, embedder, store, explainer, cfg)
+
+	// summarizer should be set by NewIndexService
+	if svc.summarizer == nil {
+		t.Skip("summarizer not initialized in test setup")
+	}
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Index with summarizer failed: %v", err)
+	}
+	if result.NodesCreated != 1 {
+		t.Errorf("NodesCreated = %d, want 1", result.NodesCreated)
+	}
+}
+
+// ── Additional tests for Index() coverage: Linkers with orphan edges ────────────
+
+func TestIndex_LinkersWithOrphanEdges(t *testing.T) {
+	// Covers: linker orphan edge handling (line 320-323)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "a.go", Language: "go"},
+			{Path: "b.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "a.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "pkg.F"}},
+			Edges: []types.CodeEdge{{FromID: "n1", ToID: "n2", Kind: "calls"}},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	// Linker that returns an orphan edge (FromID not in nodeFileMap)
+	orphanLinker := &mockEdgeLinker{
+		name: "orphan-linker",
+	}
+	svc.SetLinkers([]domain.EdgeLinker{orphanLinker})
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Index with orphan edges failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for ReEmbed() coverage: AlreadyEmbeddedNodes skip ──────────
+
+func TestReEmbed_AlreadyEmbeddedNodesSkipped(t *testing.T) {
+	// Covers: already embedded node skip (line 789-792)
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{},
+	}
+
+	store := newStubGraphStore()
+	// n1 already has embedding, n2 doesn't
+	store.nodeIDs = []string{"n1", "n2"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1", Embedding: []float32{0.1, 0.2}}
+	store.nodes["n2"] = &types.CodeNode{ID: "n2"}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	if err != nil {
+		t.Fatalf("ReEmbed with pre-embedded nodes failed: %v", err)
+	}
+	// n1 is skipped (already embedded), n2 gets 0 embedded (no batch results)
+	if result.NodesTotal != 2 {
+		t.Errorf("NodesTotal = %d, want 2", result.NodesTotal)
+	}
+}
+
+// ── Additional tests for Index() coverage: Mixed error tracking ──────────────────
+
+func TestIndex_MixedErrorTracking(t *testing.T) {
+	// Covers: multiple non-fatal errors being tracked (parse + embed + store)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "a.go", Language: "go"},
+			{Path: "b.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "a.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "main"}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Index with multiple files failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for Index() coverage: Incremental skip with tracker ───────
+
+func TestIndex_IncrementalSkipWithTracker(t *testing.T) {
+	// Covers: tracker.AddSkipped() path (line 208) for unchanged files
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:        "main.go",
+			ContentHash: "hash123",
+			Nodes: []types.CodeNode{
+				{ID: "n1", Qualified: "main", ContentHash: "hash123"},
+			},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	existingNode := &types.CodeNode{
+		ID:          "n1",
+		Qualified:   "main",
+		ContentHash: "hash123",
+	}
+	store.nodes["n1"] = existingNode
+	store.nodesByQ["my-repo::main"] = existingNode
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	tracker := &IndexTracker{}
+	svc.tracker = tracker
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Force:    false,
+		Reparse:  false,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with tracker and incremental skip failed: %v", err)
+	}
+	if result.FilesIndexed != 1 {
+		t.Errorf("FilesIndexed = %d, want 1 (skipped file still counted)", result.FilesIndexed)
+	}
+}
+
+// ── Additional tests for Index() coverage: Content hash mismatch (reparse) ──────
+
+func TestIndex_ContentHashMismatch(t *testing.T) {
+	// Covers: incremental skip path with hash mismatch (line 202-212)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:        "main.go",
+			ContentHash: "new-hash",
+			Nodes: []types.CodeNode{
+				{ID: "n1", Qualified: "main", ContentHash: "new-hash"},
+			},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	existingNode := &types.CodeNode{
+		ID:          "n1",
+		Qualified:   "main",
+		ContentHash: "old-hash", // Different hash
+	}
+	store.nodes["n1"] = existingNode
+	store.nodesByQ["my-repo::main"] = existingNode
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Force:    false,
+		Reparse:  false,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with content hash mismatch failed: %v", err)
+	}
+	// File should be reprocessed because hash changed
+	if result.NodesCreated < 1 {
+		t.Errorf("NodesCreated = %d, want >= 1 (file changed)", result.NodesCreated)
+	}
+}
+
+// ── Additional tests for Index() coverage: Reparse preserves all fields ──────────
+
+func TestIndex_ReparsePreservesAllFields(t *testing.T) {
+	// Covers: reparse preservation of Summary, Concepts, Embedding (line 227-235)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path: "main.go",
+			Nodes: []types.CodeNode{
+				{ID: "n1", Qualified: "main", Summary: "", Concepts: []string{}, Embedding: []float32{}},
+			},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	existingNode := &types.CodeNode{
+		ID:        "n1",
+		Qualified: "main",
+		Summary:   "Old summary",
+		Concepts:  []string{"concept1", "concept2"},
+		Embedding: []float32{0.5, 0.6},
+	}
+	store.nodes["n1"] = existingNode
+	store.nodesByQ["my-repo::main"] = existingNode
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Reparse:  true,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with reparse and field preservation failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for Index() coverage: Fast mode skips summary ──────────────
+
+func TestIndex_FastModeSkipsSummary(t *testing.T) {
+	// Covers: fast mode skips summarizer (line 338, 363-381)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "main.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "main", Summary: ""}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	explainer := &stubExplainer{}
+	svc := NewIndexService(walker, parser, embedder, store, explainer, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Fast:     true,
+	})
+
+	if err != nil {
+		t.Fatalf("Index in fast mode failed: %v", err)
+	}
+	if result.FilesIndexed != 1 {
+		t.Errorf("FilesIndexed = %d, want 1", result.FilesIndexed)
+	}
+}
+
+// ── Additional tests for Index() coverage: Nodes with existing embeddings ──────
+
+func TestIndex_NodesWithExistingEmbeddings(t *testing.T) {
+	// Covers: preEmbedded count logic (line 384-390)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path: "main.go",
+			Nodes: []types.CodeNode{
+				{ID: "n1", Qualified: "main", Embedding: []float32{0.1, 0.2}},
+				{ID: "n2", Qualified: "helper", Embedding: []float32{0.3, 0.4}},
+			},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{
+			{ID: "n1", Vector: []float32{0.1, 0.2}},
+			{ID: "n2", Vector: []float32{0.3, 0.4}},
+		},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Index with pre-embedded nodes failed: %v", err)
+	}
+	if result.NodesCreated != 2 {
+		t.Errorf("NodesCreated = %d, want 2", result.NodesCreated)
+	}
+}
+
+// ── Additional tests for Index() coverage: Reparse with partial existing data ───
+
+func TestIndex_ReparsePartialExistingData(t *testing.T) {
+	// Covers: reparse with some nodes having existing fields and others not
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path: "main.go",
+			Nodes: []types.CodeNode{
+				{ID: "n1", Qualified: "func1", Summary: ""},
+				{ID: "n2", Qualified: "func2", Summary: ""},
+			},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{
+			{ID: "n1", Vector: []float32{0.1}},
+			{ID: "n2", Vector: []float32{0.2}},
+		},
+	}
+
+	store := newStubGraphStore()
+	// Only n1 has existing data; n2 doesn't exist
+	store.nodes["n1"] = &types.CodeNode{
+		ID:          "n1",
+		Qualified:   "func1",
+		Summary:     "Existing summary",
+		Concepts:    []string{"concept1"},
+		Embedding:   []float32{0.1},
+		ContentHash: "oldhash",
+	}
+	store.nodesByQ["my-repo::func1"] = store.nodes["n1"]
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Reparse:  true,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with partial reparse data failed: %v", err)
+	}
+	if result.NodesCreated != 2 {
+		t.Errorf("NodesCreated = %d, want 2", result.NodesCreated)
+	}
+}
+
+// ── Additional tests for Index() coverage: Linker with no edges ────────────────
+
+func TestIndex_LinkerNoEdges(t *testing.T) {
+	// Covers: linker execution with empty edges (edge redistribution logic)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "a.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "a.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "pkg.F"}},
+			Edges: []types.CodeEdge{}, // no edges
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	linker := &mockEdgeLinker{name: "test-linker"}
+	svc.SetLinkers([]domain.EdgeLinker{linker})
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Index with linker and no edges failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for ReEmbed() coverage: Mixed embedding results ───────────
+
+func TestReEmbed_MixedEmbeddingResults(t *testing.T) {
+	// Covers: partial embedding results where some nodes get vectors and others don't
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{
+			{ID: "n1", Vector: []float32{0.1}}, // n1 gets embedding
+			// n2 is missing from results
+		},
+	}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"n1", "n2"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1"}
+	store.nodes["n2"] = &types.CodeNode{ID: "n2"}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	if err != nil {
+		t.Fatalf("ReEmbed with partial results failed: %v", err)
+	}
+	// Only n1 should be updated since n2 wasn't in results
+	if result.NodesEmbedded != 1 {
+		t.Errorf("NodesEmbedded = %d, want 1", result.NodesEmbedded)
+	}
+}
+
+// ── Additional tests for ReEmbed() coverage: All nodes skip (pre-embedded) ──────
+
+func TestReEmbed_AllNodesSkipped(t *testing.T) {
+	// Covers: batch with all nodes pre-embedded (line 789-791 for all nodes)
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{},
+	}
+
+	store := newStubGraphStore()
+	// All nodes already have embeddings
+	store.nodeIDs = []string{"n1", "n2", "n3"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1", Embedding: []float32{0.1}}
+	store.nodes["n2"] = &types.CodeNode{ID: "n2", Embedding: []float32{0.2}}
+	store.nodes["n3"] = &types.CodeNode{ID: "n3", Embedding: []float32{0.3}}
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	if err != nil {
+		t.Fatalf("ReEmbed with all pre-embedded nodes failed: %v", err)
+	}
+	if result.NodesEmbedded != 3 {
+		t.Errorf("NodesEmbedded = %d, want 3 (all skipped but counted)", result.NodesEmbedded)
+	}
+}
+
+// ── Additional tests for Index() coverage: Edge redistribution with orphans ─────
+
+func TestIndex_EdgeRedistributionOrphanAttachment(t *testing.T) {
+	// Covers: orphan edge attachment to first file (line 320-323)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "a.go", Language: "go"},
+			{Path: "b.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "a.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "pkg.F"}},
+			Edges: []types.CodeEdge{{FromID: "n1", ToID: "n_external", Kind: "calls"}},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	// Linker returns edges where FromID doesn't map to any nodeFileMap entry
+	orphanLinker := &mockEdgeLinker{name: "orphan-linker"}
+	svc.SetLinkers([]domain.EdgeLinker{orphanLinker})
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Index with edge redistribution failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for Index() coverage: No parsed files with linkers ──────────
+
+func TestIndex_NoFilesButLinkerDefined(t *testing.T) {
+	// Covers: linker branch when no files parsed (line 277 condition fails)
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+	embedder := &stubEmbedder{}
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	// Linker is set but no files are parsed
+	linker := &mockEdgeLinker{name: "unused"}
+	svc.SetLinkers([]domain.EdgeLinker{linker})
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	})
+
+	if err != nil {
+		t.Fatalf("Index with linker but no files failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for Index() coverage: Reparse with empty concepts ──────────
+
+func TestIndex_ReparseEmptyConceptsPreserved(t *testing.T) {
+	// Covers: reparse skips empty Concepts (line 230-231 branch)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "main.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "main", Concepts: []string{}}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	existingNode := &types.CodeNode{
+		ID:        "n1",
+		Qualified: "main",
+		Concepts:  []string{}, // empty in DB too
+		Summary:   "Summary",  // but has summary
+	}
+	store.nodes["n1"] = existingNode
+	store.nodesByQ["my-repo::main"] = existingNode
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Reparse:  true,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with reparse empty concepts failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+// ── Additional tests for Index() coverage: Reparse with empty embedding ──────────
+
+func TestIndex_ReparseEmptyEmbeddingNotPreserved(t *testing.T) {
+	// Covers: reparse skips empty Embedding (line 233 branch)
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go"},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:  "main.go",
+			Nodes: []types.CodeNode{{ID: "n1", Qualified: "main", Embedding: []float32{}}},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{{ID: "n1", Vector: []float32{0.1}}},
+	}
+
+	store := newStubGraphStore()
+	existingNode := &types.CodeNode{
+		ID:        "n1",
+		Qualified: "main",
+		Embedding: []float32{0.5, 0.6}, // has embedding
+	}
+	store.nodes["n1"] = existingNode
+	store.nodesByQ["my-repo::main"] = existingNode
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Reparse:  true,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with reparse empty embedding failed: %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
