@@ -41,29 +41,52 @@ repos:
         # Fails if gofmt modifies any file (the modified file is then unstaged;
         # stage it again and re-commit).
 
-      - id: go-mod-tidy
-        name: go mod tidy
+      # Workspace layout — tidy each member module independently.
+      - id: go-mod-tidy-server
+        name: go mod tidy (server)
         language: system
-        entry: go mod tidy
+        entry: bash -c "cd server && go mod tidy"
         pass_filenames: false
-        files: (go\.mod|go\.sum)$
+        files: ^server/go\.(mod|sum)$
+
+      - id: go-mod-tidy-pkg-types
+        name: go mod tidy (pkg/types)
+        language: system
+        entry: bash -c "cd pkg/types && go mod tidy"
+        pass_filenames: false
+        files: ^pkg/types/go\.(mod|sum)$
 
   # ── Go: vet (pre-commit, fast) ─────────────────────────────────────────────
-      - id: go-vet
-        name: go vet
+      - id: go-vet-server
+        name: go vet (server)
         language: system
-        entry: go vet ./...
+        entry: bash -c "cd server && go vet ./..."
         pass_filenames: false
-        types: [go]
+        files: ^server/.*\.go$
+
+      - id: go-vet-pkg-types
+        name: go vet (pkg/types)
+        language: system
+        entry: bash -c "cd pkg/types && go vet ./..."
+        pass_filenames: false
+        files: ^pkg/types/.*\.go$
 
   # ── Go: full lint suite (pre-push, mirrors CI) ────────────────────────────
   # golangci-lint must be installed: https://golangci-lint.run/usage/install/
   #   brew install golangci-lint        # macOS
   #   go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-      - id: golangci-lint
-        name: golangci-lint
+      - id: golangci-lint-server
+        name: golangci-lint (server)
         language: system
-        entry: golangci-lint run --fix
+        entry: bash -c "cd server && golangci-lint run --fix --timeout=5m"
         pass_filenames: false
-        types: [go]
-        stages: [pre-push]   # slow — only runs on git push, not on every commit
+        files: ^server/.*\.go$
+        stages: [pre-push]
+
+      - id: golangci-lint-pkg-types
+        name: golangci-lint (pkg/types)
+        language: system
+        entry: bash -c "cd pkg/types && golangci-lint run --fix --timeout=5m"
+        pass_filenames: false
+        files: ^pkg/types/.*\.go$
+        stages: [pre-push]
