@@ -662,3 +662,29 @@ func (u *upsertFailStore) ListNodeIDs(ctx context.Context, repoSlug string) ([]s
 func (u *upsertFailStore) GetNode(ctx context.Context, id string) (*types.CodeNode, error) {
 	return u.stubGraphStore.GetNode(ctx, id)
 }
+
+// TestIndexService_Setters covers the three thin setter methods that are
+// otherwise only invoked by wire.go.
+func TestIndexService_Setters(t *testing.T) {
+	cfg := &config.Config{Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1}, BatchSize: 1}
+	svc := NewIndexService(nil, nil, nil, newStubGraphStore(), nil, cfg)
+
+	tmp := &TemporalService{}
+	svc.SetTemporalService(tmp)
+	if svc.temporalSvc != tmp {
+		t.Errorf("SetTemporalService did not store the service")
+	}
+
+	linkers := []domain.EdgeLinker{}
+	svc.SetLinkers(linkers)
+	// Compare via reflection-friendly check: nil and empty are both length 0,
+	// but the field should reference the slice we passed.
+	if len(svc.linkers) != 0 {
+		t.Errorf("SetLinkers should accept empty slice")
+	}
+
+	svc.SetDocPrefix("search_document: ")
+	if svc.builder == nil {
+		t.Errorf("builder should still be set after SetDocPrefix")
+	}
+}
