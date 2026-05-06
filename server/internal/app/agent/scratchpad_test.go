@@ -75,7 +75,7 @@ func (f *padFakeGraph) ApplySchema(_ context.Context) error { return nil }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// invokeJSON is a convenience to call a tool with a JSON-marshalled input.
+// invokeJSON is a convenience to call a tool with a JSON-marshaled input.
 func invokeJSON(t *testing.T, tool AgentTool, ctx context.Context, input any) string {
 	t.Helper()
 	b, err := json.Marshal(input)
@@ -103,7 +103,7 @@ func mustParseMap(t *testing.T, s string) map[string]any {
 // scratchpad.go tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestNewScratchpad_Defaults verifies that NewScratchpad initialises budgets.
+// TestNewScratchpad_Defaults verifies that NewScratchpad initializes budgets.
 func TestNewScratchpad_Defaults(t *testing.T) {
 	s := NewScratchpad("find bugs")
 	if s.Goal != "find bugs" {
@@ -352,7 +352,7 @@ func TestDetectContradiction_HighRelevanceSimilarContent(t *testing.T) {
 	}
 }
 
-// TestDetectContradiction_ReducesConfidence verifies both items get penalised.
+// TestDetectContradiction_ReducesConfidence verifies both items get penalized.
 func TestDetectContradiction_ReducesConfidence(t *testing.T) {
 	s := NewScratchpad("auth token goal")
 	e1 := s.AddEvidence(Evidence{
@@ -891,7 +891,7 @@ func TestConceptsFromGoal_CappedAt10(t *testing.T) {
 	}
 }
 
-// TestToJSON_Roundtrip verifies the scratchpad serialises and has expected fields.
+// TestToJSON_Roundtrip verifies the scratchpad serializes and has expected fields.
 func TestToJSON_Roundtrip(t *testing.T) {
 	s := NewScratchpad("test goal")
 	s.Strategy = "depth-first"
@@ -1545,7 +1545,7 @@ func TestSourceReliability_AllCases(t *testing.T) {
 	}
 }
 
-// TestPlanAnalysisTool_EmptyRepoSlug verifies behaviour with empty repo slug.
+// TestPlanAnalysisTool_EmptyRepoSlug verifies behavior with empty repo slug.
 func TestPlanAnalysisTool_EmptyRepoSlug(t *testing.T) {
 	pad := NewScratchpad("goal")
 	graph := &padFakeGraph{

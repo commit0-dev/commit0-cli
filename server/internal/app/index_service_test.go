@@ -338,11 +338,11 @@ func TestIndexServiceDefaultMaxWorkersParse(t *testing.T) {
 	}
 }
 
-// TestIndexServiceStoreContextCancelled covers the store-goroutine context-cancel path (lines
+// TestIndexServiceStoreContextCanceled covers the store-goroutine context-cancel path (lines
 // added during refactor: `if err := storeCtx.Err(); err != nil { return err }`).
 // We use a pre-canceled context so that storeCtx is immediately Done, and set the channel
 // buffers to large values so the pipeline can fill before the store goroutines run.
-func TestIndexServiceStoreContextCancelled(t *testing.T) {
+func TestIndexServiceStoreContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	walker := &stubFileWalker{
@@ -380,10 +380,10 @@ func TestIndexServiceStoreContextCancelled(t *testing.T) {
 	svc.Index(ctx, IndexRequest{RepoPath: "/repo", RepoSlug: "my-repo"})
 }
 
-// TestIndexServiceParseContextCancelled exercises the parse-stage context-cancel select branch.
+// TestIndexServiceParseContextCanceled exercises the parse-stage context-cancel select branch.
 // We use an unbuffered parsedCh (parsedChBuf = -1) + pre-canceled context so the select
 // always picks the Done case (send would block, Done is immediately ready).
-func TestIndexServiceParseContextCancelled(t *testing.T) {
+func TestIndexServiceParseContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	walker := &stubFileWalker{
@@ -474,8 +474,8 @@ func TestIndexServiceStoreStageFatalError(t *testing.T) {
 	}
 }
 
-// TestIndexServiceEmbedContextCancelled exercises the embed-stage context-cancel select branch.
-func TestIndexServiceEmbedContextCancelled(t *testing.T) {
+// TestIndexServiceEmbedContextCanceled exercises the embed-stage context-cancel select branch.
+func TestIndexServiceEmbedContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	walker := &stubFileWalker{
@@ -816,7 +816,7 @@ func TestReEmbed_EmptyRepo(t *testing.T) {
 	}
 }
 
-func TestReEmbed_ContextCancelled(t *testing.T) {
+func TestReEmbed_ContextCanceled(t *testing.T) {
 	walker := &stubFileWalker{files: []domain.FileEntry{}}
 	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
 	embedder := &stubEmbedder{}
@@ -838,7 +838,7 @@ func TestReEmbed_ContextCancelled(t *testing.T) {
 	_, err := svc.ReEmbed(ctx, "test-repo", nil)
 
 	if err == nil {
-		t.Error("ReEmbed with cancelled context should error")
+		t.Error("ReEmbed with canceled context should error")
 	}
 }
 
@@ -1737,7 +1737,7 @@ func TestIndex_RepoDeduplication(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
 		BatchSize: 10,
 	}
 
@@ -1847,5 +1847,3 @@ func TestIndex_ReparseWithMissingNode(t *testing.T) {
 		t.Error("result should not be nil")
 	}
 }
-
-

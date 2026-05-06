@@ -261,7 +261,7 @@ func TestSummarizeNodes_BatchFallbackOnError(t *testing.T) {
 		{Kind: types.NodeFunction, Name: "B", Qualified: "pkg.B", Body: strings.Repeat("y\n", 55), StartLine: 0, EndLine: 55},
 	}
 
-	// Swap to per-call behaviour: first call fails (batch), subsequent succeed.
+	// Swap to per-call behavior: first call fails (batch), subsequent succeed.
 	fe2 := &mockExplainer{
 		responses: []mockResponse{
 			{err: errors.New("batch fail")}, // batch attempt

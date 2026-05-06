@@ -624,7 +624,7 @@ func TestToolsForType_Default_ReturnsAll(t *testing.T) {
 // delegate.go — runSubAgent
 // ---------------------------------------------------------------------------
 
-func TestRunSubAgent_ContextCancelledMidStream(t *testing.T) {
+func TestRunSubAgent_ContextCanceledMidStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Runner that emits nothing before the test cancels it.
@@ -650,9 +650,9 @@ func (b *blockingRunner) Run(ctx context.Context, _ AgentConfig, _ string, _ map
 }
 
 func TestRunSubAgent_TimeoutEventPath_WithPartial(t *testing.T) {
-	// Simulate context already cancelled when the error event arrives — partial message exists.
+	// Simulate context already canceled when the error event arrives — partial message exists.
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled → subCtx derived from it is also done
+	cancel() // already canceled → subCtx derived from it is also done
 
 	runner := &fakeSubRunner{
 		events: []RunnerEvent{
@@ -665,12 +665,12 @@ func TestRunSubAgent_TimeoutEventPath_WithPartial(t *testing.T) {
 	_ = err
 	// findings should be the partial content or TIMEOUT placeholder — not empty
 	if findings == "" {
-		t.Error("expected non-empty findings for cancelled-context error path")
+		t.Error("expected non-empty findings for canceled-context error path")
 	}
 }
 
 func TestRunSubAgent_TimeoutEventPath_EmptyPartial(t *testing.T) {
-	// Context already cancelled, no prior message — exercises the `if partial == ""` branch
+	// Context already canceled, no prior message — exercises the `if partial == ""` branch
 	// which substitutes the TIMEOUT sentinel string.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -683,14 +683,14 @@ func TestRunSubAgent_TimeoutEventPath_EmptyPartial(t *testing.T) {
 	}
 	dc := minimalDelegateCfg(makeFactory(runner, nil))
 	findings, _, _, err := dc.runSubAgent(ctx, "search", searchAgentInstruction, nil, "x")
-	// Either the cancelled-context branch fires (findings = "TIMEOUT: ...") or the non-cancelled
+	// Either the canceled-context branch fires (findings = "TIMEOUT: ...") or the non-canceled
 	// branch fires (err != nil). Either way is valid — the test just ensures no panic.
 	_ = findings
 	_ = err
 }
 
 // ---------------------------------------------------------------------------
-// delegate.go — Invoke JSON marshalling round-trip
+// delegate.go — Invoke JSON marshaling round-trip
 // ---------------------------------------------------------------------------
 
 func TestDelegateTool_Invoke_HappyPath(t *testing.T) {
@@ -974,8 +974,8 @@ func TestChat_DoneEventLast(t *testing.T) {
 	}
 }
 
-func TestChat_ContextCancelled(t *testing.T) {
-	// Runner that blocks until context is cancelled.
+func TestChat_ContextCanceled(t *testing.T) {
+	// Runner that blocks until context is canceled.
 	ch := make(chan RunnerEvent)
 	runner := &blockingRunner{ch: ch}
 	svc, _ := newTestService(runner)

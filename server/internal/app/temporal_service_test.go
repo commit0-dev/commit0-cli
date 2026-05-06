@@ -300,9 +300,9 @@ func TestIndexCommitRange_ModifiedFile_UnchangedNode_NoUpsert(t *testing.T) {
 	}
 }
 
-func TestIndexCommitRange_ContextCancelled_StopsEarly(t *testing.T) {
+func TestIndexCommitRange_ContextCanceled_StopsEarly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled
+	cancel() // already canceled
 
 	walker := &fakeGitWalker{
 		commits: []domain.GitCommit{
@@ -313,7 +313,7 @@ func TestIndexCommitRange_ContextCancelled_StopsEarly(t *testing.T) {
 	store := &fakeTemporalStore{}
 	svc := newTemporalService(newStubGraphStore(), store, walker, &fakeParser{})
 	err := svc.IndexCommitRange(ctx, TemporalIndexRequest{RepoSlug: "r"})
-	// Cancelled context should propagate.
+	// Canceled context should propagate.
 	if err == nil {
 		t.Error("expected context cancellation error")
 	}

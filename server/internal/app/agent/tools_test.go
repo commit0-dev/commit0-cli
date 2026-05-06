@@ -624,8 +624,9 @@ func TestBlastTool_ServiceError_PropagatesError(t *testing.T) {
 
 func TestBlastTool_AffectedNodes_FormattedCorrectly(t *testing.T) {
 	target := &types.CodeNode{ID: "fn:pkg.Core", Qualified: "pkg.Core", Kind: types.NodeFunction}
-	affected := &types.CodeNode{ID: "fn:pkg.Dep", Qualified: "pkg.Dep", Kind: types.NodeFunction}
-	_ = affected // toolsFakeGraph.TraverseGraph returns nil; service builds AffectedNode list from graph
+	// toolsFakeGraph.TraverseGraph returns nil so the service builds the
+	// affected list from whatever the graph yields — minimal here, but the
+	// tool's marshal path still gets exercised below.
 
 	g := &toolsFakeGraph{node: target}
 	tool := newBlastTool(g)
@@ -900,28 +901,27 @@ func TestFieldFlowTool_NonEmptyChainWithTaintPoints_LoopExecution(t *testing.T) 
 
 	// Test with real service - it will return non-empty results or a descriptive error
 	args, _ := json.Marshal(fieldFlowInput{
-		Symbol: "test.F",
-		FieldPath: "data.Value",
+		Symbol:        "test.F",
+		FieldPath:     "data.Value",
 		ShowMutations: true,
 	})
 	out, err := tool.Invoke(repoCtx(), string(args))
 
 	// The loop at line 362-379 is only exercised when result.Chains is non-empty.
 	// With our minimal graph, we likely get no results or an error.
-	// But the key is: the tool must produce valid JSON output that matches fieldFlowOutput.
+	// Either way, the tool must produce valid JSON matching fieldFlowOutput
+	// when it succeeds, and a recognized domain error otherwise.
 	if err == nil {
 		var result fieldFlowOutput
 		if err := json.Unmarshal([]byte(out), &result); err != nil {
 			t.Fatalf("invalid JSON output: %v", err)
 		}
-		// Verify structure is correct
-		if result.ChainCount >= 0 && result.MutationCount >= 0 {
-			// Success path exercised
+		if result.ChainCount < 0 || result.MutationCount < 0 {
+			t.Errorf("counts must be non-negative: %+v", result)
 		}
 	} else if !strings.Contains(err.Error(), "not found") &&
 		!strings.Contains(err.Error(), "no functions") &&
 		!strings.Contains(err.Error(), "no_results") {
-		// Unexpected error
 		t.Logf("service error (expected with minimal data): %v", err)
 	}
 }
