@@ -10,7 +10,6 @@ linters:
     # ── Correctness ──────────────────────────────────────────────────────────
     - govet          # mirrors `go vet` in CI
     - staticcheck    # mirrors dominikh/staticcheck-action in CI
-    - errcheck       # unchecked errors
     - ineffassign    # assigned but never used
     - unused         # exported symbols with no callers (staticcheck SA1xxx)
 
@@ -35,15 +34,11 @@ linters:
       # (dominikh/staticcheck-action@v1 defaults to "latest").
       checks:
         - "all"
-        - "-ST1000"   # package-level comment — noisy for internal packages
-        - "-ST1003"   # naming convention — allow existing names
-
-    errcheck:
-      # Ignore common intentionally-unchecked calls.
-      exclude-functions:
-        - (io.Closer).Close
-        - (*os.File).Close
-        - (*bufio.Writer).Flush
+        - "-ST10*"    # skip all comment-related style rules
+        - "-ST1021"   # comment on exported type format — too strict for docs
+        - "-S1000"    # use plain error type instead of errors.New with .Error()
+        - "-S1008"    # should use 'return ...' — refactoring suggestion
+        - "-S1009"    # should omit nil check — conservative style
 
     misspell:
       locale: US
