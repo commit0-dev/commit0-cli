@@ -688,3 +688,227 @@ func TestIndexService_Setters(t *testing.T) {
 		t.Errorf("builder should still be set after SetDocPrefix")
 	}
 }
+
+// ── Force re-index ──────────────────────────────────────────────────
+
+func TestIndex_Force_DeletesNodes(t *testing.T) {
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go", Content: []byte("func main() {}")},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:     "main.go",
+			Language: "go",
+			Nodes: []types.CodeNode{
+				{ID: "f1", Qualified: "main", Kind: types.NodeFunction},
+			},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{
+			{ID: "f1", Vector: []float32{0.1, 0.2}},
+		},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index: config.IndexConfig{
+			MaxWorkersEmbed: 1,
+			MaxWorkersStore: 1,
+		},
+		BatchSize: 1,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	_, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+		Force:    true,
+	})
+
+	if err != nil {
+		t.Fatalf("Index with Force: %v", err)
+	}
+}
+
+// ── cleanupStaleNodes ───────────────────────────────────────────────
+
+func TestCleanupStaleNodes_ListPathsFails(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+	embedder := &stubEmbedder{}
+	store := newStubGraphStore()
+
+	store.listFilePathsFn = func(ctx context.Context, repoSlug string) ([]string, error) {
+		return nil, domain.NotFound("list failed")
+	}
+
+	cfg := &config.Config{
+		Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	svc.cleanupStaleNodes(context.Background(), "test-repo", "/repo")
+}
+
+// ── ReEmbed ─────────────────────────────────────────────────────────
+
+func TestReEmbed_HappyPath(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{
+			{ID: "n1", Vector: []float32{0.1, 0.2}},
+		},
+	}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"n1"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1", Summary: "func1"}
+
+	cfg := &config.Config{
+		Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	if err != nil {
+		t.Fatalf("ReEmbed: %v", err)
+	}
+	if result.NodesTotal != 1 {
+		t.Errorf("NodesTotal = %d, want 1", result.NodesTotal)
+	}
+}
+
+func TestReEmbed_EmptyRepo(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+	embedder := &stubEmbedder{}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{}
+
+	cfg := &config.Config{
+		Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	result, err := svc.ReEmbed(context.Background(), "test-repo", nil)
+
+	if err != nil {
+		t.Fatalf("ReEmbed empty: %v", err)
+	}
+	if result.NodesTotal != 0 {
+		t.Errorf("NodesTotal = %d, want 0", result.NodesTotal)
+	}
+}
+
+func TestReEmbed_ContextCancelled(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{Nodes: []types.CodeNode{}, Edges: []types.CodeEdge{}}}
+	embedder := &stubEmbedder{}
+
+	store := newStubGraphStore()
+	store.nodeIDs = []string{"n1"}
+	store.nodes["n1"] = &types.CodeNode{ID: "n1"}
+
+	cfg := &config.Config{
+		Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 100,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := svc.ReEmbed(ctx, "test-repo", nil)
+
+	if err == nil {
+		t.Error("ReEmbed with cancelled context should error")
+	}
+}
+
+// ── IndexWithProgress ───────────────────────────────────────────────
+
+func TestIndexWithProgress_CallsCallback(t *testing.T) {
+	walker := &stubFileWalker{
+		files: []domain.FileEntry{
+			{Path: "main.go", Language: "go", Content: []byte("func main() {}")},
+		},
+	}
+
+	parser := &stubParser{
+		result: &domain.ParsedFile{
+			Path:     "main.go",
+			Language: "go",
+			Nodes: []types.CodeNode{
+				{ID: "f1", Qualified: "main", Kind: types.NodeFunction},
+			},
+			Edges: []types.CodeEdge{},
+		},
+	}
+
+	embedder := &stubEmbedder{
+		batchRes: []domain.EmbedResult{
+			{ID: "f1", Vector: []float32{0.1, 0.2}},
+		},
+	}
+
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index: config.IndexConfig{
+			MaxWorkersEmbed: 1,
+			MaxWorkersStore: 1,
+		},
+		BatchSize: 1,
+	}
+
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+
+	progressCalls := 0
+	onProgress := func(filesIndexed, nodesCreated int) {
+		progressCalls++
+	}
+
+	_, err := svc.IndexWithProgress(context.Background(), IndexRequest{
+		RepoPath: "/repo",
+		RepoSlug: "my-repo",
+	}, onProgress, nil)
+
+	if err != nil {
+		t.Fatalf("IndexWithProgress: %v", err)
+	}
+	if progressCalls == 0 {
+		t.Error("progress callback should be called")
+	}
+}
+
+// ── trackChanged ────────────────────────────────────────────────────
+
+func TestTrackChanged_PopulatesMap(t *testing.T) {
+	run := &indexRun{}
+
+	nodes := []types.CodeNode{{ID: "n1"}, {ID: "n2"}}
+	edges := []types.CodeEdge{{FromID: "n3", ToID: "n4"}}
+
+	run.trackChanged(nodes, edges)
+
+	if len(run.changedNodeIDs) != 4 {
+		t.Errorf("changedNodeIDs len = %d, want 4", len(run.changedNodeIDs))
+	}
+}

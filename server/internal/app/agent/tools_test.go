@@ -190,6 +190,19 @@ func repoCtx() context.Context {
 // marshalJSON helper
 // ==========================================================================
 
+// unmarshalable triggers the json.Marshal error path — channels can't be marshaled.
+type unmarshalable struct{ Ch chan int }
+
+func TestMarshalJSON_ErrorPathWrapsErr(t *testing.T) {
+	_, err := marshalJSON(unmarshalable{Ch: make(chan int)})
+	if err == nil {
+		t.Fatal("expected marshal error for unmarshalable type")
+	}
+	if !strings.Contains(err.Error(), "marshal output") {
+		t.Errorf("error not wrapped: %v", err)
+	}
+}
+
 func TestMarshalJSON_ReturnsValidJSON(t *testing.T) {
 	out, err := marshalJSON(map[string]string{"key": "value"})
 	if err != nil {

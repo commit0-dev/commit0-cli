@@ -12,26 +12,29 @@ import (
 // Stub implementations for testing
 
 type stubGraphStore struct {
-	traceErr       error
-	err            error
-	deleteNodesErr error
-	upsertRepoErr  error
-	listReposErr   error
-	blastRadiusErr error
-	upsertBatchErr error
-	nodesByQ       map[string]*types.CodeNode
-	repos          map[string]*types.Repo
-	nodes          map[string]*types.CodeNode
-	upsertBatchFn  func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
-	traceHops      []types.TraceHop
-	affected       []types.AffectedNode
-	neighborhood   *domain.Neighborhood
-	dataFlowHops   []types.TraceHop
-	nodeIDs        []string
-	routeEdges     []types.CodeEdge
-	vectorResults  []types.ScoredNode // for VectorSearch
-	vectorErr      error              // for VectorSearch error
-	textErr        error              // for TextSearch error
+	traceErr              error
+	err                   error
+	deleteNodesErr        error
+	upsertRepoErr         error
+	listReposErr          error
+	blastRadiusErr        error
+	upsertBatchErr        error
+	nodesByQ              map[string]*types.CodeNode
+	repos                 map[string]*types.Repo
+	nodes                 map[string]*types.CodeNode
+	upsertBatchFn         func(ctx context.Context, nodes []types.CodeNode, edges []types.CodeEdge) error
+	traceHops             []types.TraceHop
+	affected              []types.AffectedNode
+	neighborhood          *domain.Neighborhood
+	dataFlowHops          []types.TraceHop
+	nodeIDs               []string
+	routeEdges            []types.CodeEdge
+	vectorResults         []types.ScoredNode // for VectorSearch
+	vectorErr             error              // for VectorSearch error
+	textErr               error              // for TextSearch error
+	findRepoByRemoteURLFn func(ctx context.Context, url string) (*types.Repo, error)
+	listFilePathsFn       func(ctx context.Context, repoSlug string) ([]string, error)
+	deleteByFileFn        func(ctx context.Context, repoSlug, filePath string) error
 }
 
 func newStubGraphStore() *stubGraphStore {
@@ -91,7 +94,10 @@ func (s *stubGraphStore) DeleteNodesByRepo(ctx context.Context, repo string) err
 	return nil
 }
 
-func (s *stubGraphStore) DeleteNodesByFile(_ context.Context, _, _ string) error {
+func (s *stubGraphStore) DeleteNodesByFile(ctx context.Context, repoSlug, filePath string) error {
+	if s.deleteByFileFn != nil {
+		return s.deleteByFileFn(ctx, repoSlug, filePath)
+	}
 	return nil
 }
 
@@ -217,7 +223,10 @@ func (s *stubGraphStore) ListAllNodes(_ context.Context, _ string) ([]types.Code
 	return nil, nil
 }
 
-func (s *stubGraphStore) ListFilePaths(_ context.Context, _ string) ([]string, error) {
+func (s *stubGraphStore) ListFilePaths(ctx context.Context, repoSlug string) ([]string, error) {
+	if s.listFilePathsFn != nil {
+		return s.listFilePathsFn(ctx, repoSlug)
+	}
 	return nil, nil
 }
 
@@ -244,7 +253,10 @@ func (s *stubGraphStore) UpdateRepoIndexedAt(_ context.Context, _ string, _ time
 	return nil
 }
 
-func (s *stubGraphStore) FindRepoByRemoteURL(_ context.Context, _ string) (*types.Repo, error) {
+func (s *stubGraphStore) FindRepoByRemoteURL(ctx context.Context, url string) (*types.Repo, error) {
+	if s.findRepoByRemoteURLFn != nil {
+		return s.findRepoByRemoteURLFn(ctx, url)
+	}
 	return nil, nil
 }
 

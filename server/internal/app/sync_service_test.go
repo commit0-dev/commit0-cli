@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/commit0-dev/commit0/pkg/types"
+	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
@@ -645,4 +647,333 @@ func TestNotifyPeers_ListPeersError_NoPanic(t *testing.T) {
 func TestSetIndexService_Nil(t *testing.T) {
 	svc := newSyncService()
 	svc.SetIndexService(nil) // should not panic
+}
+
+// ── ExportToFile additional coverage ──────────────────────────────
+
+func TestExportToFile_BuildBundleFails(t *testing.T) {
+	svc := NewSyncService(
+		&fakeExporter{err: errors.New("export fail")},
+		&fakeImporter{},
+		&fakeCodec{},
+		nil,
+	)
+	path := filepath.Join(t.TempDir(), "bundle.cbor")
+	err := svc.ExportToFile(context.Background(), "owner/repo", path)
+	if err == nil {
+		t.Error("expected error when BuildBundle fails")
+	}
+}
+
+// ── ImportBundle additional coverage ────────────────────────────────
+
+func TestImportBundle_ReEmbedTriggeredWhenNodesImported(t *testing.T) {
+	codec := &fakeCodec{hash: "testhash"}
+	importer := &fakeImporter{
+		result: &types.SyncResult{
+			RepoSlug:       "owner/repo",
+			NodesImported:  5,
+			NodesSkipped:   0,
+			EdgesImported:  2,
+			ReEmbedQueued:  false,
+		},
+	}
+	// Build a fully-stubbed IndexService so the async re-embed goroutine
+	// (sync_service.go:155) doesn't panic on nil dependencies.
+	indexSvc := NewIndexService(
+		&stubFileWalker{}, &stubParser{}, &stubEmbedder{},
+		newStubGraphStore(), nil, &config.Config{},
+	)
+	svc := NewSyncService(&fakeExporter{}, importer, codec, nil)
+	svc.SetIndexService(indexSvc)
+
+	bundle := &types.GraphBundle{
+		RepoSlug:    "owner/repo",
+		ContentHash: "testhash",
+		Nodes:       []types.SyncNode{{ID: "n1"}, {ID: "n2"}},
+	}
+
+	result, err := svc.ImportBundle(context.Background(), bundle)
+	if err != nil {
+		t.Fatalf("ImportBundle: %v", err)
+	}
+	if !result.ReEmbedQueued {
+		t.Error("ReEmbedQueued should be true when nodes imported")
+	}
+	// Give the async re-embed goroutine a moment to finish so it doesn't
+	// leak into the next test.
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestImportBundle_NodesZero_ReEmbedNotQueued(t *testing.T) {
+	codec := &fakeCodec{hash: "testhash"}
+	importer := &fakeImporter{
+		result: &types.SyncResult{
+			RepoSlug:       "owner/repo",
+			NodesImported:  0,
+			NodesSkipped:   0,
+			EdgesImported:  0,
+			ReEmbedQueued:  false,
+		},
+	}
+	indexSvc := &IndexService{}
+	svc := NewSyncService(&fakeExporter{}, importer, codec, nil)
+	svc.SetIndexService(indexSvc)
+
+	bundle := &types.GraphBundle{
+		RepoSlug:    "owner/repo",
+		ContentHash: "testhash",
+	}
+
+	result, err := svc.ImportBundle(context.Background(), bundle)
+	if err != nil {
+		t.Fatalf("ImportBundle: %v", err)
+	}
+	if result.ReEmbedQueued {
+		t.Error("ReEmbedQueued should be false when no nodes imported")
+	}
+}
+
+func TestImportBundle_NoIndexServiceSet_NoReEmbed(t *testing.T) {
+	codec := &fakeCodec{hash: "testhash"}
+	importer := &fakeImporter{
+		result: &types.SyncResult{
+			RepoSlug:      "owner/repo",
+			NodesImported: 5,
+		},
+	}
+	svc := NewSyncService(&fakeExporter{}, importer, codec, nil)
+	// Don't set index service
+
+	bundle := &types.GraphBundle{
+		RepoSlug:    "owner/repo",
+		ContentHash: "testhash",
+	}
+
+	result, err := svc.ImportBundle(context.Background(), bundle)
+	if err != nil {
+		t.Fatalf("ImportBundle: %v", err)
+	}
+	if result.ReEmbedQueued {
+		t.Error("ReEmbedQueued should be false when no index service")
+	}
+}
+
+// ── Manifest additional coverage ───────────────────────────────────
+
+func TestManifest_HashError_ReturnsManifestWithoutHash(t *testing.T) {
+	// On hash failure the source returns the manifest WITHOUT a content
+	// hash and no error — it's a graceful degrade, not a hard failure.
+	svc := NewSyncService(
+		&fakeExporter{
+			manifest: &types.SyncManifest{RepoSlug: "r"},
+			bundle:   &types.GraphBundle{},
+		},
+		&fakeImporter{},
+		&fakeCodec{hashErr: errors.New("hash fail")},
+		nil,
+	)
+	m, err := svc.Manifest(context.Background(), "r")
+	if err != nil {
+		t.Fatalf("hash failure should be tolerated, got %v", err)
+	}
+	if m.ContentHash != "" {
+		t.Errorf("ContentHash should be empty on hash failure, got %q", m.ContentHash)
+	}
+}
+
+func TestManifest_PopulatesContentHash(t *testing.T) {
+	expectedHash := "somehash123"
+	svc := NewSyncService(
+		&fakeExporter{bundle: &types.GraphBundle{}},
+		&fakeImporter{},
+		&fakeCodec{hash: expectedHash},
+		nil,
+	)
+	m, err := svc.Manifest(context.Background(), "owner/repo")
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	if m.ContentHash != expectedHash {
+		t.Errorf("ContentHash = %s, want %s", m.ContentHash, expectedHash)
+	}
+}
+
+// ── Pull additional coverage ───────────────────────────────────────
+
+func TestPull_ManifestFails(t *testing.T) {
+	svc := newSyncService()
+	svc.SetTransport(
+		&fakeTransport{err: errors.New("manifest fail")},
+		&fakePeerStore{peers: []types.PeerInfo{{Name: "peer1"}}},
+		&fakeScopeStore{inScope: true},
+	)
+	_, err := svc.Pull(context.Background(), "peer1", "owner/repo")
+	if err == nil {
+		t.Error("expected manifest error")
+	}
+}
+
+func TestPull_BundlePullFails(t *testing.T) {
+	svc := newSyncService()
+	svc.SetTransport(
+		&fakeTransport{err: errors.New("bundle fail")},
+		&fakePeerStore{peers: []types.PeerInfo{{Name: "peer1"}}},
+		&fakeScopeStore{inScope: true},
+	)
+	_, err := svc.Pull(context.Background(), "peer1", "owner/repo")
+	if err == nil {
+		t.Error("expected bundle pull error")
+	}
+}
+
+func TestPull_ImportBundleFails(t *testing.T) {
+	svc := NewSyncService(
+		&fakeExporter{manifest: &types.SyncManifest{ContentHash: "hash1"}},
+		&fakeImporter{err: errors.New("import fail")},
+		&fakeCodec{hash: "differenthash"},
+		nil,
+	)
+	svc.SetTransport(
+		&fakeTransport{
+			manifest: &types.SyncManifest{ContentHash: "hash2"},
+			bundle:   &types.GraphBundle{RepoSlug: "owner/repo"},
+		},
+		&fakePeerStore{peers: []types.PeerInfo{{Name: "peer1"}}},
+		&fakeScopeStore{inScope: true},
+	)
+	_, err := svc.Pull(context.Background(), "peer1", "owner/repo")
+	if err == nil {
+		t.Error("expected import error")
+	}
+}
+
+func TestPull_NoLocalManifest_FetchesRemote(t *testing.T) {
+	remoteMani := &types.SyncManifest{ContentHash: "remotehash", NodeCount: 10}
+	bundle := &types.GraphBundle{RepoSlug: "owner/repo", Nodes: []types.SyncNode{{ID: "n1"}}}
+
+	svc := NewSyncService(
+		&fakeExporter{manifest: nil}, // no local manifest
+		&fakeImporter{
+			result: &types.SyncResult{
+				NodesImported:  1,
+				EdgesImported:  0,
+				ReEmbedQueued:  false,
+			},
+		},
+		&fakeCodec{hash: "remotehash"},
+		nil,
+	)
+	svc.SetTransport(
+		&fakeTransport{
+			manifest: remoteMani,
+			bundle:   bundle,
+		},
+		&fakePeerStore{peers: []types.PeerInfo{{Name: "peer1"}}},
+		&fakeScopeStore{inScope: true},
+	)
+
+	result, err := svc.Pull(context.Background(), "peer1", "owner/repo")
+	if err != nil {
+		t.Fatalf("Pull with no local manifest: %v", err)
+	}
+	if result.NodesImported != 1 {
+		t.Errorf("NodesImported = %d, want 1", result.NodesImported)
+	}
+}
+
+// ── Push additional coverage ───────────────────────────────────────
+
+func TestPush_BuildBundleFails(t *testing.T) {
+	svc := NewSyncService(
+		&fakeExporter{err: errors.New("build fail")},
+		&fakeImporter{},
+		&fakeCodec{},
+		nil,
+	)
+	svc.SetTransport(
+		&fakeTransport{},
+		&fakePeerStore{peers: []types.PeerInfo{{Name: "peer1"}}},
+		nil,
+	)
+	_, err := svc.Push(context.Background(), "peer1", "owner/repo")
+	if err == nil {
+		t.Error("expected build error")
+	}
+}
+
+func TestPush_PushBundleFails(t *testing.T) {
+	svc := newSyncService()
+	svc.SetTransport(
+		&fakeTransport{err: errors.New("push fail")},
+		&fakePeerStore{peers: []types.PeerInfo{{Name: "peer1"}}},
+		nil,
+	)
+	_, err := svc.Push(context.Background(), "peer1", "owner/repo")
+	if err == nil {
+		t.Error("expected push error")
+	}
+}
+
+// ── HandleBundleRequest additional coverage ────────────────────────
+
+func TestHandleBundleRequest_BuildBundleFails(t *testing.T) {
+	svc := NewSyncService(
+		&fakeExporter{err: errors.New("build fail")},
+		&fakeImporter{},
+		&fakeCodec{},
+		nil,
+	)
+	_, err := svc.HandleBundleRequest(context.Background(), "r")
+	if err == nil {
+		t.Error("expected error when bundle build fails")
+	}
+}
+
+func TestHandleBundleRequest_EncodeFails(t *testing.T) {
+	svc := NewSyncService(
+		&fakeExporter{},
+		&fakeImporter{},
+		&fakeCodec{encErr: errors.New("encode fail")},
+		nil,
+	)
+	_, err := svc.HandleBundleRequest(context.Background(), "r")
+	if err == nil {
+		t.Error("expected encode error")
+	}
+}
+
+// ── NotifyPeers additional coverage ────────────────────────────────
+
+func TestNotifyPeers_IteratesPeers(t *testing.T) {
+	svc := newSyncService()
+	peers := []types.PeerInfo{
+		{Name: "peer1"},
+		{Name: "peer2"},
+	}
+	svc.SetTransport(
+		&fakeTransport{},
+		&fakePeerStore{peers: peers},
+		nil,
+	)
+
+	// Should iterate through peers without error
+	svc.NotifyPeers(context.Background(), "owner/repo")
+}
+
+func TestNotifyPeers_ExportManifestError_Continues(t *testing.T) {
+	svc := NewSyncService(
+		&fakeExporter{err: errors.New("export fail")},
+		&fakeImporter{},
+		&fakeCodec{},
+		nil,
+	)
+	svc.SetTransport(
+		&fakeTransport{},
+		&fakePeerStore{peers: []types.PeerInfo{{Name: "peer1"}}},
+		nil,
+	)
+
+	// Should not panic even if manifest export fails
+	svc.NotifyPeers(context.Background(), "owner/repo")
 }
