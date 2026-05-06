@@ -111,13 +111,15 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	}
 	_ = repo // repo record is upserted; slug is now canonical in req
 
-	fileCh, walkErrCh := is.startWalk(ctx, req)
+	fileCh, walkErrCh := is.runWalk(ctx, req)
 
 	parsedCh := is.runParse(ctx, fileCh, req, run)
 
 	allParsed := is.runLinkAndSummarize(ctx, parsedCh, run)
 
-	if err := is.runEmbedAndStore(ctx, allParsed, req, run); err != nil {
+	embedCh := is.runEmbed(ctx, allParsed, req, run)
+
+	if err := is.runStore(ctx, embedCh, run); err != nil {
 		return nil, err
 	}
 
@@ -194,11 +196,11 @@ func (is *IndexService) runSetup(ctx context.Context, req *IndexRequest, _ *inde
 	return repo, nil
 }
 
-// startWalk kicks off the filesystem walk and returns its channels.
+// runWalk kicks off the filesystem walk and returns its channels.
 // Tracker stage transitions (StartStage/CompleteStage for Walk) happen inside
 // the goroutine that drains fileCh (runParse), so the walk and parse stages
 // are always bookended in the same goroutine.
-func (is *IndexService) startWalk(ctx context.Context, req IndexRequest) (<-chan domain.FileEntry, <-chan error) {
+func (is *IndexService) runWalk(ctx context.Context, req IndexRequest) (<-chan domain.FileEntry, <-chan error) {
 	is.log.Info("starting walk", "repo", req.RepoSlug, "path", req.RepoPath)
 	if is.tracker != nil {
 		is.tracker.StartStage(types.StageWalk)
@@ -374,11 +376,14 @@ func (is *IndexService) runLinkAndSummarize(_ context.Context, parsedCh <-chan *
 	return allParsed
 }
 
-// runEmbedAndStore drives the summarize → embed → store pipeline for the
-// resolved parsed-file slice. Returns a fatal error only when the store
-// errgroup propagates a context-cancellation error.
-func (is *IndexService) runEmbedAndStore(ctx context.Context, allParsed []*domain.ParsedFile, req IndexRequest, run *indexRun) error {
-	// Feed resolved parsed files into the embed/store pipeline.
+// runEmbed drives the summarize → embed half of the pipeline. It spawns a
+// background goroutine that summarizes (when not Fast/Reparse) and embeds
+// each parsed file in parallel, sending results on the returned channel.
+// The channel is closed when all embed workers finish. The caller (runStore)
+// drains it. Embed errors are non-fatal: they're logged and the file is
+// dropped from the pipeline.
+func (is *IndexService) runEmbed(ctx context.Context, allParsed []*domain.ParsedFile, req IndexRequest, run *indexRun) <-chan *embeddedFile {
+	// Feed resolved parsed files into the embed pipeline.
 	resolvedCh := make(chan *domain.ParsedFile, len(allParsed))
 	go func() {
 		defer close(resolvedCh)
@@ -387,7 +392,7 @@ func (is *IndexService) runEmbedAndStore(ctx context.Context, allParsed []*domai
 		}
 	}()
 
-	// Stage 3: Embed (API-bound, limited concurrency).
+	// Stage 3 boundary tracker setup (Summarize is conditional, Embed always).
 	if is.tracker != nil {
 		if req.Fast || req.Reparse {
 			is.tracker.SkipStage(types.StageSummarize)
@@ -470,7 +475,14 @@ func (is *IndexService) runEmbedAndStore(ctx context.Context, allParsed []*domai
 		}
 	}()
 
-	// Stage 4: Store (SurrealDB, limited concurrency).
+	return embedCh
+}
+
+// runStore drains embedCh and upserts each batch into the graph. Returns a
+// fatal error only when the store errgroup propagates a context-cancellation
+// error; per-batch upsert failures are logged + non-fatal so the pipeline
+// keeps draining.
+func (is *IndexService) runStore(ctx context.Context, embedCh <-chan *embeddedFile, run *indexRun) error {
 	if is.tracker != nil {
 		is.tracker.StartStage(types.StageStore)
 	}
