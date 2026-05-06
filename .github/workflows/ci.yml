@@ -76,18 +76,15 @@ jobs:
             -coverpkg=./internal/app/... \
             ./...
 
-      # Coverage floor — set below current actual (~32%) after the v0.0.2
-      # monorepo split temporarily diluted the ratio. Tracked back up to the
-      # original 98% target in the v0.0.2 release-blocker thread.
-      - name: Enforce coverage floor
+      - name: Enforce 98 % coverage threshold
         working-directory: server
         run: |
           COVERAGE=$(go tool cover -func=coverage.out \
             | grep -E "^total:" | awk '{print $3}' | tr -d '%')
           echo "coverage=${COVERAGE}" >> "$GITHUB_ENV"
-          THRESHOLD=30
+          THRESHOLD=98
           if awk "BEGIN{exit !($COVERAGE < $THRESHOLD)}"; then
-            echo "::error::Coverage ${COVERAGE}% is below the floor ${THRESHOLD}%"
+            echo "::error::Coverage ${COVERAGE}% is below the required ${THRESHOLD}%"
             exit 1
           fi
           echo "Coverage ${COVERAGE}% >= ${THRESHOLD}% ✓"
@@ -102,7 +99,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Total** | **${coverage}%** |"
-            echo "| Floor | 30% |"
+            echo "| Threshold | 98% |"
             echo ""
             echo "### Per-function breakdown"
             echo '```'
