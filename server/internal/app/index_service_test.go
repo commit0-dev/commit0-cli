@@ -3739,3 +3739,76 @@ func TestRunPostPipeline_ReembedError_FailsStage(t *testing.T) {
 		t.Fatalf("Index: %v", err)
 	}
 }
+
+// ── runParse + runLinkAndSummarize fine branches ──────────────────────────
+
+// TestRunParse_DefaultParseWorkers covers parseLimit <= 0 fallback to
+// runtime.GOMAXPROCS(0).
+func TestRunParse_DefaultParseWorkers(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{
+		{Path: "a.go", Language: "go"}, {Path: "b.go", Language: "go"},
+	}}
+	parser := &stubParser{result: &domain.ParsedFile{
+		Nodes: []types.CodeNode{{ID: "f", Qualified: "p.f", Kind: types.NodeFunction}},
+	}}
+	embedder := &stubEmbedder{batchRes: []domain.EmbedResult{{ID: "f", Vector: []float32{0.1}}}}
+	store := newStubGraphStore()
+	cfg := &config.Config{
+		// MaxWorkersParse=0 → falls through to runtime.GOMAXPROCS.
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1, MaxWorkersParse: 0},
+		BatchSize: 10,
+	}
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/", RepoSlug: "r"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+}
+
+// TestRunParse_ParseErrorWithTracker covers the AddStageError(StageParse) path.
+func TestRunParse_ParseErrorWithTracker(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{{Path: "bad.go", Language: "go"}}}
+	parser := &stubParser{err: domain.Validation("syntax")}
+	embedder := &stubEmbedder{}
+	store := newStubGraphStore()
+	cfg := &config.Config{Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1}}
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	svc.tracker = NewIndexTracker("job", "r", types.IndexConfig{})
+
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/", RepoSlug: "r"}); err != nil {
+		t.Fatalf("parse error should be non-fatal: %v", err)
+	}
+}
+
+// TestRunParse_UnbufferedChannel covers the parsedChBuf < 0 branch that
+// forces an unbuffered channel.
+func TestRunParse_UnbufferedChannel(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{}}
+	embedder := &stubEmbedder{}
+	store := newStubGraphStore()
+	cfg := &config.Config{Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1}}
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	svc.parsedChBuf = -1 // unbuffered
+
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/", RepoSlug: "r"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+}
+
+// TestRunPostPipeline_FastReparseSkipsReembed covers SkipStage(StageReembed)
+// when Fast or Reparse is set with a tracker.
+func TestRunPostPipeline_ReparseSkipsReembed(t *testing.T) {
+	walker := &stubFileWalker{}
+	parser := &stubParser{result: &domain.ParsedFile{}}
+	embedder := &stubEmbedder{}
+	store := newStubGraphStore()
+	cfg := &config.Config{Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1}}
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	svc.tracker = NewIndexTracker("job", "r", types.IndexConfig{})
+
+	if _, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/", RepoSlug: "r", Reparse: true,
+	}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+}
