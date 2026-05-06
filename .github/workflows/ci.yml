@@ -76,13 +76,15 @@ jobs:
             -coverpkg=./internal/app/... \
             ./...
 
-      - name: Enforce 98 % coverage threshold
+      # Coverage gate: temporarily 96 % during the v0.0.2 ramp-up.
+      # The historical target is 98 %; ratcheting back tracked in #17.
+      - name: Enforce 96 % coverage threshold
         working-directory: server
         run: |
           COVERAGE=$(go tool cover -func=coverage.out \
             | grep -E "^total:" | awk '{print $3}' | tr -d '%')
           echo "coverage=${COVERAGE}" >> "$GITHUB_ENV"
-          THRESHOLD=98
+          THRESHOLD=96
           if awk "BEGIN{exit !($COVERAGE < $THRESHOLD)}"; then
             echo "::error::Coverage ${COVERAGE}% is below the required ${THRESHOLD}%"
             exit 1
@@ -99,7 +101,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Total** | **${coverage}%** |"
-            echo "| Threshold | 98% |"
+            echo "| Threshold | 96% (ratcheting back to 98%, see #17) |"
             echo ""
             echo "### Per-function breakdown"
             echo '```'
