@@ -3812,3 +3812,47 @@ func TestRunPostPipeline_ReparseSkipsReembed(t *testing.T) {
 		t.Fatalf("Index: %v", err)
 	}
 }
+
+// ── runLinkAndSummarize: linker chain execution ──────────────────────────
+
+// fakeEdgeLinker is a minimal linker that satisfies domain.EdgeLinker.
+type fakeEdgeLinker struct {
+	name string
+}
+
+func (l *fakeEdgeLinker) Name() string             { return l.name }
+func (l *fakeEdgeLinker) Labels() []types.EdgeKind { return []types.EdgeKind{types.EdgeCalls} }
+func (l *fakeEdgeLinker) Link(edges []types.CodeEdge, _ *domain.SymbolTable) ([]types.CodeEdge, domain.LinkStats) {
+	return edges, domain.LinkStats{LinkerName: l.name, Processed: 1, Resolved: 1, Unresolved: 0}
+}
+
+// TestRunLinkAndSummarize_LinkerChainWithTracker exercises the linker-chain
+// execution path including tracker.AddCallEdgeResolution and the per-file
+// edge re-distribution.
+func TestRunLinkAndSummarize_LinkerChainWithTracker(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{
+		{Path: "main.go", Language: "go", Content: []byte("package main")},
+	}}
+	parser := &stubParser{result: &domain.ParsedFile{
+		Path: "main.go", Language: "go",
+		Nodes: []types.CodeNode{{ID: "f1", Qualified: "main.f1", Kind: types.NodeFunction}},
+		Edges: []types.CodeEdge{
+			{Kind: types.EdgeCalls, FromID: "f1", ToID: "f2"},
+			{Kind: types.EdgeCalls, FromID: "ghost", ToID: "f3"}, // orphan FromID
+		},
+	}}
+	embedder := &stubEmbedder{batchRes: []domain.EmbedResult{{ID: "f1", Vector: []float32{0.1}}}}
+	store := newStubGraphStore()
+
+	cfg := &config.Config{
+		Index:     config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1},
+		BatchSize: 10,
+	}
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	svc.SetLinkers([]domain.EdgeLinker{&fakeEdgeLinker{name: "test-linker"}})
+	svc.tracker = NewIndexTracker("job", "r", types.IndexConfig{})
+
+	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/", RepoSlug: "r"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+}
