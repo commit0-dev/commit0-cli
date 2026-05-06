@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -3853,6 +3854,33 @@ func TestRunLinkAndSummarize_LinkerChainWithTracker(t *testing.T) {
 	svc.tracker = NewIndexTracker("job", "r", types.IndexConfig{})
 
 	if _, err := svc.Index(context.Background(), IndexRequest{RepoPath: "/", RepoSlug: "r"}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+}
+
+// TestRunPostPipeline_TemporalSvc_Error covers the temporal IndexCommitRange
+// failure branch (FailStage(StageTemporal)).
+func TestRunPostPipeline_TemporalSvc_Error(t *testing.T) {
+	walker := &stubFileWalker{files: []domain.FileEntry{}}
+	parser := &stubParser{result: &domain.ParsedFile{}}
+	embedder := &stubEmbedder{}
+	store := newStubGraphStore()
+
+	cfg := &config.Config{Index: config.IndexConfig{MaxWorkersEmbed: 1, MaxWorkersStore: 1}}
+	svc := NewIndexService(walker, parser, embedder, store, nil, cfg)
+	svc.tracker = NewIndexTracker("job", "r", types.IndexConfig{})
+
+	// Wire a temporal service whose gitWalker errors on ListCommits — this
+	// causes IndexCommitRange to return that error and runPostPipeline to
+	// hit FailStage(StageTemporal).
+	tempStore := &fakeTemporalStore{}
+	gitWalker := &fakeGitWalker{listErr: errors.New("git unreachable")}
+	tempSvc := NewTemporalService(store, tempStore, gitWalker, parser)
+	svc.SetTemporalService(tempSvc)
+
+	if _, err := svc.Index(context.Background(), IndexRequest{
+		RepoPath: "/repo", RepoSlug: "repo",
+	}); err != nil {
 		t.Fatalf("Index: %v", err)
 	}
 }
