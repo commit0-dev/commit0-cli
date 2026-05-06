@@ -527,10 +527,10 @@ func textSimilarity(a, b string) float64 {
 			intersection++
 		}
 	}
+	// union ≥ 1 here: wordsA and wordsB are both non-empty (early return
+	// above), and intersection ≤ min(|A|, |B|), so |A| + |B| − intersection
+	// ≥ max(|A|, |B|) ≥ 1.
 	union := len(wordsA) + len(wordsB) - intersection
-	if union == 0 {
-		return 0
-	}
 	return float64(intersection) / float64(union)
 }
 

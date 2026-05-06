@@ -73,10 +73,9 @@ func (t *delegateTool) Invoke(ctx context.Context, argsJSON string) (string, err
 	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	out, err := t.dc.execute(ctx, input)
-	if err != nil {
-		return "", err
-	}
+	// execute never returns an error — runSubAgent failures are captured
+	// into the delegateOutput.Status field rather than propagated.
+	out := t.dc.execute(ctx, input)
 	return marshalJSON(out)
 }
 
@@ -101,13 +100,13 @@ type SubToolLog struct {
 	ResultSize int    `json:"result_size"`
 }
 
-func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) (delegateOutput, error) {
+func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) delegateOutput {
 	// Protocol enforcement: refuse if scratchpad wasn't updated since last delegation.
 	if dc.pad.DelegationCount > 0 && !dc.pad.UpdatedSinceDelegation {
 		return delegateOutput{
 			Status:   "error",
 			Findings: "You must call update_scratchpad before delegating again. Record what you learned from the previous delegation.",
-		}, nil
+		}
 	}
 
 	// Cost budget check.
@@ -115,7 +114,7 @@ func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) (del
 		return delegateOutput{
 			Status:   "budget_exceeded",
 			Findings: "Cost budget exceeded. Synthesize with available evidence using write_report.",
-		}, nil
+		}
 	}
 	if dc.pad.CostConsumed > dc.pad.CostBudget*0.8 {
 		dc.log.Warn("cost budget 80% consumed", "consumed", dc.pad.CostConsumed, "budget", dc.pad.CostBudget)
@@ -126,7 +125,7 @@ func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) (del
 		return delegateOutput{
 			Status:   "error",
 			Findings: "Maximum 8 delegations reached. Synthesize with available evidence.",
-		}, nil
+		}
 	}
 
 	// Validate agent type.
@@ -135,7 +134,7 @@ func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) (del
 		return delegateOutput{
 			Status:   "error",
 			Findings: fmt.Sprintf("Unknown agent type: %s. Use: search, trace, security, deep_dive", input.AgentType),
-		}, nil
+		}
 	}
 
 	// Select tools for sub-agent.
@@ -165,7 +164,7 @@ func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) (del
 			Findings: fmt.Sprintf("Sub-agent error: %v. Try a different approach.", err),
 			Duration: duration.String(),
 			ToolLog:  toolLog,
-		}, nil
+		}
 	}
 
 	// Validate output quality.
@@ -175,7 +174,7 @@ func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) (del
 			Findings: "Sub-agent produced no useful output. Try different search terms or a different agent type.",
 			Duration: duration.String(),
 			ToolLog:  toolLog,
-		}, nil
+		}
 	}
 
 	// Estimate cost.
@@ -197,7 +196,7 @@ func (dc *delegateConfig) execute(ctx context.Context, input delegateInput) (del
 		Duration:  duration.String(),
 		ToolCalls: toolCalls,
 		ToolLog:   toolLog,
-	}, nil
+	}
 }
 
 // runSubAgent creates a temporary agent, runs it, and captures output + tool log.

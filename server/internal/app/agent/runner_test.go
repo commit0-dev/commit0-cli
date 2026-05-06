@@ -284,13 +284,10 @@ func TestDelegateExecute_ScratchpadEnforcementBeforeFirstDelegation(t *testing.T
 	dc := minimalDelegateCfg(factory)
 	dc.pad.UpdatedSinceDelegation = false // freshly created
 
-	out, err := dc.execute(context.Background(), delegateInput{
+	out := dc.execute(context.Background(), delegateInput{
 		AgentType: "search",
 		Task:      "find something",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if out.Status == "error" && strings.Contains(out.Findings, "update_scratchpad") {
 		t.Errorf("first delegation should not be blocked by scratchpad enforcement")
 	}
@@ -303,13 +300,10 @@ func TestDelegateExecute_ScratchpadEnforcementAfterFirst(t *testing.T) {
 	dc.pad.DelegationCount = 1
 	dc.pad.UpdatedSinceDelegation = false
 
-	out, err := dc.execute(context.Background(), delegateInput{
+	out := dc.execute(context.Background(), delegateInput{
 		AgentType: "search",
 		Task:      "find something",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if out.Status != "error" {
 		t.Errorf("expected error status, got %q", out.Status)
 	}
@@ -323,10 +317,7 @@ func TestDelegateExecute_BudgetExceeded(t *testing.T) {
 	dc.pad.CostConsumed = 2.0
 	dc.pad.CostBudget = 1.0
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
 	if out.Status != "budget_exceeded" {
 		t.Errorf("expected budget_exceeded, got %q", out.Status)
 	}
@@ -341,10 +332,7 @@ func TestDelegateExecute_BudgetAt80Percent_StillProceeds(t *testing.T) {
 	dc.pad.CostConsumed = 0.85 // > 80% of default 1.00
 	dc.pad.CostBudget = 1.0
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
 	// Should NOT be budget_exceeded (just a warning); delegation proceeds.
 	if out.Status == "budget_exceeded" {
 		t.Errorf("80%% budget should log warning but not block, got budget_exceeded")
@@ -356,10 +344,7 @@ func TestDelegateExecute_MaxDelegations(t *testing.T) {
 	dc.pad.DelegationCount = 8
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
 	if out.Status != "error" {
 		t.Errorf("expected error on max delegations, got %q", out.Status)
 	}
@@ -372,10 +357,7 @@ func TestDelegateExecute_UnknownAgentType(t *testing.T) {
 	dc := minimalDelegateCfg(nil)
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "bogus", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "bogus", Task: "x"})
 	if out.Status != "error" {
 		t.Errorf("expected error for unknown agent type, got %q", out.Status)
 	}
@@ -388,10 +370,7 @@ func TestDelegateExecute_FactoryError(t *testing.T) {
 	dc := minimalDelegateCfg(makeFactory(nil, errors.New("factory broke")))
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected hard error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
 	if out.Status != "error" {
 		t.Errorf("expected error on factory failure, got %q", out.Status)
 	}
@@ -402,10 +381,7 @@ func TestDelegateExecute_SubAgentRunError(t *testing.T) {
 	dc := minimalDelegateCfg(makeFactory(runner, nil))
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected hard error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
 	if out.Status != "error" {
 		t.Errorf("expected error on sub-agent run failure, got %q", out.Status)
 	}
@@ -418,10 +394,7 @@ func TestDelegateExecute_EmptyFindings(t *testing.T) {
 	dc := minimalDelegateCfg(makeFactory(runner, nil))
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
 	if out.Status != "empty" {
 		t.Errorf("expected empty status for short output, got %q (findings=%q)", out.Status, out.Findings)
 	}
@@ -439,14 +412,11 @@ func TestDelegateExecute_HappyPath(t *testing.T) {
 	dc := minimalDelegateCfg(makeFactory(runner, nil))
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{
+	out := dc.execute(context.Background(), delegateInput{
 		AgentType: "search",
 		Task:      "find authentication functions",
 		Context:   "prior analysis showed X",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if out.Status != "success" {
 		t.Errorf("expected success, got %q (findings=%q)", out.Status, out.Findings)
 	}
@@ -469,14 +439,11 @@ func TestDelegateExecute_HappyPath_WithContext(t *testing.T) {
 	dc := minimalDelegateCfg(makeFactory(runner, nil))
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{
+	out := dc.execute(context.Background(), delegateInput{
 		AgentType: "security",
 		Task:      "audit login flow",
 		Context:   "previously traced auth path",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if out.Status != "success" {
 		t.Errorf("expected success, got %q", out.Status)
 	}
@@ -495,10 +462,7 @@ func TestDelegateExecute_TracksToolLog(t *testing.T) {
 	dc := minimalDelegateCfg(makeFactory(runner, nil))
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "trace", Task: "trace auth"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "trace", Task: "trace auth"})
 	if out.ToolCalls != 2 {
 		t.Errorf("expected 2 tool_calls, got %d", out.ToolCalls)
 	}
@@ -516,10 +480,7 @@ func TestDelegateExecute_ErrorEvent_NonTimeout(t *testing.T) {
 	dc := minimalDelegateCfg(makeFactory(runner, nil))
 	dc.pad.UpdatedSinceDelegation = true
 
-	out, err := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
-	if err != nil {
-		t.Fatalf("unexpected hard error: %v", err)
-	}
+	out := dc.execute(context.Background(), delegateInput{AgentType: "search", Task: "x"})
 	if out.Status != "error" {
 		t.Errorf("expected error status for error event, got %q", out.Status)
 	}
@@ -705,10 +666,7 @@ func TestDelegateTool_Invoke_HappyPath(t *testing.T) {
 	tool := BuildDelegateTool(nil, nil, nil, nil, nil, nil, nil, nil, nil, &config.Config{}, pad, factory)
 
 	argsJSON := `{"agent_type":"search","task":"find authentication","context":""}`
-	result, err := tool.Invoke(context.Background(), argsJSON)
-	if err != nil {
-		t.Fatalf("Invoke returned error: %v", err)
-	}
+	result, _ := tool.Invoke(context.Background(), argsJSON)
 	if !strings.Contains(result, "status") {
 		t.Errorf("result should be JSON with status field, got %q", result)
 	}
@@ -721,7 +679,7 @@ func TestDelegateTool_Invoke_HappyPath(t *testing.T) {
 func TestNewAgentService_HappyPath(t *testing.T) {
 	factory := makeFactory(&fakeSubRunner{}, nil)
 
-	svc, err := NewAgentService(
+	svc, _ := NewAgentService(
 		nil, nil, nil, nil, nil, nil,
 		nil, nil, nil,
 		&config.Config{},
@@ -729,9 +687,6 @@ func TestNewAgentService_HappyPath(t *testing.T) {
 		&fakeRunner{},
 		factory,
 	)
-	if err != nil {
-		t.Fatalf("NewAgentService error: %v", err)
-	}
 	if svc == nil {
 		t.Fatal("NewAgentService returned nil")
 	}
@@ -739,16 +694,13 @@ func TestNewAgentService_HappyPath(t *testing.T) {
 
 func TestNewAgentService_ImplementsAgentRunner(t *testing.T) {
 	factory := makeFactory(&fakeSubRunner{}, nil)
-	svc, err := NewAgentService(
+	svc, _ := NewAgentService(
 		nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		&config.Config{},
 		nil,
 		&fakeRunner{},
 		factory,
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Compile-time check exists in service.go; this just confirms the value satisfies the interface.
 	var _ domain.AgentRunner = svc
 }
@@ -761,13 +713,10 @@ func TestChat_RunnerError(t *testing.T) {
 	runner := &fakeRunner{err: errors.New("llm down")}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{
 		RepoSlug: "owner/repo",
 		Message:  "hello",
 	})
-	if err != nil {
-		t.Fatalf("Chat returned immediate error: %v", err)
-	}
 
 	var events []domain.ChatEvent
 	for e := range ch {
@@ -792,13 +741,10 @@ func TestChat_MessageEvent(t *testing.T) {
 	}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{
 		RepoSlug: "test/repo",
 		Message:  "what is auth?",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	var events []domain.ChatEvent
 	for e := range ch {
@@ -828,10 +774,7 @@ func TestChat_ToolCallAndResult(t *testing.T) {
 	}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{Message: "find auth"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{Message: "find auth"})
 
 	var toolCalls, toolResults int
 	for e := range ch {
@@ -858,10 +801,7 @@ func TestChat_UsageEvent(t *testing.T) {
 	}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
 
 	var usageEvents []domain.ChatEvent
 	for e := range ch {
@@ -887,10 +827,7 @@ func TestChat_UsageEvent_NilUsage(t *testing.T) {
 	}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
 
 	var usageEvents int
 	for e := range ch {
@@ -912,10 +849,7 @@ func TestChat_ErrorEvent_FromRunner(t *testing.T) {
 	}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
 
 	var events []domain.ChatEvent
 	for e := range ch {
@@ -936,10 +870,7 @@ func TestChat_ThinkingEventFirst(t *testing.T) {
 	}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
 
 	var events []domain.ChatEvent
 	for e := range ch {
@@ -959,10 +890,7 @@ func TestChat_DoneEventLast(t *testing.T) {
 	}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
 
 	var events []domain.ChatEvent
 	for e := range ch {
@@ -981,10 +909,7 @@ func TestChat_ContextCanceled(t *testing.T) {
 	svc, _ := newTestService(runner)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	eventCh, err := svc.Chat(ctx, domain.ChatRequest{Message: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	eventCh, _ := svc.Chat(ctx, domain.ChatRequest{Message: "x"})
 	cancel()
 	close(ch)
 
@@ -997,10 +922,7 @@ func TestChat_PanicRecovery(t *testing.T) {
 	runner := &panicRunner{}
 	svc, _ := newTestService(runner)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{Message: "x"})
 
 	var events []domain.ChatEvent
 	for e := range ch {
@@ -1031,13 +953,10 @@ func TestChat_RepoSlugPropagatedToState(t *testing.T) {
 	recorder := &stateRecorder{}
 	svc, _ := newTestService(recorder)
 
-	ch, err := svc.Chat(context.Background(), domain.ChatRequest{
+	ch, _ := svc.Chat(context.Background(), domain.ChatRequest{
 		RepoSlug: "acme/myrepo",
 		Message:  "test",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	for range ch {
 	}
 
@@ -1115,13 +1034,10 @@ func TestDelegateExecute_AllFourAgentTypes_HappyPath(t *testing.T) {
 			dc := minimalDelegateCfg(makeFactory(runner, nil))
 			dc.pad.UpdatedSinceDelegation = true
 
-			out, err := dc.execute(context.Background(), delegateInput{
+			out := dc.execute(context.Background(), delegateInput{
 				AgentType: typ,
 				Task:      "investigate something important",
 			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
 			if out.Status != "success" {
 				t.Errorf("expected success for %q, got %q (findings=%q)", typ, out.Status, out.Findings)
 			}
