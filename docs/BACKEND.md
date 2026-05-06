@@ -8,11 +8,12 @@
 
 | Layer | Location | Responsibility |
 |-------|----------|---------------|
-| Domain | `internal/domain/`, `pkg/types/` | Port interfaces, domain errors, types. No external imports. |
-| Application | `internal/app/` | Service orchestration. Composes port interfaces only. |
-| Driven adapters | `internal/adapters/surreal/`, `gemini/`, `openrouter/`, etc. | Implement port interfaces. |
-| Driving adapters | `internal/adapters/http/` (server), `internal/adapters/client/` (CLI) | Translate between HTTP and service calls. |
-| CLI | `cli/cmd/` | HTTP client. `serve` command starts the server; all others call it over HTTP. |
+| Domain | `server/internal/domain/`, `pkg/types/` | Port interfaces, domain errors, types. No external imports. |
+| Application | `server/internal/app/` | Service orchestration. Composes port interfaces only. |
+| Driven adapters | `server/internal/adapters/surreal/`, `gemini/`, `voyage/`, `unsloth/`, `eino/`, etc. | Implement port interfaces. |
+| Driving adapters | `server/internal/adapters/http/` (Gin) | Translate inbound HTTP into service calls. |
+
+> The CLI is a separate Go module at [`commit0-cli`](https://github.com/commit0-dev/commit0-cli). It calls this server over HTTP via Resty v3 and never imports server internals.
 
 ---
 
@@ -41,7 +42,7 @@ Single interface for all graph operations. Every application service depends on 
 | `LLMExplainer` | `Explain` (streaming), `ExplainStructured` (JSON) | Gemini, Ollama |
 | `Parser` | `Parse`, `SupportedLanguages` | tree-sitter (CGO) |
 | `FileWalker` | `Walk` | OS filesystem (.gitignore-aware) |
-| `AgentRunner` | `Chat` | Google ADK |
+| `AgentRunner` | `Chat` | CloudWeGo Eino |
 | `MemoryStore` | `StoreMemory`, `RetrieveMemories`, `ListSessionMemories` | SurrealDB |
 | `GitWalker` | `ListCommits`, `DiffCommit`, `ReadFileAtCommit`, `CommitInfo` | git CLI |
 
@@ -147,7 +148,7 @@ Implements `OpenCodeGraph`, `MemoryStore`, `SessionStore`, and sync interfaces. 
 
 ### Agent (`internal/app/agent/`)
 
-Multi-step code analysis using Google ADK. An analyst agent delegates to specialized sub-agents (search, trace, security, deep-dive), tracks evidence in a scratchpad, and produces a structured report.
+Multi-step code analysis using CloudWeGo Eino. An analyst agent delegates to specialised sub-agents (search, trace, security, deep-dive) via `SubRunnerFactory`, tracks evidence in a scratchpad, and produces a structured report.
 
 | File | Purpose |
 |------|---------|

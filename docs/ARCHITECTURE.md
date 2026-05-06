@@ -52,11 +52,12 @@ The codebase follows a ports-and-adapters pattern. Domain logic depends only on 
 
 | Layer | Location | Rule |
 |-------|----------|------|
-| Domain | `internal/domain/`, `pkg/types/` | No external imports. Defines interfaces and types. |
-| Application | `internal/app/` | Composes interfaces. Does not import adapters. |
-| Driven adapters | `internal/adapters/surreal/`, `gemini/`, etc. | Implement domain interfaces. |
-| Driving adapters | `internal/adapters/http/`, `client/` | Translate HTTP to service calls. |
-| CLI | `cli/cmd/` | HTTP client only. |
+| Domain | `server/internal/domain/`, `pkg/types/` | No external imports. Defines interfaces and types. |
+| Application | `server/internal/app/` | Composes interfaces. Does not import adapters. |
+| Driven adapters | `server/internal/adapters/surreal/`, `gemini/`, etc. | Implement domain interfaces. |
+| Driving adapters | `server/internal/adapters/http/` (Gin) | Translate HTTP requests to service calls. |
+
+> The CLI lives in the standalone [`commit0-cli`](https://github.com/commit0-dev/commit0-cli) repo. It is a pure-Go Resty v3 HTTP client and never imports server internals.
 
 ### Port Interfaces
 
@@ -65,7 +66,7 @@ The codebase follows a ports-and-adapters pattern. Domain logic depends only on 
 | `OpenCodeGraph` | Graph CRUD, traversal, vector/text search | SurrealDB 3.0 |
 | `Embedder` | Text/code to vector embeddings | Gemini, Voyage AI, Ollama |
 | `LLMExplainer` | Natural-language explanation generation | Gemini, Ollama |
-| `AgentRunner` | Multi-turn agent conversations | Google ADK |
+| `AgentRunner` | Multi-turn agent conversations | CloudWeGo Eino |
 | `Parser` | Source file to AST nodes and edges | tree-sitter (CGO) |
 | `FileWalker` | Repository file enumeration | OS filesystem |
 | `MemoryStore` | Persistent memory with vector retrieval | SurrealDB |
@@ -87,7 +88,7 @@ The codebase follows a ports-and-adapters pattern. Domain logic depends only on 
 | Database | SurrealDB 3.0 |
 | Embeddings | Gemini, Voyage AI, or Ollama |
 | LLM | Gemini, OpenRouter, or Ollama |
-| Agent framework | Google ADK for Go |
+| Agent framework | CloudWeGo Eino v0.8 (with `SubRunnerFactory` for sub-agent isolation) |
 | Logging | log/slog (stdlib) |
 
 ---

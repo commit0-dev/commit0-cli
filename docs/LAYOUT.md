@@ -4,13 +4,15 @@
 
 ```
 server/cmd/              Server entry point, dependency injection
-cli/cmd/                 CLI commands (HTTP clients)
 server/internal/app/     Application services (composes port interfaces)
 server/internal/domain/  Port interfaces and domain errors (no external imports)
-server/internal/adapters SurrealDB, Gemini, OpenRouter, Voyage, Ollama, tree-sitter, HTTP
-pkg/types/               Exported types shared between server, CLI, and SDK
+server/internal/adapters SurrealDB, Gemini, OpenRouter, Voyage, Unsloth, Ollama,
+                         Eino, tree-sitter, Gin HTTP, QUIC, mDNS, Consul
+pkg/types/               Exported types shared with the standalone CLI
 server/assets/           Embedded files (schema.surql)
 ```
+
+> The CLI lives in [`commit0-cli`](https://github.com/commit0-dev/commit0-cli) (pure Go, no CGO). It depends only on `pkg/types` (republished as a standalone module) and Resty v3.
 
 ## Tree
 
@@ -47,8 +49,8 @@ commit0/
 │   │   │   ├── embed_batcher.go         Batch embedding
 │   │   │   ├── fusion.go               Reciprocal Rank Fusion
 │   │   │   ├── agent/
-│   │   │   │   ├── service.go           ADK agent runner
-│   │   │   │   ├── delegate.go          Sub-agent delegation
+│   │   │   │   ├── service.go           Eino agent runner
+│   │   │   │   ├── delegate.go          Sub-agent delegation (SubRunnerFactory)
 │   │   │   │   ├── scratchpad.go        Evidence tracking
 │   │   │   │   ├── tools.go             Agent tools
 │   │   │   │   └── instructions.go      System prompts
@@ -70,9 +72,10 @@ commit0/
 │   │   │   │   ├── schema.go            DDL and versioning
 │   │   │   │   └── session_store.go     Chat persistence
 │   │   │   ├── gemini/                  Gemini embedder + explainer
-│   │   │   ├── openrouter/              OpenRouter LLM adapter
 │   │   │   ├── voyage/                  Voyage AI embedder
+│   │   │   ├── unsloth/                 Unsloth embedder + LLM (vLLM-compatible)
 │   │   │   ├── local/                   Ollama embedder + explainer
+│   │   │   ├── eino/                    CloudWeGo Eino agent runner + factory
 │   │   │   ├── treesitter/              tree-sitter parser (CGO)
 │   │   │   │   ├── parser.go
 │   │   │   │   └── lang/                Go, Python, TypeScript, JavaScript extractors
@@ -80,7 +83,6 @@ commit0/
 │   │   │   │   ├── server.go            Routes and middleware
 │   │   │   │   ├── handlers.go          Request handlers
 │   │   │   │   └── handlers_*.go        Domain-specific handlers
-│   │   │   ├── client/                  CLI HTTP client (Resty v3)
 │   │   │   ├── git/                     Git history adapter
 │   │   │   ├── walker/                  File system walker
 │   │   │   ├── sync/                    P2P sync codec and auth
@@ -91,14 +93,6 @@ commit0/
 │   │   └── config/                      Configuration loading
 │   └── assets/
 │       └── schema.surql                 SurrealDB DDL
-├── cli/
-│   ├── main.go
-│   └── cmd/                             CLI commands
-│       ├── query.go  trace.go  blast.go  index.go
-│       ├── flow.go  findroot.go
-│       ├── repo.go  api.go  analyze.go
-│       └── report.go
-├── sdk/                                 Go SDK
 ├── pkg/types/
 │   ├── ast.go                           CodeNode, CodeEdge
 │   ├── graph.go                         GraphNode, GraphEdge
