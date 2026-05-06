@@ -146,7 +146,7 @@ jobs:
 
       # GitHub-native provenance attestation (separate from docker buildx
       # provenance — this one is queryable via `gh attestation verify`).
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/commit0
           subject-digest: ${{ steps.build.outputs.digest }}
