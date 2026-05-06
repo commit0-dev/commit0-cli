@@ -1,14 +1,11 @@
 name: commit0
 
-# Profiles
-#   (default)    surreal only — use this when developing the binary locally
-#   --profile app  full stack: surreal + commit0 (uses ghcr.io/commit0-dev/commit0:edge)
-#
 # Usage:
-#   docker compose up -d              # start SurrealDB only
-#   docker compose --profile app up -d  # start full stack
+#   docker compose up -d              # start SurrealDB + commit0 server
+#   docker compose up -d --build      # rebuild server image then start
+#   docker compose logs -f commit0    # tail server logs
 #
-# Copy .env.example to .env and set GEMINI_API_KEY before starting.
+# Copy .env.example to .env and set provider keys before starting.
 
 services:
 
@@ -24,35 +21,72 @@ services:
         --pass ${SURREAL_PASS:-root}
         surrealkv:///data
     ports:
-      - "${SURREAL_PORT:-8000}:8000"
+      - "${SURREAL_PORT:-8001}:8000"
     volumes:
       - surreal_data:/data
     healthcheck:
-      test: ["CMD", "surreal", "isready", "--conn", "http://localhost:8000"]
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 15s
+      start_period: 30s
 
-  # ── commit0 binary (full-stack profile) ───────────────────────────────────
+  # ── commit0 server ────────────────────────────────────────────────────────
   commit0:
-    image: ghcr.io/commit0-dev/commit0:edge
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-none}
     restart: unless-stopped
+    command: ["serve"]
     env_file:
       - path: .env
         required: false
     environment:
-      # Override the URL to reach the compose-internal surreal service.
       SURREAL_URL: ws://surreal:8000
       SURREAL_USER: ${SURREAL_USER:-root}
       SURREAL_PASS: ${SURREAL_PASS:-root}
+      OLLAMA_URL: http://host.docker.internal:11434
+      UNSLOTH_URL: http://host.docker.internal:8888/v1
+      OLLAMA_EMBED_MODEL: qwen3-embedding:4b
     ports:
       - "${SERVER_PORT:-8080}:8080"
     depends_on:
       surreal:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/commit0", "healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── Unsloth via vLLM (optional, GPU required) ──────────────────────────────
+  # Usage: docker compose --profile unsloth up -d
+  # Then set LLM_PROVIDER=unsloth and UNSLOTH_URL=http://unsloth:8000/v1 in commit0 env
+  unsloth:
+    image: vllm/vllm-openai:latest
+    restart: unless-stopped
+    command: >
+      --model ${UNSLOTH_MODEL:-unsloth/gemma-3-4b}
+      --max-model-len ${UNSLOTH_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization 0.90
+      --dtype auto
+    ports:
+      - "${UNSLOTH_PORT:-8000}:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     profiles:
-      - app
+      - unsloth
 
 volumes:
   surreal_data:

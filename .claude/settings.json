@@ -1,21 +1,29 @@
 {
   "permissions": {
     "allow": [
+      "Bash(cat *)",
+      "Bash(find *)",
+      "Bash(go build:*)",
+      "Bash(go env:*)",
+      "Bash(go get:*)",
+      "Bash(go list:*)",
+      "Bash(go mod:*)",
       "Bash(go test:*)",
       "Bash(go tool:*)",
-      "Edit(/.claude/skills/commit0-go/**)",
-      "Bash(go get:*)",
-      "Read(//Users/thomas.nguyen/go/1.25.6/pkg/mod/google.golang.org/genai@v1.52.1/**)",
-      "Bash(go env:*)",
       "Bash(go version:*)",
-      "Read(//Users/thomas.nguyen/go/1.25.6/pkg/mod/github.com/surrealdb/surrealdb.go@v1.4.0/**)",
-      "Read(//Users/thomas.nguyen/go/1.25.6/pkg/mod/github.com/smacker/**)",
       "Bash(go vet:*)",
-      "Bash(grep -h \"^func New\" /Volumes/DATA/Coding/commit0/commit0/internal/app/*.go)",
+      "Bash(grep *)",
+      "Bash(head *)",
+      "Bash(ls *)",
+      "Bash(sed *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(awk *)",
+      "Bash(sed *)",
+      "Edit(/.claude/skills/commit0-go/**)",
       "Read(//private/tmp/**)",
-      "Bash(go list:*)",
-      "Bash(ls /Volumes/DATA/Coding/commit0/commit0/internal/adapters/surreal/*_test.go)",
-      "Read(//Users/thomas.nguyen/.claude/plugins/marketplaces/claude-code-skills/engineering/ci-cd-pipeline-builder/**)"
+      "Read(//Users/thomas.nguyen/go/**/pkg/mod/**)",
+      "Read(~/.claude/skills/engineering-skills/**)"
     ]
   }
 }

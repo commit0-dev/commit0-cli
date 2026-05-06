@@ -26,7 +26,9 @@ linters-settings:
   govet:
     enable-all: true
     disable:
-      - shadow        # too noisy for short-lived err variables
+      - shadow         # too noisy for short-lived err variables
+      - fieldalignment # layout optimisation is a micro-opt; server structs are
+                       # ordered for readability and grouped by semantic domain
 
   staticcheck:
     # Keep in sync with the staticcheck version used in CI

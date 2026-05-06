@@ -1,29 +1,31 @@
-BINARY   := commit0
-PKG      := github.com/commit0-dev/commit0
-VERSION  ?= dev
-COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+BINARY_SERVER := commit0
+PKG           := github.com/commit0-dev/commit0
+VERSION       ?= dev
+COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS       := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-# CGO is required for smacker/go-tree-sitter.
-export CGO_ENABLED := 1
-
-.PHONY: all build run clean \
+.PHONY: all build build-server run clean \
         fmt vet lint \
         test test-cover test-race \
         install-hooks uninstall-hooks hooks-run \
+        ext-build ext-package \
         help
 
 all: build
 
 # ── Build ──────────────────────────────────────────────────────────────────
-build:
-	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) .
+## build: build the commit0 server binary (requires CGO for tree-sitter)
+build: build-server
 
-run: build
-	./$(BINARY)
+## build-server: build the commit0 server binary (requires CGO for tree-sitter)
+build-server:
+	CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY_SERVER) ./server
+
+run: build-server
+	./bin/$(BINARY_SERVER) serve
 
 clean:
-	rm -f $(BINARY) coverage.out coverage.html
+	rm -f bin/$(BINARY_SERVER) coverage.out coverage.html
 	rm -rf dist/
 
 # ── Code quality ───────────────────────────────────────────────────────────
@@ -47,13 +49,13 @@ test:
 test-race:
 	go test -race -count=1 -timeout=5m ./...
 
-## test-cover: run coverage for internal/app and enforce 98 % threshold
+## test-cover: run coverage for server/internal/app and enforce 98 % threshold
 test-cover:
 	@go test -count=1 -timeout=5m \
 		-coverprofile=coverage.out \
 		-covermode=atomic \
-		-coverpkg=./internal/app/... \
-		./internal/app/...
+		-coverpkg=./server/internal/app/... \
+		./server/internal/app/...
 	@COVERAGE=$$(go tool cover -func=coverage.out \
 		| grep -E "^total:" | awk '{print $$3}' | tr -d '%'); \
 	echo "Coverage: $${COVERAGE}%"; \
@@ -84,6 +86,15 @@ uninstall-hooks:
 hooks-run:
 	pre-commit run --all-files
 	pre-commit run golangci-lint --hook-stage pre-push --all-files
+
+# ── VSCode Extension ───────────────────────────────────────────────────────
+## ext-build: compile the VSCode extension
+ext-build:
+	cd vscode-extension && npm run compile
+
+## ext-package: package the VSCode extension as .vsix
+ext-package:
+	cd vscode-extension && npx @vscode/vsce package
 
 # ── Help ───────────────────────────────────────────────────────────────────
 help:

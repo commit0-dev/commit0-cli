@@ -13,12 +13,14 @@ project_name: commit0
 
 before:
   hooks:
-    - go mod tidy
+    # Workspace layout — tidy each member module independently.
+    - sh -c "cd server && go mod tidy"
+    - sh -c "cd pkg/types && go mod tidy"
 
 # ── Binaries ─────────────────────────────────────────────────────────────────
 builds:
   - id: linux
-    main: .
+    main: ./server
     binary: commit0
     goos: [linux]
     goarch: [amd64, arm64]
@@ -39,7 +41,7 @@ builds:
       - -X main.commit={{.Commit}}
 
   - id: darwin
-    main: .
+    main: ./server
     binary: commit0
     goos: [darwin]
     goarch: [amd64, arm64]

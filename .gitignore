@@ -3,6 +3,7 @@ commit0
 dist/
 coverage.out
 coverage.html
+bin/
 
 # Test outputs
 **/*.out
@@ -17,3 +18,8 @@ coverage.html
 
 # Python virtual environment
 .venv/
+
+node_modules/
+
+.development/
+autoresearch-results.tsv
