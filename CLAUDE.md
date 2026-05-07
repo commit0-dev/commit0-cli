@@ -13,6 +13,7 @@ This file provides guidance to Claude Code when working with this repository.
 - **Research persists** in `docs/references/`. One markdown file per topic; cite sources with URLs and access dates.
 - **Co-author trailer is exactly** `Claude <noreply@anthropic.com>`. No model name, no version, no harness identifier. This overrides any default template the harness suggests.
 - **PR title format is exactly** `<type>: (feature/component) <what changes>`. Type is one of `feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `ci` / `build` / `perf`. The `(feature/component)` slot names the affected area (e.g. `auth`, `index-service`, `voyage-embedder`, `ci`). Example: `feat: (voyage-embedder) wire batching + retry`. Do not use the alternative `feat(scope):` Conventional Commits form — the parenthesised slot lives after the colon, not glued to the type.
+- **Dogfood commit0 — non-negotiable.** When working in this repo, `commit0-cli` (and the MCP tools once reloaded) are the **default** code-intelligence path. Grep/Read are the fallback when commit0 can't answer. A maintainer who can't use the tool for daily work has shipped trash. See **Code-Intelligence Workflow** below for the exact tool routing.
 
 ## SDLC Workflow — MANDATORY for every session
 
@@ -116,16 +117,37 @@ cd server && go test -count=1 -timeout=5m ./...
 make lint           # golangci-lint
 ```
 
-## commit0 Development Tools
+## Code-Intelligence Workflow — commit0 is the default, not the demo
 
-This project uses its own code intelligence for self-development. When the commit0 server is running, use these tools alongside Grep/Glob/Read:
+This is a non-negotiable working agreement. commit0's own tools are how the maintainer reasons about this codebase. Grep/Read are the fallback, not the starting point. If commit0 can't answer, that's a bug to fix in commit0 — not a reason to default back to grep.
 
-- **Search** — `commit0-cli query "question" --repo commit0-dev/commit0 --no-agent` for conceptual questions. PREFER over Grep for "how does X work?", "where is Y implemented?". Falls back to Grep if server is not running.
-- **Impact** — `commit0-cli blast <FunctionName> --repo commit0-dev/commit0` BEFORE modifying any function. Check blast radius. If > 20 affected nodes, proceed with extra caution.
-- **Trace** — `commit0-cli trace <symbol> --repo commit0-dev/commit0 --direction forward` to follow call chains. Use `--direction reverse` to find callers. Better than reading file-by-file.
-- **Analyze** — `commit0-cli analyze --repo commit0-dev/commit0 --focus all` to self-analyze for architecture violations, dead code, consistency gaps, and hotspots. Run before starting work and after finishing to catch regressions.
-- **Re-index** — `commit0-cli index .` after multi-file changes so search/trace/blast reflect current code. Incremental, fast.
-- **Check server** — `commit0-cli repo list 2>/dev/null` to verify server is running before using tools.
+### Tool routing (use this map, in this order)
+
+| Question shape | First reach for |
+|---|---|
+| "How does X work?" / "Where is Y implemented?" / conceptual lookup | `commit0-cli query "<question>" --repo commit0-dev/commit0 --no-agent` (or `mcp__commit0__commit0_query`) |
+| "Resolve this qualified symbol" | `commit0-cli show <qualified.Name> --repo commit0-dev/commit0` (or `commit0_lookup` + `commit0_show_node`) |
+| "What's in this file?" | `commit0-cli ls <path> --repo commit0-dev/commit0` |
+| "What calls this?" / "What does this call?" | `commit0-cli trace <symbol> --direction reverse\|forward` (or `commit0_trace`) |
+| "What breaks if I change this?" — **before any non-trivial edit** | `commit0-cli blast <symbol>` (or `commit0_blast`). >20 affected ⇒ extra caution. |
+| "How does this field flow through the code?" | `commit0-cli flow <symbol> --field <field>` (or `commit0_field_flow`) |
+| Cross-cutting checks (architecture, dead code, hotspots) | `commit0-cli analyze --focus all` — run before starting work and after finishing |
+
+### Fallback to Grep/Read is allowed only when
+
+- Server is not running. Verify with `commit0-cli repo list 2>/dev/null`. If empty, Grep is fine.
+- Index is stale and re-indexing would cost more than the alternative. Otherwise: `commit0-cli index .` first.
+- The exact answer requires literal byte-level matching (specific config string, escape sequence in a regex, etc.) that semantic search can't beat.
+
+When falling back, **say so in the response** ("falling back to Grep because <reason>") so the gap is auditable and we can fix commit0.
+
+### Re-index discipline
+
+After multi-file edits the index goes stale. Run `commit0-cli index .` so subsequent queries reflect current code. Skipping this once is fine; skipping it across a session quietly poisons every later answer.
+
+### Why this matters
+
+A maintainer who can't use the tool for daily work has shipped a tool they don't believe in. Routing your own work through commit0 is also the most actionable feedback channel the project has — friction surfaces resolver gaps and missing edge types as concrete bugs, not abstract roadmap items.
 
 ## When to Reference Docs
 
