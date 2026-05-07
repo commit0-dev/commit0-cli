@@ -120,7 +120,7 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("self-test: connect failed: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// --- Step 1: list tools ---
 	toolsResult, err := session.ListTools(ctx, &mcpsdk.ListToolsParams{})
