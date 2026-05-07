@@ -33,10 +33,12 @@ type TraceResult struct {
 
 // TraceHop represents a single hop in a trace tree.
 type TraceHop struct {
-	Edge     CodeEdge
-	Children []TraceHop
-	Node     CodeNode
-	Depth    int
+	Edge            CodeEdge
+	Children        []TraceHop
+	Node            CodeNode
+	Depth           int
+	CallSiteExcerpt string `json:",omitempty"` // 3-line source snippet centered on the call line
+	CallExpression  string `json:",omitempty"` // literal call expression text (e.g. "foo(ctx, req)")
 }
 
 // BlastResult represents the result of a blast radius analysis.
@@ -50,10 +52,13 @@ type BlastResult struct {
 
 // AffectedNode represents a node affected by a change.
 type AffectedNode struct {
-	Module   string
-	Path     string
-	Node     CodeNode
-	HopCount int
+	Module          string
+	Path            string
+	Node            CodeNode
+	HopCount        int
+	CallSiteExcerpt string `json:",omitempty"` // 3-line source snippet centered on the call line
+	CallExpression  string `json:",omitempty"` // literal call expression text (e.g. "foo(ctx, req)")
+	CallLine        int    `json:",omitempty"` // 1-based line number of the call site
 }
 
 // DataFlowResult represents the result of a data-flow analysis rooted at a symbol.

@@ -38,6 +38,7 @@ type traceInput struct {
 	Depth           int      `json:"depth,omitempty"            jsonschema:"Max traversal depth (1-10). Default 5."`
 	EdgeLabels      []string `json:"edge_labels,omitempty"      jsonschema:"Edge types to follow: calls, data_flow, reads, writes, imports, etc. Default ['calls']."`
 	WithExplanation bool     `json:"with_explanation,omitempty" jsonschema:"Include LLM explanation (adds 5-15s). Default false."`
+	WithContext     bool     `json:"with_context,omitempty"     jsonschema:"Include a 3-line source excerpt and call expression for each hop. Default false."`
 }
 
 func addCommit0Trace(server *mcpsdk.Server, deps Deps, log *slog.Logger) {
@@ -71,12 +72,13 @@ func addCommit0Trace(server *mcpsdk.Server, deps Deps, log *slog.Logger) {
 		}
 
 		tr, err := traceSvc.Trace(ctx, app.TraceRequest{
-			Symbol:     input.Symbol,
-			RepoSlug:   input.RepoSlug,
-			Direction:  direction,
-			Depth:      depth,
-			EdgeLabels: input.EdgeLabels,
-			NoExplain:  !input.WithExplanation,
+			Symbol:         input.Symbol,
+			RepoSlug:       input.RepoSlug,
+			Direction:      direction,
+			Depth:          depth,
+			EdgeLabels:     input.EdgeLabels,
+			NoExplain:      !input.WithExplanation,
+			IncludeContext: input.WithContext,
 		})
 		if err != nil {
 			log.Warn("commit0_trace failed", "symbol", input.Symbol, "err", err)
@@ -104,6 +106,7 @@ type blastInput struct {
 	MaxDepth        int      `json:"max_depth,omitempty"        jsonschema:"Max upstream depth (1-10). Default 5."`
 	EdgeLabels      []string `json:"edge_labels,omitempty"      jsonschema:"Edge types to follow upstream: calls (default), reads, data_flow, etc."`
 	WithExplanation bool     `json:"with_explanation,omitempty" jsonschema:"Include LLM-generated migration steps and risk assessment. Default false."`
+	WithContext     bool     `json:"with_context,omitempty"     jsonschema:"Include a 3-line source excerpt and call expression for each affected node. Default false."`
 }
 
 func addCommit0Blast(server *mcpsdk.Server, deps Deps, log *slog.Logger) {
@@ -132,11 +135,12 @@ func addCommit0Blast(server *mcpsdk.Server, deps Deps, log *slog.Logger) {
 		}
 
 		br, err := blastSvc.Blast(ctx, app.BlastRequest{
-			Symbol:     input.Symbol,
-			RepoSlug:   input.RepoSlug,
-			MaxDepth:   maxDepth,
-			EdgeLabels: input.EdgeLabels,
-			NoExplain:  !input.WithExplanation,
+			Symbol:         input.Symbol,
+			RepoSlug:       input.RepoSlug,
+			MaxDepth:       maxDepth,
+			EdgeLabels:     input.EdgeLabels,
+			NoExplain:      !input.WithExplanation,
+			IncludeContext: input.WithContext,
 		})
 		if err != nil {
 			log.Warn("commit0_blast failed", "symbol", input.Symbol, "err", err)

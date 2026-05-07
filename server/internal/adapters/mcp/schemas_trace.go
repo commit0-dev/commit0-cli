@@ -18,14 +18,16 @@ import (
 // so the wire format stays JSON-friendly without nested arrays. Clients that
 // want the tree shape can rebuild it from ParentIndex (-1 = root child).
 type TraceHopOut struct {
-	Qualified   string `json:"qualified"`
-	Kind        string `json:"kind"`
-	FilePath    string `json:"file_path"`
-	StartLine   int    `json:"start_line,omitempty"`
-	EndLine     int    `json:"end_line,omitempty"`
-	Depth       int    `json:"depth"`
-	EdgeKind    string `json:"edge_kind,omitempty"`
-	ParentIndex int    `json:"parent_index"` // -1 for top-level hops
+	Qualified       string `json:"qualified"`
+	Kind            string `json:"kind"`
+	FilePath        string `json:"file_path"`
+	StartLine       int    `json:"start_line,omitempty"`
+	EndLine         int    `json:"end_line,omitempty"`
+	Depth           int    `json:"depth"`
+	EdgeKind        string `json:"edge_kind,omitempty"`
+	ParentIndex     int    `json:"parent_index"` // -1 for top-level hops
+	CallSiteExcerpt string `json:"call_site_excerpt,omitempty"`
+	CallExpression  string `json:"call_expression,omitempty"`
 }
 
 // TraceToolResult is the structured output of commit0_trace.
@@ -58,14 +60,16 @@ func flattenTraceHops(tree []types.TraceHop, parentIdx int) []TraceHopOut {
 	var out []TraceHopOut
 	for _, h := range tree {
 		out = append(out, TraceHopOut{
-			Qualified:   h.Node.Qualified,
-			Kind:        string(h.Node.Kind),
-			FilePath:    h.Node.FilePath,
-			StartLine:   h.Node.StartLine,
-			EndLine:     h.Node.EndLine,
-			Depth:       h.Depth,
-			EdgeKind:    string(h.Edge.Kind),
-			ParentIndex: parentIdx,
+			Qualified:       h.Node.Qualified,
+			Kind:            string(h.Node.Kind),
+			FilePath:        h.Node.FilePath,
+			StartLine:       h.Node.StartLine,
+			EndLine:         h.Node.EndLine,
+			Depth:           h.Depth,
+			EdgeKind:        string(h.Edge.Kind),
+			ParentIndex:     parentIdx,
+			CallSiteExcerpt: h.CallSiteExcerpt,
+			CallExpression:  h.CallExpression,
 		})
 		thisIdx := len(out) - 1
 		out = append(out, flattenTraceHops(h.Children, thisIdx)...)
@@ -75,11 +79,14 @@ func flattenTraceHops(tree []types.TraceHop, parentIdx int) []TraceHopOut {
 
 // AffectedNodeOut is a flat representation of a blast-affected node.
 type AffectedNodeOut struct {
-	Qualified string `json:"qualified"`
-	Kind      string `json:"kind"`
-	FilePath  string `json:"file_path"`
-	HopCount  int    `json:"hop_count"`
-	Module    string `json:"module,omitempty"`
+	Qualified       string `json:"qualified"`
+	Kind            string `json:"kind"`
+	FilePath        string `json:"file_path"`
+	HopCount        int    `json:"hop_count"`
+	Module          string `json:"module,omitempty"`
+	CallSiteExcerpt string `json:"call_site_excerpt,omitempty"`
+	CallExpression  string `json:"call_expression,omitempty"`
+	CallLine        int    `json:"call_line,omitempty"`
 }
 
 // BlastToolResult is the structured output of commit0_blast.
@@ -98,11 +105,14 @@ func blastResultOut(br *types.BlastResult) BlastToolResult {
 	affected := make([]AffectedNodeOut, len(br.Affected))
 	for i, a := range br.Affected {
 		affected[i] = AffectedNodeOut{
-			Qualified: a.Node.Qualified,
-			Kind:      string(a.Node.Kind),
-			FilePath:  a.Node.FilePath,
-			HopCount:  a.HopCount,
-			Module:    a.Module,
+			Qualified:       a.Node.Qualified,
+			Kind:            string(a.Node.Kind),
+			FilePath:        a.Node.FilePath,
+			HopCount:        a.HopCount,
+			Module:          a.Module,
+			CallSiteExcerpt: a.CallSiteExcerpt,
+			CallExpression:  a.CallExpression,
+			CallLine:        a.CallLine,
 		}
 	}
 	return BlastToolResult{
@@ -287,7 +297,17 @@ func traceMarkdown(r TraceToolResult) string {
 		if h.StartLine > 0 {
 			fmt.Fprintf(&sb, ":%d", h.StartLine)
 		}
+		if h.CallExpression != "" {
+			fmt.Fprintf(&sb, "  ← `%s`", h.CallExpression)
+		}
 		sb.WriteString("\n")
+		if h.CallSiteExcerpt != "" {
+			fmt.Fprintf(&sb, "%s   ```\n", indent)
+			for _, line := range strings.Split(h.CallSiteExcerpt, "\n") {
+				fmt.Fprintf(&sb, "%s   %s\n", indent, line)
+			}
+			fmt.Fprintf(&sb, "%s   ```\n", indent)
+		}
 	}
 	fmt.Fprintf(&sb, "\n_Timing: search=%dms graph=%dms total=%dms_\n",
 		r.Timing.SearchMS, r.Timing.GraphMS, r.Timing.TotalMS)
@@ -302,7 +322,18 @@ func blastMarkdown(r BlastToolResult) string {
 		fmt.Fprintf(&sb, "%s\n\n", r.Summary)
 	}
 	for i, a := range r.Affected {
-		fmt.Fprintf(&sb, "%d. `%s` (hop %d) — %s\n", i+1, a.Qualified, a.HopCount, a.FilePath)
+		fmt.Fprintf(&sb, "%d. `%s` (hop %d) — %s", i+1, a.Qualified, a.HopCount, a.FilePath)
+		if a.CallExpression != "" {
+			fmt.Fprintf(&sb, "  ← `%s`", a.CallExpression)
+		}
+		sb.WriteString("\n")
+		if a.CallSiteExcerpt != "" {
+			sb.WriteString("   ```\n")
+			for _, line := range strings.Split(a.CallSiteExcerpt, "\n") {
+				fmt.Fprintf(&sb, "   %s\n", line)
+			}
+			sb.WriteString("   ```\n")
+		}
 	}
 	fmt.Fprintf(&sb, "\n_Timing: search=%dms graph=%dms total=%dms_\n",
 		r.Timing.SearchMS, r.Timing.GraphMS, r.Timing.TotalMS)

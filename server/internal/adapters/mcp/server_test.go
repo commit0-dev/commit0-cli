@@ -11,6 +11,7 @@ import (
 
 	"github.com/commit0-dev/commit0/pkg/types"
 	mcpadapter "github.com/commit0-dev/commit0/server/internal/adapters/mcp"
+	"github.com/commit0-dev/commit0/server/internal/app"
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
@@ -1054,6 +1055,290 @@ func TestCommit0SimilarTo_NoEmbedding(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// commit0_blast with_context tests
+// ---------------------------------------------------------------------------
+
+// newBlastDeps creates Deps with a real BlastService wired to the given fake graph.
+// Explainer is nil (NoExplain=true by default in tests).
+func newBlastDeps(graph *mcpFakeGraph) mcpadapter.Deps {
+	blastSvc := app.NewBlastService(graph, nil, nil)
+	return mcpadapter.Deps{
+		BlastService: blastSvc,
+		Graph:        graph,
+	}
+}
+
+// newTraceDeps creates Deps with a real TraceService wired to the given fake graph.
+func newTraceDeps(graph *mcpFakeGraph) mcpadapter.Deps {
+	traceSvc := app.NewTraceService(graph, nil, nil, nil)
+	return mcpadapter.Deps{
+		TraceService: traceSvc,
+		Graph:        graph,
+	}
+}
+
+func TestCommit0Blast_WithContextFalse_NoExcerpts(t *testing.T) {
+	target := types.CodeNode{
+		ID:        "function:Target",
+		Qualified: "pkg.Target",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/target.go",
+		RepoSlug:  "test-repo",
+	}
+	caller := types.CodeNode{
+		ID:        "function:Caller",
+		Qualified: "pkg.Caller",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/caller.go",
+		Body:      "func Caller() {\n\tTarget()\n}",
+		RepoSlug:  "test-repo",
+	}
+
+	graph := &mcpFakeGraph{
+		findNode:     &target,
+		traverseHops: []types.TraceHop{{Node: caller, Depth: 1}},
+		nodesByID:    map[string]*types.CodeNode{"function:Caller": &caller, "function:Target": &target},
+		listEdgesResult: []types.CodeEdge{
+			{FromID: caller.ID, ToID: target.ID, Kind: "calls", CallSite: "pkg/caller.go:2"},
+		},
+	}
+
+	sess, cancel := newTestPair(t, newBlastDeps(graph))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_blast",
+		Arguments: map[string]any{
+			"symbol":    "pkg.Target",
+			"repo_slug": "test-repo",
+			// with_context intentionally omitted (default false)
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolResultText(result))
+	}
+
+	got, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+	affected, ok := got["affected"].([]any)
+	if !ok || len(affected) == 0 {
+		t.Fatalf("expected non-empty affected list, got %v", got["affected"])
+	}
+	firstAffected, ok := affected[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map for first affected, got %T", affected[0])
+	}
+	// with_context=false → call_site_excerpt must be absent or empty
+	if excerpt, _ := firstAffected["call_site_excerpt"].(string); excerpt != "" {
+		t.Errorf("with_context=false: expected empty call_site_excerpt, got %q", excerpt)
+	}
+}
+
+func TestCommit0Blast_WithContextTrue_PopulatesExcerpts(t *testing.T) {
+	target := types.CodeNode{
+		ID:        "function:Target",
+		Qualified: "pkg.Target",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/target.go",
+		RepoSlug:  "test-repo",
+	}
+	callerBody := "func Caller() {\n\t// setup\n\tTarget()\n\t// done\n}"
+	caller := types.CodeNode{
+		ID:        "function:Caller",
+		Qualified: "pkg.Caller",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/caller.go",
+		Body:      callerBody,
+		RepoSlug:  "test-repo",
+	}
+
+	graph := &mcpFakeGraph{
+		findNode:     &target,
+		traverseHops: []types.TraceHop{{Node: caller, Depth: 1}},
+		nodesByID:    map[string]*types.CodeNode{"function:Caller": &caller, "function:Target": &target},
+		listEdgesResult: []types.CodeEdge{
+			{FromID: caller.ID, ToID: target.ID, Kind: "calls", CallSite: "pkg/caller.go:3"},
+		},
+	}
+
+	sess, cancel := newTestPair(t, newBlastDeps(graph))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_blast",
+		Arguments: map[string]any{
+			"symbol":       "pkg.Target",
+			"repo_slug":    "test-repo",
+			"with_context": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolResultText(result))
+	}
+
+	got, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+	affected, ok := got["affected"].([]any)
+	if !ok || len(affected) == 0 {
+		t.Fatalf("expected non-empty affected list, got %v", got["affected"])
+	}
+	firstAffected, ok := affected[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map for first affected, got %T", affected[0])
+	}
+
+	excerpt, _ := firstAffected["call_site_excerpt"].(string)
+	if excerpt == "" {
+		t.Error("with_context=true: expected call_site_excerpt to be populated")
+	}
+	callLine, _ := firstAffected["call_line"].(float64) // JSON numbers come back as float64
+	if callLine == 0 {
+		t.Error("with_context=true: expected call_line to be populated")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_trace with_context tests
+// ---------------------------------------------------------------------------
+
+func TestCommit0Trace_WithContextFalse_NoExcerpts(t *testing.T) {
+	root := types.CodeNode{
+		ID:        "function:Root",
+		Qualified: "pkg.Root",
+		Kind:      types.NodeFunction,
+		RepoSlug:  "test-repo",
+	}
+	callee := types.CodeNode{
+		ID:        "function:Callee",
+		Qualified: "pkg.Callee",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/callee.go",
+		RepoSlug:  "test-repo",
+	}
+
+	graph := &mcpFakeGraph{
+		findNode:     &root,
+		traverseHops: []types.TraceHop{{Node: callee, Depth: 1}},
+		nodesByID:    map[string]*types.CodeNode{"function:Callee": &callee},
+		listEdgesResult: []types.CodeEdge{
+			{FromID: callee.ID, ToID: root.ID, Kind: "calls", CallSite: "pkg/callee.go:5"},
+		},
+	}
+
+	sess, cancel := newTestPair(t, newTraceDeps(graph))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_trace",
+		Arguments: map[string]any{
+			"symbol":    "pkg.Root",
+			"repo_slug": "test-repo",
+			// with_context intentionally omitted (default false)
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolResultText(result))
+	}
+
+	got, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+	hops, ok := got["hops"].([]any)
+	if !ok || len(hops) == 0 {
+		t.Fatalf("expected non-empty hops, got %v", got["hops"])
+	}
+	firstHop, ok := hops[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map for first hop, got %T", hops[0])
+	}
+	if excerpt, _ := firstHop["call_site_excerpt"].(string); excerpt != "" {
+		t.Errorf("with_context=false: expected empty call_site_excerpt, got %q", excerpt)
+	}
+}
+
+func TestCommit0Trace_WithContextTrue_PopulatesExcerpts(t *testing.T) {
+	root := types.CodeNode{
+		ID:        "function:Root",
+		Qualified: "pkg.Root",
+		Kind:      types.NodeFunction,
+		RepoSlug:  "test-repo",
+	}
+	calleeBody := "func Callee() {\n\t// step 1\n\tRoot()\n\t// step 2\n}"
+	callee := types.CodeNode{
+		ID:        "function:Callee",
+		Qualified: "pkg.Callee",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/callee.go",
+		Body:      calleeBody,
+		RepoSlug:  "test-repo",
+	}
+
+	graph := &mcpFakeGraph{
+		findNode:     &root,
+		traverseHops: []types.TraceHop{{Node: callee, Depth: 1}},
+		nodesByID:    map[string]*types.CodeNode{"function:Callee": &callee, "function:Root": &root},
+		listEdgesResult: []types.CodeEdge{
+			{FromID: callee.ID, ToID: root.ID, Kind: "calls", CallSite: "pkg/callee.go:3"},
+		},
+	}
+
+	sess, cancel := newTestPair(t, newTraceDeps(graph))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_trace",
+		Arguments: map[string]any{
+			"symbol":       "pkg.Root",
+			"repo_slug":    "test-repo",
+			"with_context": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolResultText(result))
+	}
+
+	got, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+	hops, ok := got["hops"].([]any)
+	if !ok || len(hops) == 0 {
+		t.Fatalf("expected non-empty hops, got %v", got["hops"])
+	}
+	firstHop, ok := hops[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map for first hop, got %T", hops[0])
+	}
+
+	excerpt, _ := firstHop["call_site_excerpt"].(string)
+	if excerpt == "" {
+		t.Error("with_context=true: expected call_site_excerpt to be populated on hop")
+	}
+	// Verify the markdown also contains the excerpt
+	text := toolResultText(result)
+	if !strings.Contains(text, "Root()") && !strings.Contains(text, "```") {
+		t.Errorf("expected call site content in markdown output, got: %s", text)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -1077,6 +1362,7 @@ func toolResultText(r *mcpsdk.CallToolResult) string {
 type mcpFakeGraph struct {
 	findNode         *types.CodeNode
 	findErr          error
+	nodesByID        map[string]*types.CodeNode // for GetNode lookup in with_context tests
 	traverseHops     []types.TraceHop
 	traverseErr      error
 	lastLabels       []string
@@ -1086,10 +1372,16 @@ type mcpFakeGraph struct {
 	nodeEmbeddingErr error
 	vectorResults    []types.ScoredNode
 	vectorErr        error
+	listEdgesResult  []types.CodeEdge
 }
 
 func (g *mcpFakeGraph) PutNode(_ context.Context, _ *types.CodeNode) error { return nil }
-func (g *mcpFakeGraph) GetNode(_ context.Context, _ string) (*types.CodeNode, error) {
+func (g *mcpFakeGraph) GetNode(_ context.Context, id string) (*types.CodeNode, error) {
+	if g.nodesByID != nil {
+		if n, ok := g.nodesByID[id]; ok {
+			return n, nil
+		}
+	}
 	return g.findNode, g.findErr
 }
 func (g *mcpFakeGraph) FindNode(_ context.Context, _, _ string) (*types.CodeNode, error) {
@@ -1125,7 +1417,7 @@ func (g *mcpFakeGraph) ListNodes(_ context.Context, _ string, _ domain.ListOpts)
 	return nil, nil
 }
 func (g *mcpFakeGraph) ListEdges(_ context.Context, _ string, _ []string) ([]types.CodeEdge, error) {
-	return nil, nil
+	return g.listEdgesResult, nil
 }
 func (g *mcpFakeGraph) ListFilePaths(_ context.Context, _ string) ([]string, error) {
 	return nil, nil

@@ -16,11 +16,12 @@ import (
 
 // BlastRequest represents a blast radius analysis request.
 type BlastRequest struct {
-	Symbol     string
-	RepoSlug   string
-	MaxDepth   int
-	NoExplain  bool
-	EdgeLabels []string // which edge types to follow. Empty = ["calls"].
+	Symbol         string
+	RepoSlug       string
+	MaxDepth       int
+	NoExplain      bool
+	EdgeLabels     []string // which edge types to follow. Empty = ["calls"].
+	IncludeContext bool     // when true, populate CallSiteExcerpt/CallExpression/CallLine on each affected node
 }
 
 // BlastService analyzes code change impact.
@@ -102,6 +103,13 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	// Deduplicate and sort
 	affected = deduplicateAffected(affected)
 	sortAffectedByHopCount(affected)
+
+	// Optionally enrich with call-site context (non-fatal).
+	if req.IncludeContext {
+		if enrichErr := EnrichAffectedWithCallSites(ctx, bs.graph, req.RepoSlug, affected); enrichErr != nil {
+			bs.log.Warn("blast call-site enrichment failed", "err", enrichErr)
+		}
+	}
 
 	// Build explanation (non-fatal). Structured first, fallback to streaming.
 	explanation := ""

@@ -14,12 +14,13 @@ import (
 
 // TraceRequest represents a code trace request.
 type TraceRequest struct {
-	Symbol     string
-	RepoSlug   string
-	Direction  string
-	Depth      int
-	NoExplain  bool
-	EdgeLabels []string // which edge types to follow. Empty = ["calls"].
+	Symbol         string
+	RepoSlug       string
+	Direction      string
+	Depth          int
+	NoExplain      bool
+	EdgeLabels     []string // which edge types to follow. Empty = ["calls"].
+	IncludeContext bool     // when true, populate CallSiteExcerpt/CallExpression on each hop
 }
 
 // TraceService traces code flow paths.
@@ -86,6 +87,13 @@ func (ts *TraceService) Trace(ctx context.Context, req TraceRequest) (*types.Tra
 	// Dedup hops by qualified name — graph traversal may return multiple
 	// edge paths to the same node, causing duplicates.
 	hops = dedupHops(hops)
+
+	// Optionally enrich with call-site context (non-fatal).
+	if req.IncludeContext {
+		if enrichErr := EnrichHopsWithCallSites(ctx, ts.graph, req.RepoSlug, hops); enrichErr != nil {
+			ts.log.Warn("trace call-site enrichment failed", "err", enrichErr)
+		}
+	}
 
 	// Build explanation (non-fatal). Structured output first, fallback to streaming.
 	graphStart := time.Now()
