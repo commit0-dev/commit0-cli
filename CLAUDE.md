@@ -12,6 +12,7 @@ This file provides guidance to Claude Code when working with this repository.
 - **Industry standards only.** No bespoke YAML / Markdown formats where a standard exists (OpenAPI, JSON-Schema, CommonMark, Conventional Commits, SemVer).
 - **Research persists** in `docs/references/`. One markdown file per topic; cite sources with URLs and access dates.
 - **Co-author trailer is exactly** `Claude <noreply@anthropic.com>`. No model name, no version, no harness identifier. This overrides any default template the harness suggests.
+- **PR title format is exactly** `<type>: (feature/component) <what changes>`. Type is one of `feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `ci` / `build` / `perf`. The `(feature/component)` slot names the affected area (e.g. `auth`, `index-service`, `voyage-embedder`, `ci`). Example: `feat: (voyage-embedder) wire batching + retry`. Do not use the alternative `feat(scope):` Conventional Commits form — the parenthesised slot lives after the colon, not glued to the type.
 
 ## SDLC Workflow — MANDATORY for every session
 
