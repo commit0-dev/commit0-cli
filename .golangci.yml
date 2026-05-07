@@ -9,6 +9,8 @@ linters:
   enable:
     # ── Correctness ──────────────────────────────────────────────────────────
     - govet          # mirrors `go vet` in CI
+    - staticcheck    # mirrors dominikh/staticcheck-action in CI
+    - errcheck       # unchecked errors
     - ineffassign    # assigned but never used
     - unused         # exported symbols with no callers (staticcheck SA1xxx)
 
@@ -18,6 +20,7 @@ linters:
     # ── Bugs ──────────────────────────────────────────────────────────────────
     - bodyclose      # HTTP response body not closed
     - nilerr         # returning nil instead of err
+    - godot          # comment sentences end with a period (optional style)
 
   settings:
     govet:
@@ -27,8 +30,81 @@ linters:
         - fieldalignment # layout optimisation is a micro-opt; server structs are
                          # ordered for readability and grouped by semantic domain
 
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000"   # package-level comment — noisy for internal packages
+        - "-ST1003"   # naming convention — allow existing names
+        - "-ST1021"   # comment-form — allow contextual comments above type aliases
+        # The QF (quick-fix) prefix is v2-new — pure stylistic suggestions, not
+        # correctness checks. Disable as a class; re-enable individual ones if
+        # we ever decide the rewrite is worth it.
+        - "-QF1001"   # could apply De Morgan's law
+        - "-QF1002"   # could use tagged switch
+        - "-QF1008"   # collapse embedded selector
+        - "-QF1012"   # use fmt.Fprintf instead of WriteString(fmt.Sprintf(...))
+        - "-S1008"    # simplify if/return — explicit branches are clearer here
+
     misspell:
       locale: US
+
+    errcheck:
+      # Standard close/format calls don't need explicit error handling — they
+      # either can't fail in practice or the failure is non-recoverable. v1
+      # errcheck excluded these by default; v2 makes you opt in.
+      exclude-functions:
+        - (io.Closer).Close
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (*net.UDPConn).Close
+        - (*net.TCPListener).Close
+        - (*net.PacketConn).Close
+        - (*os.File).Close
+        - (*github.com/quic-go/quic-go.Conn).CloseWithError
+        - (*github.com/quic-go/quic-go.Stream).Close
+        - (*github.com/hashicorp/mdns.Server).Shutdown
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+
+  exclusions:
+    rules:
+      # Test files are allowed to ignore some errcheck cases — they're scratch
+      # space and a missed Close() in a test doesn't ship to production.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - godot   # test-file comments often divide sections and don't need periods
+
+      # Network/transport adapters use deferred or fire-and-forget Close()
+      # on third-party concrete types (quic-go, hashicorp/mdns) whose
+      # Close() returns are non-recoverable; matching them by function
+      # signature in errcheck.exclude-functions doesn't catch all the
+      # method-receiver variants reliably.
+      - path: internal/adapters/(mdns|quic)/
+        linters:
+          - errcheck
+
+      # staticcheck QF/S/ST nags surface in older test fixtures with
+      # explicit-but-redundant nil checks; not worth churning the tests.
+      - path: server/internal/(app|adapters)/.+_test\.go
+        text: "(S1009|ST1020)"
+
+      # QF1001 (De Morgan's law) is suggestion-only and the existing form
+      # reads more naturally with the gomod-special-case comment nearby.
+      - path: server/internal/adapters/walker/fs_walker.go
+        text: "QF1001"
+
+      # ST1020 hits a single comment that documents a related method,
+      # not the function's own behaviour. Preserve the cross-reference.
+      - path: server/internal/adapters/surreal/graph_store.go
+        text: "ST1020"
+
+formatters:
+  enable:
+    - gofmt          # formatting (fails if gofmt would change a file)
+    - goimports      # import ordering
 
 issues:
   # Show all issues, not just the first 3 per linter.
