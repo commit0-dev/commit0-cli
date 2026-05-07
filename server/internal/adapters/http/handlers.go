@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -475,6 +476,93 @@ func (s *Server) handleGetNeighborhood(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, neighborhood)
+}
+
+// ---- Static graph (HUD canvas seed) ---------------------------------------
+
+const (
+	graphLimitDefault = 2000
+	graphLimitMax     = 5000
+)
+
+// handleGraph handles GET /api/v1/graph?repo=<slug>&limit=N.
+//
+// Returns the persisted nodes + edges of a repo as the lightweight
+// GraphNodeDelta / GraphEdgeDelta wire shape used by the streaming
+// graph_delta event (see PR #47). The HUD canvas calls this once at mount
+// to seed itself; the SSE stream then layers live deltas on top.
+//
+// limit defaults to 2000 and is capped at 5000 to bound the response. The
+// flag intentionally lives on the query string rather than as a path
+// parameter so we don't collide with the existing /api/v1/repos/*slug
+// wildcard route.
+func (s *Server) handleGraph(c *gin.Context) {
+	slug := strings.TrimSpace(c.Query("repo"))
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "repo query parameter is required"})
+		return
+	}
+
+	limit := graphLimitDefault
+	if l := strings.TrimSpace(c.Query("limit")); l != "" {
+		parsed, err := strconv.Atoi(l)
+		if err != nil || parsed <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "limit must be a positive integer"})
+			return
+		}
+		limit = parsed
+	}
+	if limit > graphLimitMax {
+		limit = graphLimitMax
+	}
+
+	ctx := c.Request.Context()
+
+	nodes, err := s.graph.ListNodes(ctx, slug, domain.ListOpts{Limit: limit})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	// ListEdges takes a label filter slice; nil = all kinds.
+	edges, err := s.graph.ListEdges(ctx, slug, nil)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	// Project to the trimmed wire DTOs (matching IndexEvent.graph_delta).
+	// Heavy fields (Body, Embedding, Concepts) are deliberately dropped:
+	// the HUD shows structure, not bodies. Frontend can re-fetch full
+	// CodeNode bodies via GET /api/v1/nodes/lookup when a user drills in.
+	nodeDeltas := make([]types.GraphNodeDelta, 0, len(nodes))
+	for _, n := range nodes {
+		nodeDeltas = append(nodeDeltas, types.GraphNodeDelta{
+			ID:        n.ID,
+			Qualified: n.Qualified,
+			Name:      n.Name,
+			Kind:      n.Kind,
+			FilePath:  n.FilePath,
+			Language:  n.Language,
+			RepoSlug:  n.RepoSlug,
+			StartLine: n.StartLine,
+			EndLine:   n.EndLine,
+			Signature: n.Signature,
+		})
+	}
+	edgeDeltas := make([]types.GraphEdgeDelta, 0, len(edges))
+	for _, e := range edges {
+		edgeDeltas = append(edgeDeltas, types.GraphEdgeDelta{
+			FromID:   e.FromID,
+			ToID:     e.ToID,
+			Kind:     e.Kind,
+			CallSite: e.CallSite,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"nodes": nodeDeltas,
+		"edges": edgeDeltas,
+	})
 }
 
 // ---- SSE helpers ----------------------------------------------------------

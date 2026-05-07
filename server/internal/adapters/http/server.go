@@ -111,6 +111,9 @@ func (s *Server) registerRoutes() {
 	v1.GET("/index/:job_id", s.handleIndexStatus)
 	v1.GET("/index/:job_id/stream", s.handleIndexStream)
 
+	// Static graph (HUD canvas seed)
+	v1.GET("/graph", s.handleGraph)
+
 	// Analysis
 	v1.POST("/query", s.handleQuery)
 	v1.POST("/query/stream", s.handleQueryStream)
