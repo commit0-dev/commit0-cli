@@ -133,13 +133,13 @@ jobs:
           cache: true
 
       - name: Validate .goreleaser.yaml
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: check
 
       - name: Snapshot build (all platforms)
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: build --snapshot --clean
