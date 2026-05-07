@@ -42,12 +42,11 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
           cache: false
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.64.8
-          install-mode: goinstall
+          version: v2.12.2
           working-directory: ${{ matrix.module }}
-          args: --timeout=5m
+          args: -c ${{ github.workspace }}/.golangci.yml --timeout=5m
 
   # ── Unit tests + coverage publishing ──────────────────────────────────────
   test:

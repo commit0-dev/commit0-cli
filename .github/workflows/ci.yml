@@ -41,12 +41,13 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
           cache: false   # golangci-lint-action manages its own cache
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.64.8
-          install-mode: goinstall
+          version: v2.12.2
           working-directory: ${{ matrix.module }}
-          args: --timeout=5m
+          # Absolute path so it works for both `server` (1 level deep) and
+          # `pkg/types` (2 levels deep) under the same matrix.
+          args: -c ${{ github.workspace }}/.golangci.yml --timeout=5m
 
   # ── Unit tests + coverage ─────────────────────────────────────────────────
   # Tests run inside the server/ module — that's where internal/app and the
