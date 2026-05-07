@@ -228,6 +228,249 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 	}, nil
 }
 
+// QueryStream executes a semantic code search and emits staged events via the provided channel.
+// The channel is expected to be buffered (256+ recommended) and consumed by the caller.
+// QueryStream closes the channel when done or on fatal error.
+func (qs *QueryService) QueryStream(ctx context.Context, req QueryRequest, events chan<- types.QueryEvent) error {
+	startTime := time.Now()
+	defer close(events)
+
+	if req.Question == "" {
+		emitError(events, "validation", "question cannot be empty")
+		return domain.Validation("question cannot be empty")
+	}
+
+	if req.TopK <= 0 {
+		req.TopK = qs.cfg.Query.DefaultTopK
+	}
+	if req.MinScore == 0 {
+		req.MinScore = qs.cfg.Query.MinScore
+	}
+
+	if len(req.NodeKinds) == 0 {
+		req.NodeKinds = []types.NodeKind{types.NodeFunction, types.NodeClass, types.NodeFile}
+	}
+
+	embedStart := time.Now()
+	queryVec, err := qs.embedder.EmbedQuery(ctx, req.Question)
+	if err != nil {
+		emitError(events, "embedding", fmt.Sprintf("embed query: %v", err))
+		return err
+	}
+	embedMS := time.Since(embedStart).Milliseconds()
+	embedDims := len(queryVec)
+
+	emitEvent(events, types.QueryEvent{
+		Type:      types.QueryEventEmbeddingDone,
+		Dims:      embedDims,
+		MS:        embedMS,
+		EmittedAt: time.Now(),
+	})
+
+	searchStart := time.Now()
+	var vectorHits, ftsHits []types.ScoredNode
+
+	g, gCtx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		hits, err := qs.graph.VectorSearch(gCtx, queryVec, domain.VectorSearchOpts{
+			RepoSlug:  req.RepoSlug,
+			TopK:      req.TopK * 2,
+			MinScore:  req.MinScore,
+			NodeKinds: req.NodeKinds,
+		})
+		if err != nil {
+			return fmt.Errorf("vector search: %w", err)
+		}
+		vectorHits = hits
+		for _, hit := range hits {
+			emitEvent(events, types.QueryEvent{
+				Type:      types.QueryEventVectorHit,
+				Hit:       &hit,
+				EmittedAt: time.Now(),
+			})
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		hits, err := qs.graph.TextSearch(gCtx, req.Question, domain.TextSearchOpts{
+			RepoSlug:  req.RepoSlug,
+			TopK:      req.TopK * 2,
+			NodeKinds: req.NodeKinds,
+		})
+		if err != nil {
+			return fmt.Errorf("fts search: %w", err)
+		}
+		ftsHits = hits
+		for _, hit := range hits {
+			emitEvent(events, types.QueryEvent{
+				Type:      types.QueryEventFTSHit,
+				Hit:       &hit,
+				EmittedAt: time.Now(),
+			})
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		emitError(events, "search", err.Error())
+		return err
+	}
+	searchMS := time.Since(searchStart).Milliseconds()
+
+	fused := ReciprocalRankFusion(vectorHits, ftsHits, DefaultRRFWeights())
+
+	emitEvent(events, types.QueryEvent{
+		Type:         types.QueryEventFused,
+		TopKAfterRRF: fused,
+		EmittedAt:    time.Now(),
+	})
+
+	expanded := qs.expandWithGraph(ctx, fused, req.RepoSlug, req.TopK)
+
+	newNeighbors := expanded
+	if len(expanded) > len(fused) {
+		newNeighbors = expanded[len(fused):]
+	}
+	emitEvent(events, types.QueryEvent{
+		Type:       types.QueryEventExpanded,
+		Neighbours: newNeighbors,
+		EmittedAt:  time.Now(),
+	})
+
+	reranked := qs.conceptRerank(expanded, req.Question)
+
+	emitEvent(events, types.QueryEvent{
+		Type:       types.QueryEventReranked,
+		FinalOrder: reranked,
+		EmittedAt:  time.Now(),
+	})
+
+	if req.FilePath != "" {
+		filtered := reranked[:0]
+		for _, n := range reranked {
+			if strings.HasPrefix(n.Node.FilePath, req.FilePath) {
+				filtered = append(filtered, n)
+			}
+		}
+		reranked = filtered
+	}
+
+	if len(reranked) > req.TopK {
+		reranked = reranked[:req.TopK]
+	}
+
+	excerpts := make([]domain.CodeExcerpt, 0, len(reranked))
+	for _, scored := range reranked {
+		excerpts = append(excerpts, domain.CodeExcerpt{
+			Qualified: scored.Node.Qualified,
+			FilePath:  scored.Node.FilePath,
+			Snippet:   scored.Node.Body,
+			Score:     scored.FusedScore,
+		})
+	}
+
+	graphContext := ""
+	if qs.flowSvc != nil {
+		graphContext = qs.flowSvc.BuildFlowContext(ctx, reranked)
+	}
+
+	explanation := ""
+	var structuredExplan *types.SearchExplanation
+	explainStart := time.Now()
+
+	if qs.explainer != nil && !req.NoExplain {
+		explainReq := domain.ExplainRequest{
+			QueryType:      "search",
+			UserQuery:      req.Question,
+			GraphContext:   graphContext,
+			CodeContext:    excerpts,
+			ResponseSchema: domain.SchemaForQueryType("search"),
+		}
+
+		raw, err := qs.explainer.ExplainStructured(ctx, explainReq)
+		if err == nil {
+			var se types.SearchExplanation
+			if json.Unmarshal(raw, &se) == nil {
+				structuredExplan = &se
+				explanation = se.Overview
+			}
+		}
+
+		if structuredExplan == nil {
+			chunks, err := qs.explainer.Explain(ctx, explainReq)
+			if err != nil {
+				qs.log.Warn("explain failed", "err", err)
+			} else if chunks != nil {
+				var buf []byte
+				for chunk := range chunks {
+					if chunk.Error != nil {
+						qs.log.Warn("explain chunk error", "err", chunk.Error)
+						break
+					}
+					if chunk.Text != "" {
+						emitEvent(events, types.QueryEvent{
+							Type:      types.QueryEventExplanationToken,
+							Delta:     chunk.Text,
+							EmittedAt: time.Now(),
+						})
+					}
+					buf = append(buf, []byte(chunk.Text)...)
+					if chunk.Done {
+						break
+					}
+				}
+				explanation = string(buf)
+			}
+		}
+	}
+	explainMS := time.Since(explainStart).Milliseconds()
+
+	result := &types.QueryResult{
+		Nodes:                 reranked,
+		Explanation:           explanation,
+		StructuredExplanation: structuredExplan,
+		Query:                 req.Question,
+		RepoSlug:              req.RepoSlug,
+		Timing: types.TimingInfo{
+			EmbedMS:   embedMS,
+			SearchMS:  searchMS,
+			ExplainMS: explainMS,
+			TotalMS:   time.Since(startTime).Milliseconds(),
+		},
+	}
+
+	emitEvent(events, types.QueryEvent{
+		Type:      types.QueryEventDone,
+		Done:      result,
+		EmittedAt: time.Now(),
+	})
+
+	return nil
+}
+
+// emitEvent sends an event to the channel non-blocking.
+func emitEvent(ch chan<- types.QueryEvent, evt types.QueryEvent) {
+	select {
+	case ch <- evt:
+	default:
+	}
+}
+
+// emitError sends an error event.
+func emitError(ch chan<- types.QueryEvent, stage, message string) {
+	select {
+	case ch <- types.QueryEvent{
+		Type:      types.QueryEventError,
+		Stage:     stage,
+		Message:   message,
+		EmittedAt: time.Now(),
+	}:
+	default:
+	}
+}
+
 // expandWithGraph pulls 1-hop callers + callees of top results into the
 // candidate pool, deduplicating by node ID. This ensures that when we find
 // "MemoryStore.Save", we also surface "MemoryStore.Load" and "MemoryStore.Clear".

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -160,6 +161,60 @@ func (s *Server) handleQuery(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// handleQueryStream handles POST /api/v1/query/stream with SSE streaming.
+func (s *Server) handleQueryStream(c *gin.Context) {
+	var req queryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request body"})
+		return
+	}
+	if req.Question == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "question is required"})
+		return
+	}
+
+	var nodeKinds []types.NodeKind
+	for _, k := range req.NodeKinds {
+		nodeKinds = append(nodeKinds, types.NodeKind(k))
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	if ctrl := http.NewResponseController(c.Writer); ctrl != nil {
+		_ = ctrl.SetWriteDeadline(time.Time{})
+	}
+
+	events := make(chan types.QueryEvent, 256)
+
+	go func() {
+		_ = s.querySvc.QueryStream(c.Request.Context(), app.QueryRequest{
+			Question:  req.Question,
+			RepoSlug:  req.RepoSlug,
+			TopK:      req.TopK,
+			MinScore:  req.MinScore,
+			NoExplain: req.NoExplain,
+			NodeKinds: nodeKinds,
+			FilePath:  req.FilePath,
+		}, events)
+	}()
+
+	ctx := c.Request.Context()
+	for {
+		select {
+		case evt, open := <-events:
+			if !open {
+				return
+			}
+			writeSSE(c, string(evt.Type), evt)
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // ---- Trace (SSE) ----------------------------------------------------------

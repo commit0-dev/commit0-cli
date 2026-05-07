@@ -112,6 +112,7 @@ func (s *Server) registerRoutes() {
 
 	// Analysis
 	v1.POST("/query", s.handleQuery)
+	v1.POST("/query/stream", s.handleQueryStream)
 	v1.POST("/trace", s.handleTrace)
 	v1.POST("/trace/json", s.handleTraceJSON)
 	v1.POST("/blast", s.handleBlast)
