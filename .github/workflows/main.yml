@@ -44,8 +44,8 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.11.0
-          install-mode: goinstall
+          version: v2.12.2
+          install-mode: binary
           working-directory: ${{ matrix.module }}
           args: -c ../.golangci.yml --timeout=5m
 
