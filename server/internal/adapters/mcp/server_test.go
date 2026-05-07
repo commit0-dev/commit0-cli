@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -47,7 +48,7 @@ func newTestPair(t *testing.T, deps mcpadapter.Deps) (session *mcpsdk.ClientSess
 // Lifecycle + capability tests
 // ---------------------------------------------------------------------------
 
-func TestToolsList_ReturnsFourTools(t *testing.T) {
+func TestToolsList_ReturnsAllTools(t *testing.T) {
 	sess, cancel := newTestPair(t, mcpadapter.Deps{})
 	defer cancel()
 
@@ -56,8 +57,9 @@ func TestToolsList_ReturnsFourTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	if len(result.Tools) != 4 {
-		t.Errorf("expected 4 tools, got %d", len(result.Tools))
+	const wantCount = 8 // 4 search + 4 trace/analysis
+	if len(result.Tools) != wantCount {
+		t.Errorf("expected %d tools, got %d", wantCount, len(result.Tools))
 		for _, tool := range result.Tools {
 			t.Logf("  tool: %s", tool.Name)
 		}
@@ -93,10 +95,14 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 	}
 
 	want := []string{
+		"commit0_blast",
+		"commit0_field_flow",
+		"commit0_find_root_cause",
 		"commit0_lookup",
 		"commit0_neighborhood",
 		"commit0_query",
 		"commit0_show_node",
+		"commit0_trace",
 	}
 
 	got := make([]string, len(result.Tools))
@@ -297,6 +303,204 @@ func TestShowNode_DBUnavailable_ReturnsToolError(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Errorf("expected isError=true when DB is unavailable")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_trace tests
+// ---------------------------------------------------------------------------
+
+func TestTrace_MissingSymbol_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_trace",
+		Arguments: map[string]any{
+			"repo_slug": "commit0-dev/commit0",
+		},
+	})
+	if err != nil {
+		return // protocol-level validation is fine
+	}
+	if result == nil {
+		t.Fatal("got nil result for missing symbol")
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true for missing symbol")
+	}
+}
+
+func TestTrace_DBUnavailable_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_trace",
+		Arguments: map[string]any{
+			"symbol":    "app.IndexService.Index",
+			"repo_slug": "commit0-dev/commit0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true when TraceService is nil")
+	}
+	if !strings.Contains(toolResultText(result), "SurrealDB") {
+		t.Errorf("expected error text to mention SurrealDB, got: %s", toolResultText(result))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_blast tests
+// ---------------------------------------------------------------------------
+
+func TestBlast_MissingSymbol_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_blast",
+		Arguments: map[string]any{
+			"repo_slug": "commit0-dev/commit0",
+		},
+	})
+	if err != nil {
+		return
+	}
+	if result == nil {
+		t.Fatal("got nil result for missing symbol")
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true for missing symbol")
+	}
+}
+
+func TestBlast_DBUnavailable_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_blast",
+		Arguments: map[string]any{
+			"symbol":    "app.QueryService.Query",
+			"repo_slug": "commit0-dev/commit0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true when BlastService is nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_field_flow tests
+// ---------------------------------------------------------------------------
+
+func TestFieldFlow_MissingSymbol_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_field_flow",
+		Arguments: map[string]any{
+			"repo_slug": "commit0-dev/commit0",
+		},
+	})
+	if err != nil {
+		return
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true for missing symbol")
+	}
+}
+
+func TestFieldFlow_DBUnavailable_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_field_flow",
+		Arguments: map[string]any{
+			"symbol":    "http.NewLoginHandler",
+			"repo_slug": "commit0-dev/commit0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true when FieldFlowService is nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_find_root_cause tests
+// ---------------------------------------------------------------------------
+
+func TestFindRootCause_MissingDescription_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_find_root_cause",
+		Arguments: map[string]any{
+			"repo_slug": "commit0-dev/commit0",
+			"repo_path": "/tmp/repo",
+		},
+	})
+	if err != nil {
+		return
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true for missing description")
+	}
+}
+
+func TestFindRootCause_MissingRepoPath_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_find_root_cause",
+		Arguments: map[string]any{
+			"description": "queries return wrong embedding dimension",
+			"repo_slug":   "commit0-dev/commit0",
+			// repo_path intentionally missing
+		},
+	})
+	if err != nil {
+		return
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true for missing repo_path")
+	}
+	if !strings.Contains(toolResultText(result), "repo_path") {
+		t.Errorf("expected error text to mention repo_path, got: %s", toolResultText(result))
+	}
+}
+
+func TestFindRootCause_DBUnavailable_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_find_root_cause",
+		Arguments: map[string]any{
+			"description": "queries return wrong embedding dimension",
+			"repo_slug":   "commit0-dev/commit0",
+			"repo_path":   "/tmp/repo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true when RootCauseService is nil")
 	}
 }
 

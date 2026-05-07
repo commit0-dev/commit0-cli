@@ -23,8 +23,12 @@ const (
 // Callers set these fields after successfully wiring adapters; the server
 // falls back to dbUnavailableError() on first use if they remain nil.
 type Deps struct {
-	QueryService *app.QueryService
-	Graph        domain.OpenCodeGraph
+	QueryService     *app.QueryService
+	TraceService     *app.TraceService
+	BlastService     *app.BlastService
+	FieldFlowService *app.FieldFlowService
+	RootCauseService *app.RootCauseAnalysisService
+	Graph            domain.OpenCodeGraph
 	// DBAddr is shown in the unavailability error message when Graph is nil.
 	DBAddr string
 }
@@ -41,13 +45,17 @@ func New(deps Deps) *mcpsdk.Server {
 		},
 		&mcpsdk.ServerOptions{
 			Instructions: "commit0 provides graph-based code intelligence. " +
-				"Use commit0_query to search semantically, commit0_lookup to resolve a symbol, " +
-				"commit0_neighborhood to explore immediate graph context, and " +
-				"commit0_show_node to retrieve full source of a node.",
+				"Search: commit0_query (semantic), commit0_lookup (qualified name), " +
+				"commit0_neighborhood (one hop), commit0_show_node (full body). " +
+				"Trace: commit0_trace (call chain forward/reverse), commit0_blast " +
+				"(transitive impact of a change), commit0_field_flow (field-level " +
+				"data flow + mutations), commit0_find_root_cause (commit-zero " +
+				"detection from a bug description).",
 		},
 	)
 
 	registerSearchTools(server, deps, log)
+	registerTraceTools(server, deps, log)
 
 	return server
 }
@@ -83,6 +91,54 @@ func queryServiceFromDeps(deps Deps) (*app.QueryService, *mcpsdk.CallToolResult)
 		return nil, dbUnavailableError(addr)
 	}
 	return deps.QueryService, nil
+}
+
+// traceServiceFromDeps returns the TraceService or a nil guard with an error.
+func traceServiceFromDeps(deps Deps) (*app.TraceService, *mcpsdk.CallToolResult) {
+	if deps.TraceService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.TraceService, nil
+}
+
+// blastServiceFromDeps returns the BlastService or a nil guard with an error.
+func blastServiceFromDeps(deps Deps) (*app.BlastService, *mcpsdk.CallToolResult) {
+	if deps.BlastService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.BlastService, nil
+}
+
+// fieldFlowServiceFromDeps returns the FieldFlowService or a nil guard with an error.
+func fieldFlowServiceFromDeps(deps Deps) (*app.FieldFlowService, *mcpsdk.CallToolResult) {
+	if deps.FieldFlowService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.FieldFlowService, nil
+}
+
+// rootCauseServiceFromDeps returns the RootCauseAnalysisService or a nil guard with an error.
+func rootCauseServiceFromDeps(deps Deps) (*app.RootCauseAnalysisService, *mcpsdk.CallToolResult) {
+	if deps.RootCauseService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.RootCauseService, nil
 }
 
 // RunStdio starts the MCP server on stdio transport, blocking until the client
