@@ -47,7 +47,7 @@ jobs:
           version: v2.11.0
           install-mode: goinstall
           working-directory: ${{ matrix.module }}
-          args: --timeout=5m
+          args: -c ../.golangci.yml --timeout=5m
 
   # ── Unit tests + coverage publishing ──────────────────────────────────────
   test:
