@@ -61,7 +61,7 @@ func TestToolsList_ReturnsAllTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	const wantCount = 11 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects
+	const wantCount = 12 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff
 	if len(result.Tools) != wantCount {
 		t.Errorf("expected %d tools, got %d", wantCount, len(result.Tools))
 		for _, tool := range result.Tools {
@@ -100,6 +100,7 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 
 	want := []string{
 		"commit0_blast",
+		"commit0_diff_impact",
 		"commit0_field_flow",
 		"commit0_find_root_cause",
 		"commit0_lookup",
@@ -1356,6 +1357,162 @@ func toolResultText(r *mcpsdk.CallToolResult) string {
 	return out
 }
 
+// ---------------------------------------------------------------------------
+// commit0_diff_impact tests
+// ---------------------------------------------------------------------------
+
+func TestDiffImpact_MissingRepoSlug_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_diff_impact",
+		Arguments: map[string]any{
+			"repo_path": "/tmp/repo",
+			// repo_slug intentionally omitted
+		},
+	})
+	if err != nil {
+		// Protocol-level validation is acceptable.
+		return
+	}
+	if result == nil {
+		t.Fatal("got nil result")
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true for missing repo_slug, got: %v", result.Content)
+	}
+}
+
+func TestDiffImpact_DBUnavailable_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_diff_impact",
+		Arguments: map[string]any{
+			"repo_slug": "org/repo",
+			"repo_path": "/tmp/repo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true when DiffImpactService is nil")
+	}
+	if !strings.Contains(toolResultText(result), "SurrealDB") {
+		t.Errorf("expected error to mention SurrealDB, got: %s", toolResultText(result))
+	}
+}
+
+// newDiffImpactDeps creates Deps with a real DiffImpactService wired to the given fake graph.
+func newDiffImpactDeps(graph *mcpFakeGraph) mcpadapter.Deps {
+	blastSvc := app.NewBlastService(graph, nil, nil)
+	gitWalker := &mcpFakeGitWalker{}
+	diffImpactSvc := app.NewDiffImpactService(graph, blastSvc, gitWalker, nil, nil)
+	return mcpadapter.Deps{
+		DiffImpactService: diffImpactSvc,
+		Graph:             graph,
+	}
+}
+
+// mcpFakeGitWalker is a minimal fake GitWalker for MCP-layer diff-impact tests.
+type mcpFakeGitWalker struct {
+	diffs []domain.GitFileDiff
+	err   error
+}
+
+func (f *mcpFakeGitWalker) ListCommits(_ context.Context, _ string, _, _ string) ([]domain.GitCommit, error) {
+	return nil, nil
+}
+func (f *mcpFakeGitWalker) DiffCommit(_ context.Context, _, _ string) ([]domain.GitFileDiff, error) {
+	return nil, nil
+}
+func (f *mcpFakeGitWalker) ReadFileAtCommit(_ context.Context, _, _, _ string) ([]byte, error) {
+	return nil, nil
+}
+func (f *mcpFakeGitWalker) CommitInfo(_ context.Context, _, _ string) (*domain.GitCommit, error) {
+	return nil, nil
+}
+func (f *mcpFakeGitWalker) DiffWorkingTree(_ context.Context, _ string) ([]domain.GitFileDiff, error) {
+	return f.diffs, f.err
+}
+func (f *mcpFakeGitWalker) DiffRange(_ context.Context, _, _, _ string) ([]domain.GitFileDiff, error) {
+	return f.diffs, f.err
+}
+
+var _ domain.GitWalker = (*mcpFakeGitWalker)(nil)
+
+func TestDiffImpact_HappyPath_ReturnsAffected(t *testing.T) {
+	changedNode := types.CodeNode{
+		ID:        "function:pkg.Foo",
+		Qualified: "pkg.Foo",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/foo.go",
+		RepoSlug:  "org/repo",
+		StartLine: 1,
+		EndLine:   10,
+	}
+	callerNode := types.CodeNode{
+		ID:        "function:pkg.Bar",
+		Qualified: "pkg.Bar",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/bar.go",
+		RepoSlug:  "org/repo",
+		StartLine: 5,
+		EndLine:   20,
+	}
+
+	patch := "@@ -1,3 +1,4 @@ package pkg\n"
+	graph := &mcpFakeGraph{
+		listNodesResult: []types.CodeNode{changedNode},
+		findNode:        &changedNode,
+		traverseHops:    []types.TraceHop{{Node: callerNode, Depth: 1}},
+	}
+	deps := newDiffImpactDeps(graph)
+	// Override the gitwalker with one that returns a diff.
+	blastSvc := app.NewBlastService(graph, nil, nil)
+	gitWalker := &mcpFakeGitWalker{
+		diffs: []domain.GitFileDiff{
+			{Path: "pkg/foo.go", Status: "modified", Patch: patch},
+		},
+	}
+	deps.DiffImpactService = app.NewDiffImpactService(graph, blastSvc, gitWalker, nil, nil)
+
+	sess, cancel := newTestPair(t, deps)
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_diff_impact",
+		Arguments: map[string]any{
+			"repo_slug": "org/repo",
+			"repo_path": "/tmp/repo",
+			"to_ref":    "WORKING",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolResultText(result))
+	}
+
+	structured, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		// StructuredContent may be the typed struct; check text content.
+		text := toolResultText(result)
+		if !strings.Contains(text, "changed") {
+			t.Errorf("expected result text to mention 'changed', got: %s", text)
+		}
+		return
+	}
+	// If we have structured content, verify basic fields.
+	if structured["changed_symbols"] == nil {
+		t.Errorf("expected changed_symbols in structured content")
+	}
+}
+
 // mcpFakeGraph is a minimal fake satisfying domain.OpenCodeGraph for the tests
 // in this package that need a non-nil Graph without booting SurrealDB. Methods
 // untouched by the tools under test return zero-value/nil and don't error.
@@ -1373,6 +1530,7 @@ type mcpFakeGraph struct {
 	vectorResults    []types.ScoredNode
 	vectorErr        error
 	listEdgesResult  []types.CodeEdge
+	listNodesResult  []types.CodeNode // returned by ListNodes for diff-impact tests
 }
 
 func (g *mcpFakeGraph) PutNode(_ context.Context, _ *types.CodeNode) error { return nil }
@@ -1414,7 +1572,7 @@ func (g *mcpFakeGraph) TextSearch(_ context.Context, _ string, _ domain.TextSear
 	return nil, nil
 }
 func (g *mcpFakeGraph) ListNodes(_ context.Context, _ string, _ domain.ListOpts) ([]types.CodeNode, error) {
-	return nil, nil
+	return g.listNodesResult, nil
 }
 func (g *mcpFakeGraph) ListEdges(_ context.Context, _ string, _ []string) ([]types.CodeEdge, error) {
 	return g.listEdgesResult, nil
