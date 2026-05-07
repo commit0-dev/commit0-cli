@@ -1,0 +1,69 @@
+run:
+  timeout: 5m
+
+linters:
+  # Opt-in model: only explicitly listed linters run.
+  disable-all: true
+  enable:
+    # ── Correctness ──────────────────────────────────────────────────────────
+    - govet          # mirrors `go vet` in CI
+    - staticcheck    # mirrors dominikh/staticcheck-action in CI
+    - errcheck       # unchecked errors
+    - ineffassign    # assigned but never used
+    - unused         # exported symbols with no callers (staticcheck SA1xxx)
+
+    # ── Style ─────────────────────────────────────────────────────────────────
+    - gofmt          # formatting (fails if gofmt would change a file)
+    - goimports      # import ordering
+    - misspell       # common spelling mistakes in comments/strings
+
+    # ── Bugs ──────────────────────────────────────────────────────────────────
+    - bodyclose      # HTTP response body not closed
+    - nilerr         # returning nil instead of err
+    - godot          # comment sentences end with a period (optional style)
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - shadow         # too noisy for short-lived err variables
+      - fieldalignment # layout optimisation is irrelevant for a CLI tool; JSON
+                       # types are ordered for readability, not memory density
+
+  staticcheck:
+    # Keep in sync with the staticcheck version used in CI
+    # (dominikh/staticcheck-action@v1 defaults to "latest").
+    checks:
+      - "all"
+      - "-ST1000"   # package-level comment — noisy for internal packages
+      - "-ST1003"   # naming convention — allow existing names
+
+  errcheck:
+    # Ignore common intentionally-unchecked calls.
+    exclude-functions:
+      - (io.Closer).Close
+      - (*os.File).Close
+      - (*bufio.Writer).Flush
+
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: github.com/commit0-dev/commit0
+
+  misspell:
+    locale: US
+
+issues:
+  # Show all issues, not just the first 3 per linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    # Test files: relax errcheck and godot.
+    - path: "_test\\.go"
+      linters: [errcheck, godot]
+
+    # Integration tests: skip most style checks.
+    - path: "integration_test\\.go"
+      linters: [errcheck, godot, misspell]

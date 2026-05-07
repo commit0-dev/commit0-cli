@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# One release at a time — a second tag push waits rather than racing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CGO_ENABLED: "0"   # pure Go — no tree-sitter, no CGO ever
+
+jobs:
+  # ── Binary archives + GitHub Release ─────────────────────────────────────
+  # Builds linux + darwin + windows binaries (amd64/arm64), creates tar.gz / zip
+  # archives, SHA-256 checksums, and publishes the GitHub Release with changelog.
+  #
+  # Pure Go cross-compilation is built into the Go toolchain — no goreleaser-cross
+  # Docker container or osxcross tooling needed.
+  release-binaries:
+    name: Release binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # create GitHub Release + upload assets
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for changelog + tag resolution
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: GoReleaser release
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

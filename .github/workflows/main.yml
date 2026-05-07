@@ -1,0 +1,153 @@
+# ── Post-merge Pipeline ────────────────────────────────────────────────────────
+# Runs after a PR is merged (or on direct push) to main. Verifies the merge
+# commit, publishes coverage, and builds snapshot binaries for all platforms.
+#
+# PR quality checks (lint, test, vuln scan) live in ci.yml — this workflow
+# focuses on artifacts and publishing.
+name: Main
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"   # pure Go — no tree-sitter, no CGO ever
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────────────────
+  # Safety net for the merge commit — catches issues that slipped through
+  # (admin bypass, merge conflict resolution, etc.).
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          install-mode: goinstall
+          args: --timeout=5m
+
+  # ── Unit tests + coverage publishing ──────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # ncruces/go-coverage-report writes to the repo Wiki
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests with coverage
+        run: |
+          go test -count=1 -timeout=5m \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            ./...
+
+      - name: Write coverage summary
+        if: always()
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out \
+            | grep -E "^total:" | awk '{print $3}' | tr -d '%')
+          {
+            echo "## Coverage report"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Total** | **${COVERAGE}%** |"
+            echo ""
+            echo "### Per-function breakdown"
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+      # Publish coverage report + trend chart to the repo Wiki.
+      - uses: ncruces/go-coverage-report@v0
+        with:
+          coverage-file: coverage.out
+          report: true
+          chart: true
+          amend: true
+        continue-on-error: true
+
+  # ── Go vulnerability scan ─────────────────────────────────────────────────
+  govulncheck:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+  # ── GoReleaser snapshot ───────────────────────────────────────────────────
+  # Validates .goreleaser.yaml and builds binaries for all platforms.
+  # Pure Go — no cross-compiler needed, runs directly in the GitHub runner.
+  # Gated on lint + test to avoid publishing from a broken main.
+  goreleaser:
+    name: GoReleaser snapshot
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # goreleaser needs full history for changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate .goreleaser.yaml
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: check
+
+      - name: Snapshot build (all platforms)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: build --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot
+          path: dist/
+          retention-days: 3
