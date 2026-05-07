@@ -45,7 +45,9 @@ jobs:
         with:
           version: v2.12.2
           working-directory: ${{ matrix.module }}
-          args: -c ../.golangci.yml --timeout=5m
+          # Absolute path so it works for both `server` (1 level deep) and
+          # `pkg/types` (2 levels deep) under the same matrix.
+          args: -c ${{ github.workspace }}/.golangci.yml --timeout=5m
 
   # ── Unit tests + coverage ─────────────────────────────────────────────────
   # Tests run inside the server/ module — that's where internal/app and the

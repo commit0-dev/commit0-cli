@@ -46,7 +46,7 @@ jobs:
         with:
           version: v2.12.2
           working-directory: ${{ matrix.module }}
-          args: -c ../.golangci.yml --timeout=5m
+          args: -c ${{ github.workspace }}/.golangci.yml --timeout=5m
 
   # ── Unit tests + coverage publishing ──────────────────────────────────────
   test:
