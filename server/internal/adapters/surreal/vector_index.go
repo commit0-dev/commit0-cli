@@ -41,9 +41,19 @@ func (a *SurrealAdapter) GetNodeEmbedding(ctx context.Context, nodeID string) ([
 		return nil, domain.Validation("nodeID is required")
 	}
 
+	// nodeID arrives as "table:identifier" (e.g. "function:app⋅QueryService⋅Query").
+	// A SurrealDB record ID is a (table, identifier) pair — splitting on the first
+	// colon is the canonical decode used elsewhere in this adapter (see splitRecordID
+	// in client.go). Passing the whole string as the identifier with empty table
+	// produces "cannot marshal RecordID with empty table or ID" at the SDK layer.
+	table, ident := splitRecordID(nodeID)
+	if table == "" || ident == "" {
+		return nil, domain.Validation("nodeID must be 'table:identifier', got: " + nodeID)
+	}
+
 	query := "SELECT embedding FROM type::record($id)"
 	params := map[string]any{
-		"id": models.NewRecordID("", nodeID),
+		"id": models.NewRecordID(table, ident),
 	}
 
 	results, err := surrealdb.Query[[]embeddingRow](ctx, a.db, query, params)
