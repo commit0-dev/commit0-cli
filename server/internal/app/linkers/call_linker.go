@@ -20,8 +20,15 @@ import (
 // naturally follows only "calls" edges without construction/test noise.
 type CallLinker struct{}
 
-func (l *CallLinker) Name() string             { return "call" }
-func (l *CallLinker) Labels() []types.EdgeKind { return []types.EdgeKind{types.EdgeCalls} }
+func (l *CallLinker) Name() string { return "call" }
+
+// Labels returns every edge kind CallLinker may produce. The linker examines
+// EdgeCalls inputs and may reclassify each to EdgeTests (test caller) or
+// EdgeConstructs (constructor / init / wire*). Declaring all three lets the
+// pipeline (and dashboards) reflect what the linker actually emits.
+func (l *CallLinker) Labels() []types.EdgeKind {
+	return []types.EdgeKind{types.EdgeCalls, types.EdgeTests, types.EdgeConstructs}
+}
 
 func (l *CallLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([]types.CodeEdge, domain.LinkStats) {
 	stats := domain.LinkStats{LinkerName: l.Name()}

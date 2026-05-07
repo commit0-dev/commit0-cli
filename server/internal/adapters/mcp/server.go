@@ -50,12 +50,15 @@ func New(deps Deps) *mcpsdk.Server {
 				"Trace: commit0_trace (call chain forward/reverse), commit0_blast " +
 				"(transitive impact of a change), commit0_field_flow (field-level " +
 				"data flow + mutations), commit0_find_root_cause (commit-zero " +
-				"detection from a bug description).",
+				"detection from a bug description). " +
+				"Tests: commit0_tests_for (which tests cover a symbol), " +
+				"commit0_subjects_for (which prod symbols a test exercises).",
 		},
 	)
 
 	registerSearchTools(server, deps, log)
 	registerTraceTools(server, deps, log)
+	registerTestsTools(server, deps, log)
 
 	return server
 }

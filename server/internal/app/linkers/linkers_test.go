@@ -29,9 +29,17 @@ func TestCallLinker_Metadata(t *testing.T) {
 	if got := l.Name(); got != "call" {
 		t.Errorf("Name() = %q, want %q", got, "call")
 	}
-	labels := l.Labels()
-	if len(labels) != 1 || labels[0] != types.EdgeCalls {
-		t.Errorf("Labels() = %v, want [calls]", labels)
+	// CallLinker examines EdgeCalls inputs and may reclassify each to
+	// EdgeTests or EdgeConstructs; Labels() must declare all three.
+	want := []types.EdgeKind{types.EdgeCalls, types.EdgeTests, types.EdgeConstructs}
+	got := l.Labels()
+	if len(got) != len(want) {
+		t.Fatalf("Labels() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Labels()[%d] = %v, want %v", i, got[i], want[i])
+		}
 	}
 }
 

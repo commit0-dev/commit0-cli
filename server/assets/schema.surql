@@ -229,49 +229,64 @@ DEFINE INDEX IF NOT EXISTS fn_modified_idx   ON `function` FIELDS last_modified_
 -- Only in/out indexes for traversal performance.
 -- ─────────────────────────────────────────
 
-DEFINE TABLE calls TYPE RELATION SCHEMALESS;
-DEFINE INDEX calls_in_idx   ON calls FIELDS in;
-DEFINE INDEX calls_out_idx  ON calls FIELDS out;
+-- All relation tables and their in/out indexes use OVERWRITE so the DDL is
+-- idempotent on re-apply (required when schemaVersion bumps trigger a
+-- redeploy against an already-populated DB — see #34).
+DEFINE TABLE OVERWRITE calls TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE calls_in_idx   ON calls FIELDS in;
+DEFINE INDEX OVERWRITE calls_out_idx  ON calls FIELDS out;
 
-DEFINE TABLE imports TYPE RELATION SCHEMALESS;
-DEFINE INDEX imports_in_idx  ON imports FIELDS in;
-DEFINE INDEX imports_out_idx ON imports FIELDS out;
+DEFINE TABLE OVERWRITE imports TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE imports_in_idx  ON imports FIELDS in;
+DEFINE INDEX OVERWRITE imports_out_idx ON imports FIELDS out;
 
-DEFINE TABLE defines TYPE RELATION SCHEMALESS;
-DEFINE INDEX defines_in_idx  ON defines FIELDS in;
-DEFINE INDEX defines_out_idx ON defines FIELDS out;
+DEFINE TABLE OVERWRITE defines TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE defines_in_idx  ON defines FIELDS in;
+DEFINE INDEX OVERWRITE defines_out_idx ON defines FIELDS out;
 
-DEFINE TABLE inherits TYPE RELATION SCHEMALESS;
-DEFINE INDEX inherits_in_idx  ON inherits FIELDS in;
-DEFINE INDEX inherits_out_idx ON inherits FIELDS out;
+DEFINE TABLE OVERWRITE inherits TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE inherits_in_idx  ON inherits FIELDS in;
+DEFINE INDEX OVERWRITE inherits_out_idx ON inherits FIELDS out;
 
-DEFINE TABLE uses TYPE RELATION SCHEMALESS;
-DEFINE INDEX uses_in_idx  ON uses FIELDS in;
-DEFINE INDEX uses_out_idx ON uses FIELDS out;
+DEFINE TABLE OVERWRITE uses TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE uses_in_idx  ON uses FIELDS in;
+DEFINE INDEX OVERWRITE uses_out_idx ON uses FIELDS out;
 
-DEFINE TABLE data_flow TYPE RELATION SCHEMALESS;
-DEFINE INDEX df_in_idx   ON data_flow FIELDS in;
-DEFINE INDEX df_out_idx  ON data_flow FIELDS out;
+DEFINE TABLE OVERWRITE data_flow TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE df_in_idx   ON data_flow FIELDS in;
+DEFINE INDEX OVERWRITE df_out_idx  ON data_flow FIELDS out;
 
-DEFINE TABLE reads TYPE RELATION SCHEMALESS;
-DEFINE INDEX reads_in_idx  ON reads FIELDS in;
-DEFINE INDEX reads_out_idx ON reads FIELDS out;
+DEFINE TABLE OVERWRITE reads TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE reads_in_idx  ON reads FIELDS in;
+DEFINE INDEX OVERWRITE reads_out_idx ON reads FIELDS out;
 
-DEFINE TABLE writes TYPE RELATION SCHEMALESS;
-DEFINE INDEX writes_in_idx  ON writes FIELDS in;
-DEFINE INDEX writes_out_idx ON writes FIELDS out;
+DEFINE TABLE OVERWRITE writes TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE writes_in_idx  ON writes FIELDS in;
+DEFINE INDEX OVERWRITE writes_out_idx ON writes FIELDS out;
 
-DEFINE TABLE route TYPE RELATION SCHEMALESS;
-DEFINE INDEX route_in_idx   ON route FIELDS in;
-DEFINE INDEX route_out_idx  ON route FIELDS out;
+DEFINE TABLE OVERWRITE route TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE route_in_idx   ON route FIELDS in;
+DEFINE INDEX OVERWRITE route_out_idx  ON route FIELDS out;
 
-DEFINE TABLE control_flow TYPE RELATION SCHEMALESS;
-DEFINE INDEX cf_in_idx  ON control_flow FIELDS in;
-DEFINE INDEX cf_out_idx ON control_flow FIELDS out;
+DEFINE TABLE OVERWRITE control_flow TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE cf_in_idx  ON control_flow FIELDS in;
+DEFINE INDEX OVERWRITE cf_out_idx ON control_flow FIELDS out;
 
-DEFINE TABLE data_dep TYPE RELATION SCHEMALESS;
-DEFINE INDEX dd_in_idx  ON data_dep FIELDS in;
-DEFINE INDEX dd_out_idx ON data_dep FIELDS out;
+DEFINE TABLE OVERWRITE data_dep TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE dd_in_idx  ON data_dep FIELDS in;
+DEFINE INDEX OVERWRITE dd_out_idx ON data_dep FIELDS out;
+
+-- Test invocations: A is a test that exercises B. Produced by CallLinker
+-- when the caller lives in *_test.go or its name starts with Test/Benchmark.
+DEFINE TABLE OVERWRITE tests TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE tests_in_idx  ON tests FIELDS in;
+DEFINE INDEX OVERWRITE tests_out_idx ON tests FIELDS out;
+
+-- Construction/wiring: A initializes or wires B. Produced by CallLinker
+-- when the caller is New*, init, main, wire*, setup*, or register*.
+DEFINE TABLE OVERWRITE constructs TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE constructs_in_idx  ON constructs FIELDS in;
+DEFINE INDEX OVERWRITE constructs_out_idx ON constructs FIELDS out;
 
 -- ─────────────────────────────────────────
 -- 7. System Tables

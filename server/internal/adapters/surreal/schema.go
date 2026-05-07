@@ -14,7 +14,7 @@ import (
 // schemaVersion is the version number written to the schema_version table
 // by the DDL in schema.surql. Bump this when the schema changes.
 // Bump when: schema structure changes OR default embed dimension changes.
-const schemaVersion = 17 // 16: OpenCodeGraph — batch-drop edge tables + recreate as SCHEMALESS
+const schemaVersion = 18 // 18: declare `tests` + `constructs` relation tables (#34)
 
 // SchemaVersion returns the current schema version for external callers.
 func SchemaVersion() int { return schemaVersion }
