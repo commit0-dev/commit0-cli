@@ -253,12 +253,46 @@ Environment variables are loaded via Viper. A `.env` file in the working directo
 
 ---
 
-## 9. Testing
+## 9. MCP Server
+
+commit0 ships a **stdio MCP server** (`commit0 mcp`) that exposes code intelligence as [Model Context Protocol](https://modelcontextprotocol.io/) tools — accessible to Claude Code, Cursor, Cline, and any other MCP-aware client.
+
+**Design reference:** [`docs/references/mcp-server-design.md`](references/mcp-server-design.md)
+
+**Tools shipped (v1 — search group):**
+
+| Tool | Maps to | Description |
+|------|---------|-------------|
+| `commit0_query` | `app.QueryService.Query` | Hybrid semantic + BM25 search, RRF-fused |
+| `commit0_lookup` | `domain.OpenCodeGraph.FindNode` | Pure index lookup by qualified name |
+| `commit0_neighborhood` | `domain.OpenCodeGraph.Neighbors` | One-hop graph context (callers/callees/flows) |
+| `commit0_show_node` | `domain.OpenCodeGraph.GetNode` | Full node body retrieval |
+
+**Adding to Claude Code:**
+```bash
+# User-scoped:
+claude mcp add --scope user --transport stdio commit0 -- commit0 mcp
+
+# Or add .mcp.json to the project root:
+# { "mcpServers": { "commit0": { "type": "stdio", "command": "commit0", "args": ["mcp"] } } }
+```
+
+**Verify:**
+```bash
+commit0 mcp --self-test   # exits 0 if protocol round-trip works
+```
+
+**Architecture:** `commit0 mcp` embeds the full adapter graph (same as `serve`) and calls services in-process — zero HTTP serialization tax. Boot fails gracefully if SurrealDB is unreachable; individual tool calls return a clear "run docker compose up surreal" message instead of crashing.
+
+---
+
+## 10. Testing
 
 | Level | Location | Approach |
 |-------|----------|----------|
 | Unit | `internal/app/*_test.go` | In-memory stubs (`stubs_test.go`) |
 | HTTP handlers | `internal/adapters/http/handlers_test.go` | `httptest.NewRecorder` with Gin test context |
 | HTTP clients | `internal/adapters/openrouter/client_test.go` | `httptest.NewServer` |
+| MCP tools | `internal/adapters/mcp/server_test.go` | `mcpsdk.NewInMemoryTransports()` pair; no DB needed |
 | Integration | `internal/adapters/*/` | Requires running SurrealDB and API keys |
 | Compile-time | Adapter files | `var _ domain.OpenCodeGraph = (*adapter)(nil)` |
