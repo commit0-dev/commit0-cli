@@ -46,7 +46,8 @@ func New(deps Deps) *mcpsdk.Server {
 		&mcpsdk.ServerOptions{
 			Instructions: "commit0 provides graph-based code intelligence. " +
 				"Search: commit0_query (semantic), commit0_lookup (qualified name), " +
-				"commit0_neighborhood (one hop), commit0_show_node (full body). " +
+				"commit0_neighborhood (one hop), commit0_show_node (full body), " +
+				"commit0_similar_to (find similar code by embedding). " +
 				"Trace: commit0_trace (call chain forward/reverse), commit0_blast " +
 				"(transitive impact of a change), commit0_field_flow (field-level " +
 				"data flow + mutations), commit0_find_root_cause (commit-zero " +
@@ -59,6 +60,7 @@ func New(deps Deps) *mcpsdk.Server {
 	registerSearchTools(server, deps, log)
 	registerTraceTools(server, deps, log)
 	registerTestsTools(server, deps, log)
+	registerSimilarTools(server, deps, log)
 
 	return server
 }

@@ -304,6 +304,9 @@ func (s *stubGraphStore) DeleteByFile(ctx context.Context, repo, filePath string
 func (s *stubGraphStore) Neighbors(ctx context.Context, nodeID string) (*domain.Neighborhood, error) {
 	return s.GetNeighborhood(ctx, nodeID)
 }
+func (s *stubGraphStore) GetNodeEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return nil, nil
+}
 func (s *stubGraphStore) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
 	if s.vectorErr != nil {
 		return nil, s.vectorErr

@@ -42,6 +42,7 @@ type OpenCodeGraph interface {
 	Neighbors(ctx context.Context, nodeID string) (*Neighborhood, error)
 
 	// ── Search ────────────────────────────────────────────
+	GetNodeEmbedding(ctx context.Context, nodeID string) ([]float32, error)
 	VectorSearch(ctx context.Context, query []float32, opts VectorSearchOpts) ([]types.ScoredNode, error)
 	TextSearch(ctx context.Context, query string, opts TextSearchOpts) ([]types.ScoredNode, error)
 

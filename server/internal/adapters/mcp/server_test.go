@@ -60,7 +60,7 @@ func TestToolsList_ReturnsAllTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	const wantCount = 10 // 4 search + 4 trace/analysis + 2 tests/subjects
+	const wantCount = 11 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects
 	if len(result.Tools) != wantCount {
 		t.Errorf("expected %d tools, got %d", wantCount, len(result.Tools))
 		for _, tool := range result.Tools {
@@ -105,6 +105,7 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 		"commit0_neighborhood",
 		"commit0_query",
 		"commit0_show_node",
+		"commit0_similar_to",
 		"commit0_subjects_for",
 		"commit0_tests_for",
 		"commit0_trace",
@@ -800,6 +801,259 @@ func TestSubjectsFor_HappyPath_ExcludesTestNodesAndSelf(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Tool: commit0_similar_to
+// ---------------------------------------------------------------------------
+
+func TestCommit0SimilarTo_MissingNodeID(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: &mcpFakeGraph{}})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_similar_to",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected tool error for missing node_id")
+	}
+}
+
+func TestCommit0SimilarTo_DBUnavailable(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_similar_to",
+		Arguments: map[string]any{
+			"node_id": "function:some-id",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected tool error when graph is unavailable")
+	}
+}
+
+func TestCommit0SimilarTo_HappyPath(t *testing.T) {
+	sourceNode := types.CodeNode{
+		ID:        "function:source-id",
+		Kind:      types.NodeFunction,
+		Qualified: "app.runWalk",
+		Name:      "runWalk",
+		FilePath:  "server/internal/app/walk.go",
+		RepoSlug:  "commit0-dev/commit0",
+		Language:  "go",
+		StartLine: 42,
+		EndLine:   100,
+	}
+
+	// Fake embedding for the source node
+	sourceEmbedding := make([]float32, 100)
+	for i := range sourceEmbedding {
+		sourceEmbedding[i] = float32(i) * 0.01
+	}
+
+	// Fake similar nodes (source will be #1 with score 1.0, so include extra)
+	neighbor1 := types.ScoredNode{
+		Node: types.CodeNode{
+			ID:        "function:source-id", // The source itself
+			Qualified: "app.runWalk",
+			Kind:      types.NodeFunction,
+			FilePath:  "server/internal/app/walk.go",
+			RepoSlug:  "commit0-dev/commit0",
+			StartLine: 42,
+		},
+		VectorScore: 1.0,
+	}
+	neighbor2 := types.ScoredNode{
+		Node: types.CodeNode{
+			ID:        "function:runStage",
+			Qualified: "app.runStage",
+			Kind:      types.NodeFunction,
+			FilePath:  "server/internal/app/stage.go",
+			RepoSlug:  "commit0-dev/commit0",
+			StartLine: 200,
+		},
+		VectorScore: 0.92,
+	}
+	neighbor3 := types.ScoredNode{
+		Node: types.CodeNode{
+			ID:        "function:runPhase",
+			Qualified: "app.runPhase",
+			Kind:      types.NodeFunction,
+			FilePath:  "server/internal/app/phase.go",
+			RepoSlug:  "commit0-dev/commit0",
+			StartLine: 300,
+		},
+		VectorScore: 0.88,
+	}
+
+	graph := &mcpFakeGraph{
+		findNode:      &sourceNode,
+		nodeEmbedding: sourceEmbedding,
+		vectorResults: []types.ScoredNode{neighbor1, neighbor2, neighbor3},
+	}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_similar_to",
+		Arguments: map[string]any{
+			"node_id": sourceNode.ID,
+			"k":       10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolResultText(result))
+	}
+
+	got, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+
+	// The source node should be filtered out; we should get neighbor2 and neighbor3
+	neighbors, ok := got["neighbors"].([]any)
+	if !ok {
+		t.Fatalf("expected neighbors array, got %T", got["neighbors"])
+	}
+	if len(neighbors) != 2 {
+		t.Fatalf("expected 2 neighbors (source + 3 total - source = 2), got %d", len(neighbors))
+	}
+
+	// Check first neighbor details
+	firstNeighbor, ok := neighbors[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected neighbor map, got %T", neighbors[0])
+	}
+	if qualified, _ := firstNeighbor["qualified"].(string); qualified != "app.runStage" {
+		t.Errorf("expected first neighbor qualified=app.runStage, got %s", qualified)
+	}
+
+	// Verify the markdown output is present
+	text := toolResultText(result)
+	if !strings.Contains(text, "Similar to") {
+		t.Errorf("expected markdown header in text output")
+	}
+}
+
+func TestCommit0SimilarTo_ExcludeSameFile(t *testing.T) {
+	sourceNode := types.CodeNode{
+		ID:        "function:source-id",
+		Kind:      types.NodeFunction,
+		Qualified: "app.runWalk",
+		FilePath:  "server/internal/app/walk.go",
+		RepoSlug:  "commit0-dev/commit0",
+	}
+
+	sourceEmbedding := make([]float32, 100)
+	for i := range sourceEmbedding {
+		sourceEmbedding[i] = float32(i) * 0.01
+	}
+
+	// One neighbor in the same file, one in a different file
+	sameFileNeighbor := types.ScoredNode{
+		Node: types.CodeNode{
+			ID:        "function:other-in-same-file",
+			Qualified: "app.otherWalkHelper",
+			FilePath:  "server/internal/app/walk.go",
+			RepoSlug:  "commit0-dev/commit0",
+		},
+		VectorScore: 0.95,
+	}
+	differentFileNeighbor := types.ScoredNode{
+		Node: types.CodeNode{
+			ID:        "function:different-file",
+			Qualified: "app.stageHelper",
+			FilePath:  "server/internal/app/stage.go",
+			RepoSlug:  "commit0-dev/commit0",
+		},
+		VectorScore: 0.90,
+	}
+
+	graph := &mcpFakeGraph{
+		findNode:      &sourceNode,
+		nodeEmbedding: sourceEmbedding,
+		vectorResults: []types.ScoredNode{sameFileNeighbor, differentFileNeighbor},
+	}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_similar_to",
+		Arguments: map[string]any{
+			"node_id":           sourceNode.ID,
+			"exclude_same_file": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolResultText(result))
+	}
+
+	got, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+
+	neighbors, ok := got["neighbors"].([]any)
+	if !ok {
+		t.Fatalf("expected neighbors array, got %T", got["neighbors"])
+	}
+	if len(neighbors) != 1 {
+		t.Fatalf("expected 1 neighbor (same-file excluded), got %d", len(neighbors))
+	}
+
+	// Verify it's the different-file neighbor
+	firstNeighbor, _ := neighbors[0].(map[string]any)
+	if filePath, _ := firstNeighbor["file_path"].(string); filePath != "server/internal/app/stage.go" {
+		t.Errorf("expected remaining neighbor from different file, got %s", filePath)
+	}
+}
+
+func TestCommit0SimilarTo_NoEmbedding(t *testing.T) {
+	sourceNode := types.CodeNode{
+		ID:        "function:source-id",
+		Qualified: "app.tinyFunc",
+		Kind:      types.NodeFunction,
+	}
+
+	graph := &mcpFakeGraph{
+		findNode:         &sourceNode,
+		nodeEmbeddingErr: domain.NotFound("node has no embedding"),
+	}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_similar_to",
+		Arguments: map[string]any{
+			"node_id": sourceNode.ID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	// When a node has no embedding, we return a graceful message (not IsError)
+	if result.IsError {
+		t.Errorf("expected graceful no-embedding message, got error")
+	}
+	text := toolResultText(result)
+	if !strings.Contains(text, "no embedding") && !strings.Contains(text, "too small") {
+		t.Errorf("expected no-embedding hint in text: %s", text)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -821,13 +1075,17 @@ func toolResultText(r *mcpsdk.CallToolResult) string {
 // in this package that need a non-nil Graph without booting SurrealDB. Methods
 // untouched by the tools under test return zero-value/nil and don't error.
 type mcpFakeGraph struct {
-	findNode      *types.CodeNode
-	findErr       error
-	traverseHops  []types.TraceHop
-	traverseErr   error
-	lastLabels    []string
-	lastDirection string
-	lastDepth     int
+	findNode         *types.CodeNode
+	findErr          error
+	traverseHops     []types.TraceHop
+	traverseErr      error
+	lastLabels       []string
+	lastDirection    string
+	lastDepth        int
+	nodeEmbedding    []float32
+	nodeEmbeddingErr error
+	vectorResults    []types.ScoredNode
+	vectorErr        error
 }
 
 func (g *mcpFakeGraph) PutNode(_ context.Context, _ *types.CodeNode) error { return nil }
@@ -854,8 +1112,11 @@ func (g *mcpFakeGraph) TraverseGraph(_ context.Context, _ string, labels []strin
 func (g *mcpFakeGraph) Neighbors(_ context.Context, _ string) (*domain.Neighborhood, error) {
 	return nil, nil
 }
+func (g *mcpFakeGraph) GetNodeEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return g.nodeEmbedding, g.nodeEmbeddingErr
+}
 func (g *mcpFakeGraph) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
-	return nil, nil
+	return g.vectorResults, g.vectorErr
 }
 func (g *mcpFakeGraph) TextSearch(_ context.Context, _ string, _ domain.TextSearchOpts) ([]types.ScoredNode, error) {
 	return nil, nil

@@ -139,6 +139,9 @@ func (s *httpTestGraphStore) DeleteByFile(_ context.Context, _, _ string) error 
 func (s *httpTestGraphStore) Neighbors(_ context.Context, _ string) (*domain.Neighborhood, error) {
 	return &domain.Neighborhood{}, nil
 }
+func (s *httpTestGraphStore) GetNodeEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return nil, nil
+}
 func (s *httpTestGraphStore) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
 	return nil, nil
 }

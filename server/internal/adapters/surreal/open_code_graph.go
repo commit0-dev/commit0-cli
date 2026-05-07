@@ -76,6 +76,10 @@ func (g *openCodeGraphAdapter) Neighbors(ctx context.Context, nodeID string) (*d
 
 // ── Search ────────────────────────────────────────────
 
+func (g *openCodeGraphAdapter) GetNodeEmbedding(ctx context.Context, nodeID string) ([]float32, error) {
+	return g.a.GetNodeEmbedding(ctx, nodeID)
+}
+
 func (g *openCodeGraphAdapter) VectorSearch(ctx context.Context, query []float32, opts domain.VectorSearchOpts) ([]types.ScoredNode, error) {
 	return g.a.VectorSearch(ctx, query, opts)
 }

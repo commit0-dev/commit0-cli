@@ -55,6 +55,9 @@ func (f *padFakeGraph) TraverseGraph(_ context.Context, _ string, _ []string, _ 
 func (f *padFakeGraph) Neighbors(_ context.Context, _ string) (*domain.Neighborhood, error) {
 	return nil, nil
 }
+func (f *padFakeGraph) GetNodeEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return nil, nil
+}
 func (f *padFakeGraph) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
 	return nil, nil
 }

@@ -50,6 +50,9 @@ func (g *toolsFakeGraph) TraverseGraph(_ context.Context, _ string, _ []string, 
 func (g *toolsFakeGraph) Neighbors(_ context.Context, _ string) (*domain.Neighborhood, error) {
 	return g.neighborhood, g.neighborErr
 }
+func (g *toolsFakeGraph) GetNodeEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return nil, nil
+}
 func (g *toolsFakeGraph) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
 	return g.vectorNodes, g.vectorErr
 }

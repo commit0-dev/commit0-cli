@@ -11,6 +11,11 @@ import (
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
+// embeddingRow is the result row for a GetNodeEmbedding query.
+type embeddingRow struct {
+	Embedding []float32 `json:"embedding"`
+}
+
 // vecRow is the raw result row from an HNSW ANN query.
 type vecRow struct {
 	ID         *models.RecordID `json:"id"`
@@ -26,6 +31,41 @@ type vecRow struct {
 	EndLine    int              `json:"end_line"`
 	Centrality int              `json:"centrality"`
 	VecDist    float64          `json:"vec_dist"` // raw cosine distance from vector::distance::knn()
+}
+
+// GetNodeEmbedding returns the stored embedding vector for a node.
+// Returns ErrNotFound if the node has no embedding (e.g. body too small to embed,
+// or indexing in progress).
+func (a *SurrealAdapter) GetNodeEmbedding(ctx context.Context, nodeID string) ([]float32, error) {
+	if nodeID == "" {
+		return nil, domain.Validation("nodeID is required")
+	}
+
+	query := "SELECT embedding FROM type::record($id)"
+	params := map[string]any{
+		"id": models.NewRecordID("", nodeID),
+	}
+
+	results, err := surrealdb.Query[[]embeddingRow](ctx, a.db, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("get embedding: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, domain.NotFound("node not found")
+	}
+
+	rows := (*results)[0].Result
+	if len(rows) == 0 {
+		return nil, domain.NotFound("node not found")
+	}
+
+	// First row's embedding field is what we need
+	embedding := rows[0].Embedding
+	if len(embedding) == 0 {
+		return nil, domain.NotFound("node has no embedding (body too small or indexing in progress)")
+	}
+
+	return embedding, nil
 }
 
 // VectorSearch performs HNSW approximate nearest-neighbor vector search across

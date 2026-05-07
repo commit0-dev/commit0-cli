@@ -59,6 +59,9 @@ func (g *fakeFieldFlowGraph) TraverseGraph(_ context.Context, _ string, _ []stri
 func (g *fakeFieldFlowGraph) Neighbors(_ context.Context, _ string) (*domain.Neighborhood, error) {
 	return &domain.Neighborhood{}, nil
 }
+func (g *fakeFieldFlowGraph) GetNodeEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return nil, nil
+}
 func (g *fakeFieldFlowGraph) VectorSearch(_ context.Context, _ []float32, _ domain.VectorSearchOpts) ([]types.ScoredNode, error) {
 	return g.vectorResult, g.vectorErr
 }
