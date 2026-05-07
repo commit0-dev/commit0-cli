@@ -426,3 +426,276 @@ func TestNodeOverlapsRanges_ExactBoundary(t *testing.T) {
 		t.Error("expected overlap on exact boundary")
 	}
 }
+
+func TestNodeOverlapsRanges_EndLineZero_TreatedAsSingleLine(t *testing.T) {
+	// Node with EndLine=0 should use StartLine as the end.
+	node := types.CodeNode{StartLine: 5, EndLine: 0}
+	if !nodeOverlapsRanges(node, []LineRange{{Start: 5, End: 5}}) {
+		t.Error("expected overlap when node.StartLine == range line and EndLine == 0")
+	}
+	if nodeOverlapsRanges(node, []LineRange{{Start: 6, End: 10}}) {
+		t.Error("expected no overlap when range starts after single-line node")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional coverage for findChangedSymbols branches
+// ---------------------------------------------------------------------------
+
+func TestDiffImpactService_DeletedFile_UsesOldPath(t *testing.T) {
+	// When a file is deleted with OldPath set, the old path should be used for lookup.
+	deletedNode := types.CodeNode{
+		ID:        "function:pkg.Gone",
+		Qualified: "pkg.Gone",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/old.go",
+		RepoSlug:  "org/repo",
+		StartLine: 1,
+		EndLine:   5,
+	}
+
+	graph := &fakeOpenCodeGraph{
+		nodesByFile: map[string][]types.CodeNode{
+			"pkg/old.go": {deletedNode},
+		},
+		findResult: &deletedNode,
+		// No traverseResult means no affected nodes.
+	}
+	walker := &fakeGitWalker{
+		workingDiffs: []domain.GitFileDiff{
+			{
+				Path:    "pkg/old.go",
+				OldPath: "pkg/old.go",
+				Status:  "deleted",
+				Patch:   "", // no patch for deleted file
+			},
+		},
+	}
+	blastSvc := NewBlastService(graph, nil, nil)
+	svc := NewDiffImpactService(graph, blastSvc, walker, nil, nil)
+
+	result, err := svc.Analyze(context.Background(), DiffImpactRequest{
+		RepoSlug:  "org/repo",
+		RepoPath:  "/tmp/fake",
+		ToRef:     "WORKING",
+		NoExplain: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ChangedSymbols) != 1 {
+		t.Errorf("expected 1 changed symbol for deleted file, got %d", len(result.ChangedSymbols))
+	}
+}
+
+func TestDiffImpactService_RenamedFile_UsesNewPath(t *testing.T) {
+	renamedNode := types.CodeNode{
+		ID:        "function:pkg.Renamed",
+		Qualified: "pkg.Renamed",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/new.go",
+		RepoSlug:  "org/repo",
+		StartLine: 1,
+		EndLine:   5,
+	}
+
+	graph := &fakeOpenCodeGraph{
+		nodesByFile: map[string][]types.CodeNode{
+			"pkg/new.go": {renamedNode},
+		},
+		findResult: &renamedNode,
+	}
+	walker := &fakeGitWalker{
+		workingDiffs: []domain.GitFileDiff{
+			{
+				Path:    "pkg/new.go",
+				OldPath: "pkg/old.go",
+				Status:  "renamed",
+				Patch:   "@@ -1 +1 @@ package pkg\n",
+			},
+		},
+	}
+	blastSvc := NewBlastService(graph, nil, nil)
+	svc := NewDiffImpactService(graph, blastSvc, walker, nil, nil)
+
+	result, err := svc.Analyze(context.Background(), DiffImpactRequest{
+		RepoSlug:  "org/repo",
+		RepoPath:  "/tmp/fake",
+		ToRef:     "WORKING",
+		NoExplain: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ChangedSymbols) != 1 {
+		t.Errorf("expected 1 changed symbol for renamed file, got %d", len(result.ChangedSymbols))
+	}
+}
+
+func TestDiffImpactService_NoPatch_IncludesAllNodesInFile(t *testing.T) {
+	// When the patch is empty, all nodes in the file should be included.
+	node := types.CodeNode{
+		ID:        "function:pkg.Foo",
+		Qualified: "pkg.Foo",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/foo.go",
+		RepoSlug:  "org/repo",
+		StartLine: 1,
+		EndLine:   5,
+	}
+
+	graph := &fakeOpenCodeGraph{
+		nodesByFile: map[string][]types.CodeNode{
+			"pkg/foo.go": {node},
+		},
+		findResult: &node,
+	}
+	walker := &fakeGitWalker{
+		workingDiffs: []domain.GitFileDiff{
+			{Path: "pkg/foo.go", Status: "modified", Patch: ""},
+		},
+	}
+	blastSvc := NewBlastService(graph, nil, nil)
+	svc := NewDiffImpactService(graph, blastSvc, walker, nil, nil)
+
+	result, err := svc.Analyze(context.Background(), DiffImpactRequest{
+		RepoSlug:  "org/repo",
+		RepoPath:  "/tmp/fake",
+		ToRef:     "WORKING",
+		NoExplain: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ChangedSymbols) != 1 {
+		t.Errorf("expected 1 changed symbol when patch is empty (all nodes included), got %d", len(result.ChangedSymbols))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sortAffected exercises — ensures sorting runs with multi-node inputs
+// ---------------------------------------------------------------------------
+
+func TestSortAffected_SortsByHopCountThenQualified(t *testing.T) {
+	nodes := []types.AffectedNode{
+		{Node: types.CodeNode{Qualified: "z.Z"}, HopCount: 2},
+		{Node: types.CodeNode{Qualified: "a.A"}, HopCount: 2},
+		{Node: types.CodeNode{Qualified: "m.M"}, HopCount: 1},
+	}
+	sortAffected(nodes)
+	if nodes[0].Node.Qualified != "m.M" {
+		t.Errorf("expected first node to be 'm.M' (hop 1), got %q", nodes[0].Node.Qualified)
+	}
+	if nodes[1].Node.Qualified != "a.A" {
+		t.Errorf("expected second node to be 'a.A' (hop 2, alpha first), got %q", nodes[1].Node.Qualified)
+	}
+	if nodes[2].Node.Qualified != "z.Z" {
+		t.Errorf("expected third node to be 'z.Z' (hop 2, alpha last), got %q", nodes[2].Node.Qualified)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildSummary coverage — uses a fakeExplainer that returns text
+// ---------------------------------------------------------------------------
+
+// textExplainer wraps the existing fakeExplainer but returns a text chunk.
+type textExplainer struct{}
+
+func (e *textExplainer) Explain(_ context.Context, _ domain.ExplainRequest) (<-chan domain.ExplainChunk, error) {
+	ch := make(chan domain.ExplainChunk, 2)
+	ch <- domain.ExplainChunk{Text: "test summary"}
+	ch <- domain.ExplainChunk{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+func (e *textExplainer) ExplainStructured(_ context.Context, _ domain.ExplainRequest) ([]byte, error) {
+	return nil, nil
+}
+
+func TestDiffImpactService_WithExplainer_PopulatesSummary(t *testing.T) {
+	patch := "@@ -1,3 +1,4 @@ package pkg\n"
+	changedNode := types.CodeNode{
+		ID:        "function:pkg.Foo",
+		Qualified: "pkg.Foo",
+		Kind:      types.NodeFunction,
+		FilePath:  "pkg/foo.go",
+		RepoSlug:  "org/repo",
+		StartLine: 1,
+		EndLine:   10,
+	}
+
+	graph := &fakeOpenCodeGraph{
+		nodesByFile: map[string][]types.CodeNode{
+			"pkg/foo.go": {changedNode},
+		},
+		findResult: &changedNode,
+	}
+	walker := &fakeGitWalker{
+		workingDiffs: []domain.GitFileDiff{
+			{Path: "pkg/foo.go", Status: "modified", Patch: patch},
+		},
+	}
+	blastSvc := NewBlastService(graph, nil, nil)
+	svc := NewDiffImpactService(graph, blastSvc, walker, &textExplainer{}, nil)
+
+	result, err := svc.Analyze(context.Background(), DiffImpactRequest{
+		RepoSlug:  "org/repo",
+		RepoPath:  "/tmp/fake",
+		ToRef:     "WORKING",
+		NoExplain: false, // enable the LLM summary
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Summary == "" {
+		t.Error("expected non-empty summary from LLM explainer")
+	}
+}
+
+func TestDiffImpactService_DiffHasNoMatchingSymbols_ReturnsEmptyChanged(t *testing.T) {
+	// Diff touches a file that has no indexed nodes.
+	graph := &fakeOpenCodeGraph{
+		nodesByFile: map[string][]types.CodeNode{}, // empty — no nodes
+	}
+	walker := &fakeGitWalker{
+		workingDiffs: []domain.GitFileDiff{
+			{Path: "pkg/foo.go", Status: "modified", Patch: "@@ -1,2 +1,3 @@ package pkg\n"},
+		},
+	}
+	blastSvc := NewBlastService(graph, nil, nil)
+	svc := NewDiffImpactService(graph, blastSvc, walker, nil, nil)
+
+	result, err := svc.Analyze(context.Background(), DiffImpactRequest{
+		RepoSlug:  "org/repo",
+		RepoPath:  "/tmp/fake",
+		ToRef:     "WORKING",
+		NoExplain: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ChangedSymbols) != 0 {
+		t.Errorf("expected 0 changed symbols when no nodes indexed for file, got %d", len(result.ChangedSymbols))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// dedupeAffected: verify changedIDs are dropped
+// ---------------------------------------------------------------------------
+
+func TestDedupeAffected_DropsChangedSymbols(t *testing.T) {
+	changedID := "function:pkg.Changed"
+	affected := []types.AffectedNode{
+		{Node: types.CodeNode{ID: changedID, Qualified: "pkg.Changed"}, HopCount: 1},
+		{Node: types.CodeNode{ID: "function:pkg.Other", Qualified: "pkg.Other"}, HopCount: 2},
+	}
+	changedIDs := map[string]struct{}{changedID: {}}
+	result := dedupeAffected(affected, changedIDs)
+	if len(result) != 1 {
+		t.Errorf("expected 1 result after dropping changed symbol, got %d", len(result))
+	}
+	if result[0].Node.ID == changedID {
+		t.Error("changed symbol should have been dropped from affected list")
+	}
+}
