@@ -27,7 +27,7 @@ jobs:
       contents: write     # create GitHub Release + upload assets
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # full history for changelog + tag resolution
 
