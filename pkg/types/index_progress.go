@@ -91,6 +91,93 @@ type PipelineCoverage struct {
 	EdgeResolution  float64 `json:"edge_resolution"`  // call_edges_resolved / call_edges_total * 100
 }
 
+// ── Streaming events (SSE) ────────────────────────────────────────────────
+
+// IndexEventType identifies an SSE event variant on the indexing stream.
+type IndexEventType string
+
+const (
+	// IndexEventStageStart is emitted when a pipeline stage transitions to running.
+	IndexEventStageStart IndexEventType = "stage_start"
+	// IndexEventStageDone is emitted when a stage completes (or skips/fails).
+	IndexEventStageDone IndexEventType = "stage_done"
+	// IndexEventGraphDelta carries a batch of newly-stored nodes and edges.
+	// Nodes are guaranteed to precede edges that reference them within the
+	// same delta (and within the run, modulo the per-batch contract of
+	// graph.PutBatch). Emitted from the store stage.
+	IndexEventGraphDelta IndexEventType = "graph_delta"
+	// IndexEventProgress is a periodic counter snapshot.
+	IndexEventProgress IndexEventType = "progress"
+	// IndexEventDone is the terminal event with a full IndexProgress snapshot.
+	IndexEventDone IndexEventType = "done"
+	// IndexEventError reports a non-fatal stream-level issue (e.g. consumer lag).
+	// The producer keeps running; the client may reconnect to resync.
+	IndexEventError IndexEventType = "error"
+)
+
+// GraphNodeDelta is the wire shape for one streamed node. Intentionally a
+// trimmed subset of CodeNode — heavy fields (Body, Embedding, Concepts) are
+// dropped so the SSE wire stays cheap. Frontend can re-fetch full bodies via
+// GET /api/v1/nodes/:id when a user drills in.
+type GraphNodeDelta struct {
+	ID        string   `json:"id"`
+	Qualified string   `json:"qualified"`
+	Name      string   `json:"name"`
+	Kind      NodeKind `json:"kind"`
+	FilePath  string   `json:"file_path"`
+	Language  string   `json:"language,omitempty"`
+	RepoSlug  string   `json:"repo_slug"`
+	StartLine int      `json:"start_line,omitempty"`
+	EndLine   int      `json:"end_line,omitempty"`
+	Signature string   `json:"signature,omitempty"`
+}
+
+// GraphEdgeDelta is the wire shape for one streamed edge.
+type GraphEdgeDelta struct {
+	FromID   string   `json:"from_id"`
+	ToID     string   `json:"to_id"`
+	Kind     EdgeKind `json:"kind"`
+	CallSite string   `json:"call_site,omitempty"`
+}
+
+// ProgressSnapshot is a lightweight tick payload emitted between stages.
+type ProgressSnapshot struct {
+	FilesIndexed int        `json:"files_indexed"`
+	NodesCreated int        `json:"nodes_created"`
+	EdgesCreated int        `json:"edges_created"`
+	ElapsedMS    int64      `json:"elapsed_ms"`
+	CurrentStage IndexStage `json:"current_stage,omitempty"`
+}
+
+// IndexEvent is one frame on the indexing SSE stream. The Type discriminator
+// selects which optional payload field is populated; all unused fields are
+// omitted from the JSON wire by `omitempty`.
+type IndexEvent struct {
+	Type      IndexEventType `json:"type"`
+	EmittedAt time.Time      `json:"emitted_at"`
+
+	// stage_start / stage_done
+	Stage       IndexStage  `json:"stage,omitempty"`
+	ItemsTotal  int         `json:"items_total,omitempty"`
+	ItemsDone   int         `json:"items_done,omitempty"`
+	ErrorCount  int         `json:"stage_error_count,omitempty"`
+	DurationMS  int64       `json:"duration_ms,omitempty"`
+	StageStatus StageStatus `json:"stage_status,omitempty"`
+
+	// graph_delta
+	Nodes []GraphNodeDelta `json:"nodes,omitempty"`
+	Edges []GraphEdgeDelta `json:"edges,omitempty"`
+
+	// progress
+	Progress *ProgressSnapshot `json:"progress,omitempty"`
+
+	// done
+	Done *IndexProgress `json:"done,omitempty"`
+
+	// error
+	Message string `json:"message,omitempty"`
+}
+
 // IndexProgress is the comprehensive snapshot of an index job's state.
 // Returned by GET /api/v1/index/:job_id.
 type IndexProgress struct {

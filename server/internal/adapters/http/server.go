@@ -109,6 +109,7 @@ func (s *Server) registerRoutes() {
 	// Indexing
 	v1.POST("/index", s.handleStartIndex)
 	v1.GET("/index/:job_id", s.handleIndexStatus)
+	v1.GET("/index/:job_id/stream", s.handleIndexStream)
 
 	// Analysis
 	v1.POST("/query", s.handleQuery)

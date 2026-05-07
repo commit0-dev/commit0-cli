@@ -702,6 +702,158 @@ func TestHandleIndexStatus_Found(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Index SSE stream
+// ---------------------------------------------------------------------------
+
+// TestHandleIndexStream_NotFound: missing job_id should be a 404.
+func TestHandleIndexStream_NotFound(t *testing.T) {
+	srv := defaultTestServer()
+	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/api/v1/index/missing/stream", nil))
+	c.AddParam("job_id", "missing")
+
+	srv.handleIndexStream(c)
+	assertStatus(t, rec, http.StatusNotFound)
+}
+
+// TestHandleIndexStream_AlreadyFinished: a stream subscriber that connects
+// after the job has finished should still receive a `done` event with the
+// final snapshot, then the connection should close cleanly. This is the
+// catch-up path the frontend uses on page reload.
+func TestHandleIndexStream_AlreadyFinished(t *testing.T) {
+	srv := defaultTestServer()
+	tracker := app.NewIndexTracker("done-job", "owner/repo", types.IndexConfig{})
+	tracker.AddNodes(42)
+	tracker.Finish(nil)
+	srv.trackers.set("done-job", tracker)
+
+	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/api/v1/index/done-job/stream", nil))
+	c.AddParam("job_id", "done-job")
+
+	srv.handleIndexStream(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SSE)", rec.Code)
+	}
+	if rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", rec.Header().Get("Content-Type"))
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: progress") {
+		t.Errorf("expected catch-up progress event, body=%q", body)
+	}
+	if !strings.Contains(body, "event: done") {
+		t.Errorf("expected terminal done event, body=%q", body)
+	}
+	if !strings.Contains(body, `"nodes_created":42`) {
+		t.Errorf("expected nodes_created=42 in done snapshot, body=%q", body)
+	}
+}
+
+// TestHandleIndexStream_LiveDeltas: a connected subscriber should receive
+// stage_start / graph_delta / stage_done frames in order, then a done event
+// when the tracker finishes.
+func TestHandleIndexStream_LiveDeltas(t *testing.T) {
+	srv := defaultTestServer()
+	tracker := app.NewIndexTracker("live-job", "owner/repo", types.IndexConfig{})
+	srv.trackers.set("live-job", tracker)
+
+	// Drive the tracker concurrently so the handler sees a real live stream.
+	go func() {
+		// Tiny pause so the handler subscribes before events fire.
+		time.Sleep(50 * time.Millisecond)
+		tracker.StartStage(types.StageStore)
+		tracker.EmitGraphDelta(
+			[]types.CodeNode{
+				{ID: "function:a", Qualified: "pkg.A", Kind: types.NodeFunction, FilePath: "a.go"},
+			},
+			[]types.CodeEdge{
+				{FromID: "function:a", ToID: "function:b", Kind: types.EdgeCalls},
+			},
+		)
+		tracker.CompleteStage(types.StageStore)
+		tracker.Finish(nil)
+	}()
+
+	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/api/v1/index/live-job/stream", nil))
+	c.AddParam("job_id", "live-job")
+
+	srv.handleIndexStream(c) // blocks until tracker.Finish closes subs
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		"event: progress", // catch-up
+		"event: stage_start",
+		"event: graph_delta",
+		"event: stage_done",
+		"event: done",
+		`"id":"function:a"`,
+		`"from_id":"function:a"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+
+	// Ordering: stage_start must precede graph_delta which must precede
+	// stage_done which must precede done. SSE frames are line-delimited so
+	// strings.Index on the event names is a sufficient ordering check.
+	order := []string{"event: stage_start", "event: graph_delta", "event: stage_done", "event: done"}
+	last := -1
+	for _, marker := range order {
+		idx := strings.Index(body, marker)
+		if idx < 0 {
+			t.Fatalf("missing %q in body", marker)
+		}
+		if idx <= last {
+			t.Errorf("ordering violated: %q at %d not after previous %d", marker, idx, last)
+		}
+		last = idx
+	}
+}
+
+// TestHandleIndexStream_ClientCancelDoesNotBlock: if the client disconnects
+// mid-stream, the handler unsubscribes and returns; the producer keeps
+// running on the tracker independent of any single consumer.
+func TestHandleIndexStream_ClientCancelDoesNotBlock(t *testing.T) {
+	srv := defaultTestServer()
+	tracker := app.NewIndexTracker("cancel-job", "owner/repo", types.IndexConfig{})
+	srv.trackers.set("cancel-job", tracker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/index/cancel-job/stream", nil).WithContext(ctx)
+	c, _ := ginCtx(req)
+	c.AddParam("job_id", "cancel-job")
+
+	done := make(chan struct{})
+	go func() {
+		srv.handleIndexStream(c)
+		close(done)
+	}()
+
+	// Cancel quickly to simulate client disconnect.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// Pass: handler returned promptly on cancel.
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after request context cancel")
+	}
+
+	// Producer keeps working — tracker emits don't panic, and Snapshot is fine.
+	tracker.StartStage(types.StageStore)
+	tracker.EmitGraphDelta(
+		[]types.CodeNode{{ID: "function:x"}},
+		nil,
+	)
+	tracker.Finish(nil)
+	if tracker.Snapshot().Status != "completed" {
+		t.Errorf("tracker status = %q, want completed", tracker.Snapshot().Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // indexTrackerStore
 // ---------------------------------------------------------------------------
 

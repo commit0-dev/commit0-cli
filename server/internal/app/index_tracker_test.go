@@ -400,6 +400,234 @@ func TestSnapshot_Fields(t *testing.T) {
 	}
 }
 
+// ── Streaming events (SSE) ────────────────────────────────────────────────
+
+// TestSubscribe_ReceivesStageStartAndDone confirms StartStage and CompleteStage
+// fan out as IndexEvents to a live subscriber.
+func TestSubscribe_ReceivesStageStartAndDone(t *testing.T) {
+	tr := newTestTracker()
+	ch, unsub := tr.Subscribe()
+	defer unsub()
+
+	tr.StartStage(types.StageWalk)
+	tr.CompleteStage(types.StageWalk)
+
+	got := drain(t, ch, 2, 500*time.Millisecond)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(got))
+	}
+	if got[0].Type != types.IndexEventStageStart || got[0].Stage != types.StageWalk {
+		t.Errorf("event 0: %+v", got[0])
+	}
+	if got[1].Type != types.IndexEventStageDone || got[1].Stage != types.StageWalk {
+		t.Errorf("event 1: %+v", got[1])
+	}
+}
+
+// TestEmitGraphDelta_NodesBeforeEdges asserts the node/edge ordering contract
+// the frontend relies on: within a single delta, every node precedes every
+// edge, and the wire shape is the trimmed delta DTO (not the full CodeNode).
+func TestEmitGraphDelta_NodesBeforeEdges(t *testing.T) {
+	tr := newTestTracker()
+	ch, unsub := tr.Subscribe()
+	defer unsub()
+
+	nodes := []types.CodeNode{
+		{ID: "function:a", Qualified: "pkg.A", Kind: types.NodeFunction, FilePath: "a.go"},
+		{ID: "function:b", Qualified: "pkg.B", Kind: types.NodeFunction, FilePath: "a.go"},
+	}
+	edges := []types.CodeEdge{
+		{FromID: "function:a", ToID: "function:b", Kind: types.EdgeCalls},
+	}
+	tr.EmitGraphDelta(nodes, edges)
+
+	got := drain(t, ch, 1, 500*time.Millisecond)
+	if len(got) != 1 || got[0].Type != types.IndexEventGraphDelta {
+		t.Fatalf("expected 1 graph_delta event, got %+v", got)
+	}
+	evt := got[0]
+	if len(evt.Nodes) != 2 {
+		t.Errorf("nodes len = %d, want 2", len(evt.Nodes))
+	}
+	if len(evt.Edges) != 1 {
+		t.Errorf("edges len = %d, want 1", len(evt.Edges))
+	}
+	if evt.Nodes[0].ID != "function:a" || evt.Nodes[1].ID != "function:b" {
+		t.Errorf("node ordering not preserved: %+v", evt.Nodes)
+	}
+	if evt.Edges[0].FromID != "function:a" {
+		t.Errorf("edge from ID wrong: %+v", evt.Edges[0])
+	}
+}
+
+// TestEmitGraphDelta_Empty_NoEvent confirms zero-length deltas are dropped at
+// the source so consumers never see useless empty events.
+func TestEmitGraphDelta_Empty_NoEvent(t *testing.T) {
+	tr := newTestTracker()
+	ch, unsub := tr.Subscribe()
+	defer unsub()
+
+	tr.EmitGraphDelta(nil, nil)
+
+	select {
+	case e := <-ch:
+		t.Errorf("expected no event for empty delta, got %+v", e)
+	case <-time.After(50 * time.Millisecond):
+		// Pass: no event produced.
+	}
+}
+
+// TestFinish_EmitsDoneAndClosesChannel verifies the terminal contract: the
+// final event is `done` with a full snapshot, and the channel is then closed
+// so consumers exit cleanly.
+func TestFinish_EmitsDoneAndClosesChannel(t *testing.T) {
+	tr := newTestTracker()
+	tr.AddNodes(7)
+	ch, unsub := tr.Subscribe()
+	defer unsub()
+
+	tr.Finish(nil)
+
+	// First event should be `done` with a non-nil snapshot.
+	select {
+	case evt, open := <-ch:
+		if !open {
+			t.Fatalf("channel closed before receiving done event")
+		}
+		if evt.Type != types.IndexEventDone {
+			t.Errorf("expected done event, got %s", evt.Type)
+		}
+		if evt.Done == nil || evt.Done.NodesCreated != 7 {
+			t.Errorf("done snapshot missing or wrong: %+v", evt.Done)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for done event")
+	}
+
+	// Channel must close after done is delivered.
+	select {
+	case _, open := <-ch:
+		if open {
+			t.Errorf("channel should be closed after done, but received another event")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("channel was not closed after done event")
+	}
+}
+
+// TestSubscribe_AfterFinish_ReturnsClosedChannel ensures late attachers do not
+// hang waiting for events that will never come.
+func TestSubscribe_AfterFinish_ReturnsClosedChannel(t *testing.T) {
+	tr := newTestTracker()
+	tr.Finish(nil)
+
+	ch, unsub := tr.Subscribe()
+	defer unsub()
+
+	select {
+	case _, open := <-ch:
+		if open {
+			t.Errorf("late subscriber should get a closed channel, not an event")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("late subscriber's channel was not closed")
+	}
+}
+
+// TestEmit_LaggedConsumer_FailsFast simulates a consumer that does not drain
+// the channel: once the buffer fills, the producer marks the sub lagged and
+// stops sending — and crucially, never blocks the indexer.
+func TestEmit_LaggedConsumer_FailsFast(t *testing.T) {
+	tr := newTestTracker()
+	_, unsub := tr.Subscribe()
+	defer unsub()
+
+	// Flood the channel with more events than the buffer holds. Producer must
+	// not block; this whole sequence should complete well under the buffer
+	// drain timeout.
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < streamSubBufSize+50; i++ {
+			tr.StartStage(types.StageStore) // generates a stage_start event
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Pass: producer did not block on a slow consumer.
+	case <-time.After(2 * time.Second):
+		t.Fatal("producer blocked on a lagged consumer")
+	}
+}
+
+// TestSubscribe_FanOutToMultipleConsumers confirms each subscriber receives
+// every event independently (not first-come-first-steal).
+func TestSubscribe_FanOutToMultipleConsumers(t *testing.T) {
+	tr := newTestTracker()
+	ch1, unsub1 := tr.Subscribe()
+	defer unsub1()
+	ch2, unsub2 := tr.Subscribe()
+	defer unsub2()
+
+	tr.StartStage(types.StageWalk)
+
+	for i, ch := range []<-chan types.IndexEvent{ch1, ch2} {
+		select {
+		case evt := <-ch:
+			if evt.Type != types.IndexEventStageStart {
+				t.Errorf("ch%d: got %s, want stage_start", i+1, evt.Type)
+			}
+		case <-time.After(200 * time.Millisecond):
+			t.Errorf("ch%d: timed out", i+1)
+		}
+	}
+}
+
+// TestUnsubscribe_StopsDeliveryAndClosesChannel verifies the unsub func cleanly
+// detaches a consumer mid-run without panicking the producer.
+func TestUnsubscribe_StopsDeliveryAndClosesChannel(t *testing.T) {
+	tr := newTestTracker()
+	ch, unsub := tr.Subscribe()
+
+	tr.StartStage(types.StageWalk) // delivered before unsubscribe
+	got := drain(t, ch, 1, 200*time.Millisecond)
+	if len(got) != 1 {
+		t.Fatalf("expected initial event, got %d", len(got))
+	}
+
+	unsub()
+
+	// Channel must be closed by unsub.
+	select {
+	case _, open := <-ch:
+		if open {
+			t.Error("channel should be closed after unsubscribe")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("channel not closed after unsubscribe")
+	}
+
+	// Producer must keep working without panic even though the sub is gone.
+	tr.CompleteStage(types.StageWalk)
+}
+
+// drain pulls up to n events with a per-event budget. Used by event-ordering
+// assertions where we expect a small, fixed number of events.
+func drain(t *testing.T, ch <-chan types.IndexEvent, n int, budget time.Duration) []types.IndexEvent {
+	t.Helper()
+	out := make([]types.IndexEvent, 0, n)
+	for i := 0; i < n; i++ {
+		select {
+		case evt := <-ch:
+			out = append(out, evt)
+		case <-time.After(budget):
+			return out
+		}
+	}
+	return out
+}
+
 // ── Concurrency safety ────────────────────────────────────────────────────
 
 func TestIndexTracker_ConcurrencySafe(t *testing.T) {
