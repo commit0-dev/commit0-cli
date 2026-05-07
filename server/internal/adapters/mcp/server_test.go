@@ -61,7 +61,7 @@ func TestToolsList_ReturnsAllTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	const wantCount = 12 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff
+	const wantCount = 13 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff + 1 interface
 	if len(result.Tools) != wantCount {
 		t.Errorf("expected %d tools, got %d", wantCount, len(result.Tools))
 		for _, tool := range result.Tools {
@@ -106,6 +106,7 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 		"commit0_lookup",
 		"commit0_neighborhood",
 		"commit0_query",
+		"commit0_resolve_interface",
 		"commit0_show_node",
 		"commit0_similar_to",
 		"commit0_subjects_for",
@@ -1510,6 +1511,133 @@ func TestDiffImpact_HappyPath_ReturnsAffected(t *testing.T) {
 	// If we have structured content, verify basic fields.
 	if structured["changed_symbols"] == nil {
 		t.Errorf("expected changed_symbols in structured content")
+	}
+}
+
+// ── commit0_resolve_interface tests ──────────────────────────────────────────
+
+func TestResolveInterface_MissingQualified_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_resolve_interface",
+		Arguments: map[string]any{
+			// qualified intentionally omitted
+			"repo_slug": "test-repo",
+		},
+	})
+	if err != nil {
+		// Protocol-level validation: acceptable.
+		return
+	}
+	if result == nil {
+		t.Fatal("got nil result for missing required field")
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true for missing qualified, got content: %v", result.Content)
+	}
+}
+
+func TestResolveInterface_DBUnavailable_ReturnsToolError(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{
+		DBAddr: "localhost:9999",
+	})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_resolve_interface",
+		Arguments: map[string]any{
+			"qualified": "domain.OpenCodeGraph",
+			"repo_slug": "test-repo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Errorf("expected isError=true when DB is unavailable")
+	}
+}
+
+func TestResolveInterface_HappyPath(t *testing.T) {
+	// Build a fake interface node with two methods.
+	iface := types.CodeNode{
+		ID:        "class:domain⋅OpenCodeGraph",
+		Kind:      types.NodeClass,
+		Name:      "OpenCodeGraph",
+		Qualified: "domain.OpenCodeGraph",
+		FilePath:  "server/internal/domain/graph.go",
+		Methods: []types.MethodSpec{
+			{Name: "PutNode", Signature: "PutNode(ctx context.Context, node *CodeNode) error", Receiver: ""},
+			{Name: "GetNode", Signature: "GetNode(ctx context.Context, id string) (*CodeNode, error)", Receiver: ""},
+		},
+	}
+	// One implementor returned by the reverse traverse.
+	implementor := types.CodeNode{
+		ID:        "class:surreal⋅SurrealAdapter",
+		Kind:      types.NodeClass,
+		Name:      "SurrealAdapter",
+		Qualified: "surreal.SurrealAdapter",
+		FilePath:  "server/internal/adapters/surreal/client.go",
+	}
+	hops := []types.TraceHop{
+		{Node: implementor, Depth: 1},
+	}
+
+	graph := &mcpFakeGraph{findNode: &iface, traverseHops: hops}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_resolve_interface",
+		Arguments: map[string]any{
+			"qualified": "domain.OpenCodeGraph",
+			"repo_slug": "commit0-dev/commit0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", toolResultText(result))
+	}
+
+	// Structured content arrives as map[string]any from the MCP transport.
+	sc, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+	ifaceMap, _ := sc["interface"].(map[string]any)
+	if ifaceMap == nil {
+		t.Fatalf("structured content missing 'interface' key: %+v", sc)
+	}
+	if q, _ := ifaceMap["qualified"].(string); q != "domain.OpenCodeGraph" {
+		t.Errorf("interface.qualified = %q, want %q", q, "domain.OpenCodeGraph")
+	}
+	methods, _ := sc["methods"].([]any)
+	if len(methods) != 2 {
+		t.Errorf("methods len = %d, want 2", len(methods))
+	}
+	impls, _ := sc["implementors"].([]any)
+	if len(impls) != 1 {
+		t.Fatalf("implementors len = %d, want 1", len(impls))
+	}
+	impl0, _ := impls[0].(map[string]any)
+	if q, _ := impl0["qualified"].(string); q != "surreal.SurrealAdapter" {
+		t.Errorf("implementors[0].qualified = %q", q)
+	}
+	// Verify text output contains the interface name.
+	text := toolResultText(result)
+	if !strings.Contains(text, "domain.OpenCodeGraph") {
+		t.Errorf("text output should mention interface name, got: %s", text)
+	}
+	// Verify the traversal was done with "implements" label in reverse.
+	if len(graph.lastLabels) == 0 || graph.lastLabels[0] != "implements" {
+		t.Errorf("expected TraverseGraph called with label 'implements', got %v", graph.lastLabels)
+	}
+	if graph.lastDirection != "reverse" {
+		t.Errorf("expected direction 'reverse', got %q", graph.lastDirection)
 	}
 }
 

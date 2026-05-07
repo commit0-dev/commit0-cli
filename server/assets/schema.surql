@@ -288,6 +288,12 @@ DEFINE TABLE OVERWRITE constructs TYPE RELATION SCHEMALESS;
 DEFINE INDEX OVERWRITE constructs_in_idx  ON constructs FIELDS in;
 DEFINE INDEX OVERWRITE constructs_out_idx ON constructs FIELDS out;
 
+-- Interface satisfaction: A (struct/concrete type) implements B (interface).
+-- Produced by ImplementsLinker during the global link phase (#44).
+DEFINE TABLE OVERWRITE implements TYPE RELATION SCHEMALESS;
+DEFINE INDEX OVERWRITE implements_in_idx  ON implements FIELDS in;
+DEFINE INDEX OVERWRITE implements_out_idx ON implements FIELDS out;
+
 -- ─────────────────────────────────────────
 -- 7. System Tables
 -- ─────────────────────────────────────────

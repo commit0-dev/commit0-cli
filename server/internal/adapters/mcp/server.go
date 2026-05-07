@@ -55,7 +55,9 @@ func New(deps Deps) *mcpsdk.Server {
 				"detection from a bug description). " +
 				"Tests: commit0_tests_for (which tests cover a symbol), " +
 				"commit0_subjects_for (which prod symbols a test exercises). " +
-				"Diff: commit0_diff_impact (git-aware blast fan-out across a diff range).",
+				"Diff: commit0_diff_impact (git-aware blast fan-out across a diff range). " +
+				"Interfaces: commit0_resolve_interface (find all concrete types that " +
+				"satisfy a Go interface and optionally locate their DI wiring sites).",
 		},
 	)
 
@@ -64,6 +66,7 @@ func New(deps Deps) *mcpsdk.Server {
 	registerTestsTools(server, deps, log)
 	registerSimilarTools(server, deps, log)
 	registerDiffTools(server, deps, log)
+	registerInterfaceTools(server, deps, log)
 
 	return server
 }

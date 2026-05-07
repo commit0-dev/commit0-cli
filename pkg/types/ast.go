@@ -60,7 +60,24 @@ const (
 	// EdgeDataDep connects a variable definition to all points where that definition is used.
 	// Metadata keys: "var_name", "def_line", "use_line", "def_type" (assignment, parameter, return_value, for_range).
 	EdgeDataDep EdgeKind = "data_dep"
+
+	// EdgeImplements records that a concrete type satisfies an interface.
+	// FromID = struct/concrete type node; ToID = interface node.
+	// Populated by ImplementsLinker during the global link phase (#44).
+	EdgeImplements EdgeKind = "implements"
 )
+
+// MethodSpec describes a single method on a type — used to populate
+// CodeNode.Methods for class (interface and struct) nodes.
+type MethodSpec struct {
+	// Name is the unqualified method name, e.g. "Run".
+	Name string `json:"name"`
+	// Signature is the full method signature text, e.g. "Run(ctx context.Context) error".
+	// Generic type parameters are stripped before storage (known limitation: textual match only).
+	Signature string `json:"signature"`
+	// Receiver is empty for interface methods and "T" or "*T" for struct methods.
+	Receiver string `json:"receiver,omitempty"`
+}
 
 // MutationKind classifies how data is transformed at a code point.
 type MutationKind string
@@ -93,6 +110,12 @@ type CodeNode struct {
 	Embedding   []float32
 	StartLine   int
 	EndLine     int
+
+	// Methods holds the method set for class (interface and struct) nodes.
+	// Empty for all other node kinds.
+	// For interface nodes: Receiver is "" for every entry.
+	// For struct nodes: Receiver is "T" or "*T".
+	Methods []MethodSpec `json:",omitempty"`
 
 	// Temporal metadata — tracks when this node was introduced/modified in git history.
 	IntroducedCommit   string

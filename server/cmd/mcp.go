@@ -134,8 +134,8 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 	}
 
 	tools := toolsResult.Tools
-	if len(tools) != 12 {
-		return fmt.Errorf("self-test: expected 12 tools, got %d", len(tools))
+	if len(tools) != 13 {
+		return fmt.Errorf("self-test: expected 13 tools, got %d", len(tools))
 	}
 
 	// Check names are sorted.
@@ -155,6 +155,7 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 		"commit0_lookup",
 		"commit0_neighborhood",
 		"commit0_query",
+		"commit0_resolve_interface",
 		"commit0_show_node",
 		"commit0_similar_to",
 		"commit0_subjects_for",
