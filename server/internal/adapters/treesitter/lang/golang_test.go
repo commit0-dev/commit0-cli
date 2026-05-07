@@ -999,6 +999,226 @@ func filterEdges(edges []types.CodeEdge, kind types.EdgeKind) []types.CodeEdge {
 	return result
 }
 
+// ── Method extraction tests (#44) ─────────────────────────────────────────────
+
+// TestGoExtractor_InterfaceMethods verifies that an interface class node is
+// populated with the correct MethodSpec entries.
+func TestGoExtractor_InterfaceMethods(t *testing.T) {
+	src := `package svc
+
+type Runner interface {
+	Run(ctx context.Context) error
+	Stop() error
+}
+`
+	root := parseGoAST(t, src)
+	e := &GoExtractor{}
+	fe := domain.FileEntry{Path: "svc/runner.go", Language: "go", Content: []byte(src)}
+	nodes, _ := e.Extract(root, fe)
+
+	var found *types.CodeNode
+	for i := range nodes {
+		if nodes[i].Kind == types.NodeClass && nodes[i].Name == "Runner" {
+			found = &nodes[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no NodeClass named 'Runner'; nodes: %+v", nodes)
+	}
+	// Embedded placeholder entries may appear; filter to real methods only.
+	var realMethods []types.MethodSpec
+	for _, m := range found.Methods {
+		if len(m.Name) > 0 && m.Name[0] != '<' {
+			realMethods = append(realMethods, m)
+		}
+	}
+	if len(realMethods) != 2 {
+		t.Fatalf("expected 2 real methods on Runner, got %d: %+v", len(realMethods), found.Methods)
+	}
+	// All interface methods must have empty Receiver.
+	for _, m := range realMethods {
+		if m.Receiver != "" {
+			t.Errorf("interface method %q should have empty Receiver, got %q", m.Name, m.Receiver)
+		}
+		if m.Name == "" {
+			t.Error("method name must not be empty")
+		}
+		if m.Signature == "" {
+			t.Error("method signature must not be empty")
+		}
+	}
+	// Verify specific method names.
+	names := map[string]bool{}
+	for _, m := range realMethods {
+		names[m.Name] = true
+	}
+	for _, want := range []string{"Run", "Stop"} {
+		if !names[want] {
+			t.Errorf("missing method %q in %+v", want, realMethods)
+		}
+	}
+}
+
+// TestGoExtractor_StructMethods verifies that struct methods with pointer
+// receivers are collected in the class node's Methods slice.
+func TestGoExtractor_StructMethods(t *testing.T) {
+	src := `package svc
+
+type Adapter struct{}
+
+func (a *Adapter) Run(ctx context.Context) error { return nil }
+func (a *Adapter) Stop() error { return nil }
+`
+	root := parseGoAST(t, src)
+	e := &GoExtractor{}
+	fe := domain.FileEntry{Path: "svc/adapter.go", Language: "go", Content: []byte(src)}
+	nodes, _ := e.Extract(root, fe)
+
+	var found *types.CodeNode
+	for i := range nodes {
+		if nodes[i].Kind == types.NodeClass && nodes[i].Name == "Adapter" {
+			found = &nodes[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no NodeClass named 'Adapter'")
+	}
+	if len(found.Methods) != 2 {
+		t.Fatalf("expected 2 methods on *Adapter, got %d: %+v", len(found.Methods), found.Methods)
+	}
+	for _, m := range found.Methods {
+		if m.Receiver != "*Adapter" {
+			t.Errorf("expected Receiver='*Adapter', got %q (method %q)", m.Receiver, m.Name)
+		}
+		if m.Name == "" {
+			t.Error("method name must not be empty")
+		}
+	}
+	names := map[string]bool{}
+	for _, m := range found.Methods {
+		names[m.Name] = true
+	}
+	for _, want := range []string{"Run", "Stop"} {
+		if !names[want] {
+			t.Errorf("missing method %q in %+v", want, found.Methods)
+		}
+	}
+}
+
+// TestGoExtractor_StructMixedReceivers verifies that both value and pointer
+// receiver methods end up in the class node's Methods slice.
+func TestGoExtractor_StructMixedReceivers(t *testing.T) {
+	src := `package svc
+
+type Widget struct{}
+
+func (w Widget) Name() string { return "widget" }
+func (w *Widget) Reset() { }
+`
+	root := parseGoAST(t, src)
+	e := &GoExtractor{}
+	fe := domain.FileEntry{Path: "svc/widget.go", Language: "go", Content: []byte(src)}
+	nodes, _ := e.Extract(root, fe)
+
+	var found *types.CodeNode
+	for i := range nodes {
+		if nodes[i].Kind == types.NodeClass && nodes[i].Name == "Widget" {
+			found = &nodes[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no NodeClass named 'Widget'")
+	}
+	if len(found.Methods) != 2 {
+		t.Fatalf("expected 2 methods on Widget, got %d: %+v", len(found.Methods), found.Methods)
+	}
+
+	receiverMap := map[string]string{} // name → receiver
+	for _, m := range found.Methods {
+		receiverMap[m.Name] = m.Receiver
+	}
+	if receiverMap["Name"] != "Widget" {
+		t.Errorf("Name() should have value receiver 'Widget', got %q", receiverMap["Name"])
+	}
+	if receiverMap["Reset"] != "*Widget" {
+		t.Errorf("Reset() should have pointer receiver '*Widget', got %q", receiverMap["Reset"])
+	}
+}
+
+// TestGoExtractor_EmbeddedInterfaceDoesNotPanic verifies that an interface
+// with an embedded type reference does not crash the extractor.
+func TestGoExtractor_EmbeddedInterfaceDoesNotPanic(t *testing.T) {
+	src := `package svc
+
+type Closer interface {
+	Close() error
+}
+
+type ReadCloser interface {
+	Closer
+	Read(p []byte) (n int, err error)
+}
+`
+	root := parseGoAST(t, src)
+	e := &GoExtractor{}
+	fe := domain.FileEntry{Path: "svc/io.go", Language: "go", Content: []byte(src)}
+	// Must not panic.
+	nodes, _ := e.Extract(root, fe)
+
+	var rcNode *types.CodeNode
+	for i := range nodes {
+		if nodes[i].Kind == types.NodeClass && nodes[i].Name == "ReadCloser" {
+			rcNode = &nodes[i]
+			break
+		}
+	}
+	if rcNode == nil {
+		t.Fatal("no NodeClass named 'ReadCloser'")
+	}
+	if len(rcNode.Methods) == 0 {
+		t.Error("ReadCloser should have at least one method entry (embedded + Read)")
+	}
+}
+
+// TestGoExtractor_StructMethodsRegression verifies that adding method-set
+// extraction does not regress the basic struct class node shape.
+func TestGoExtractor_StructMethodsRegression(t *testing.T) {
+	src := `package svc
+
+type Service struct {
+	name string
+}
+`
+	root := parseGoAST(t, src)
+	e := &GoExtractor{}
+	fe := domain.FileEntry{Path: "svc/service.go", Language: "go", Content: []byte(src)}
+	nodes, _ := e.Extract(root, fe)
+
+	var found *types.CodeNode
+	for i := range nodes {
+		if nodes[i].Kind == types.NodeClass && nodes[i].Name == "Service" {
+			found = &nodes[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no NodeClass named 'Service'")
+	}
+	if found.ID == "" {
+		t.Error("class node ID must not be empty")
+	}
+	if found.Qualified == "" {
+		t.Error("class node Qualified must not be empty")
+	}
+	// Struct with no methods → empty Methods slice.
+	if len(found.Methods) != 0 {
+		t.Errorf("struct with no methods should have empty Methods, got %+v", found.Methods)
+	}
+}
+
 func TestGoExtractor_ReturnValueFlow_NoLiterals(t *testing.T) {
 	// Return values assigned but only passed as literals should NOT produce edges
 	src := `package main

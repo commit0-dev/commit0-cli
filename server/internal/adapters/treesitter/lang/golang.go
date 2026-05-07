@@ -50,6 +50,19 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 		isLHSAssign bool   // true when inside the left side of an assignment
 	}
 
+	// pendingStructMethod is a deferred struct method spec waiting for
+	// its struct's class node to be materialized (two-pass approach).
+	type pendingStructMethod struct {
+		structQualified string // e.g. "surreal.SurrealAdapter"
+		spec            types.MethodSpec
+	}
+
+	// classIndexByQualified maps qualified class name → index in nodes slice.
+	// Populated as we encounter type_spec nodes; used in the post-pass.
+	classIndexByQualified := make(map[string]int)
+
+	var pendingMethods []pendingStructMethod
+
 	queue := []frame{{node: root, scopeQual: ""}}
 
 	for len(queue) > 0 {
@@ -95,6 +108,34 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 				edges = append(edges, extractGoCFG(n, src, file.Path, fn.Qualified)...)
 				edges = append(edges, extractGoDataDep(n, src, file.Path, fn.Qualified)...)
 				scope = fn.Qualified
+
+				// Collect struct method spec for the post-pass (#44).
+				// We need both the base type name and whether it's a pointer receiver.
+				receiverNode := n.ChildByFieldName("receiver")
+				if receiverNode != nil {
+					nameNode := n.ChildByFieldName("name")
+					if nameNode != nil {
+						baseType, isPointer := extractGoReceiverTypeWithPointer(receiverNode, src)
+						if baseType != "unknown" && baseType != "" {
+							receiver := baseType
+							if isPointer {
+								receiver = "*" + baseType
+							}
+							sig := extractGoSignature(n, src)
+							sig = stripGoGenericParams(sig)
+							structQualified := pkgName + "." + baseType
+							pendingMethods = append(pendingMethods, pendingStructMethod{
+								structQualified: structQualified,
+								spec: types.MethodSpec{
+									Name:      nodeText(nameNode, src),
+									Signature: sig,
+									Receiver:  receiver,
+								},
+							})
+						}
+					}
+				}
+
 				for i := 0; i < int(n.ChildCount()); i++ {
 					queue = append(queue, frame{node: n.Child(i), scopeQual: scope})
 				}
@@ -105,6 +146,7 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 		case "type_spec":
 			cls := extractGoTypeSpec(n, src, file.Path, pkgName)
 			if cls != nil {
+				classIndexByQualified[cls.Qualified] = len(nodes)
 				nodes = append(nodes, *cls)
 				// Still descend (methods may be nearby at package level).
 			}
@@ -171,6 +213,18 @@ func (e *GoExtractor) Extract(root *sitter.Node, file domain.FileEntry) ([]types
 		for i := range int(n.ChildCount()) {
 			queue = append(queue, frame{node: n.Child(i), scopeQual: scope, isLHSAssign: f.isLHSAssign})
 		}
+	}
+
+	// ── Post-pass: attach struct method specs to their class nodes (#44) ─
+	// At this point all type_spec nodes have been collected in `nodes`.
+	// For each deferred method spec, look up the struct's class node by qualified
+	// name and append the MethodSpec to its Methods slice.
+	for _, pm := range pendingMethods {
+		idx, ok := classIndexByQualified[pm.structQualified]
+		if !ok {
+			continue // struct not defined in this file — skip
+		}
+		nodes[idx].Methods = append(nodes[idx].Methods, pm.spec)
 	}
 
 	return nodes, edges
@@ -246,7 +300,8 @@ func extractGoTypeSpec(n *sitter.Node, src []byte, filePath, pkgName string) *ty
 	}
 	name := nodeText(nameNode, src)
 	qualified := pkgName + "." + name
-	return &types.CodeNode{
+
+	cls := &types.CodeNode{
 		ID:         makeNodeID(string(types.NodeClass), qualified),
 		Kind:       types.NodeClass,
 		Name:       name,
@@ -258,6 +313,14 @@ func extractGoTypeSpec(n *sitter.Node, src []byte, filePath, pkgName string) *ty
 		Body:       nodeText(n, src),
 		Visibility: goVisibility(name),
 	}
+
+	// For interface types, extract the declared method set (#44).
+	// Struct methods are attached in a per-file post-pass after all nodes are collected.
+	if t == "interface_type" {
+		cls.Methods = extractGoInterfaceMethods(typeNode, src)
+	}
+
+	return cls
 }
 
 // goImportResult holds module nodes and import edges extracted from an import block.
@@ -1548,6 +1611,205 @@ func extractGoReceiverType(receiverNode *sitter.Node, src []byte) string {
 		}
 	}
 	return "unknown"
+}
+
+// extractGoReceiverTypeWithPointer extracts the base type name and pointer flag
+// from a receiver field list. Returns ("T", false) for value receivers and
+// ("T", true) for pointer receivers. Returns ("unknown", false) on failure.
+func extractGoReceiverTypeWithPointer(receiverNode *sitter.Node, src []byte) (string, bool) {
+	if receiverNode == nil {
+		return "unknown", false
+	}
+	// receiver is a parameter_list; descend into parameter_declaration → type.
+	queue := []*sitter.Node{receiverNode}
+	isPointer := false
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		switch cur.Type() {
+		case "pointer_type":
+			isPointer = true
+			for i := 0; i < int(cur.ChildCount()); i++ {
+				queue = append(queue, cur.Child(i))
+			}
+			continue
+		case "type_identifier":
+			return nodeText(cur, src), isPointer
+		case "generic_type":
+			// Generic receiver: "T[...]" — use the name before the bracket.
+			nameNode := cur.ChildByFieldName("type")
+			if nameNode != nil && nameNode.Type() == "type_identifier" {
+				return nodeText(nameNode, src), isPointer
+			}
+		}
+		for i := 0; i < int(cur.ChildCount()); i++ {
+			queue = append(queue, cur.Child(i))
+		}
+	}
+	return "unknown", false
+}
+
+// extractGoInterfaceMethods walks an interface_type node and returns a
+// MethodSpec for each declared method. Embedded interface references are
+// recorded as MethodSpec{Name: "<embedded:X>", Receiver: ""}. This function
+// never panics: unrecognized child shapes are silently skipped.
+//
+// In the go-tree-sitter grammar, interface method elements are `method_elem`
+// nodes. Each `method_elem` for a regular method has children:
+//   - field_identifier  (the method name, accessible via ChildByFieldName("name"))
+//   - parameter_list    (the parameter list)
+//   - optional return type (type_identifier, etc.)
+//
+// Embedded interface constraints appear as `type_name` or `qualified_type` nodes
+// directly inside interface_type (NOT wrapped in method_elem).
+func extractGoInterfaceMethods(interfaceTypeNode *sitter.Node, src []byte) []types.MethodSpec {
+	if interfaceTypeNode == nil {
+		return nil
+	}
+	var methods []types.MethodSpec
+	for i := 0; i < int(interfaceTypeNode.ChildCount()); i++ {
+		child := interfaceTypeNode.Child(i)
+		if child == nil {
+			continue
+		}
+		switch child.Type() {
+		case "method_elem":
+			// method_elem: field_identifier (name) + parameter_list + optional result.
+			nameNode := child.ChildByFieldName("name")
+			if nameNode == nil {
+				// Fallback: check if first named child is field_identifier.
+				if child.NamedChildCount() > 0 {
+					first := child.NamedChild(0)
+					if first != nil && first.Type() == "field_identifier" {
+						nameNode = first
+					}
+				}
+			}
+			if nameNode == nil {
+				continue
+			}
+			methodName := nodeText(nameNode, src)
+			if methodName == "" {
+				continue
+			}
+
+			// Collect parameter_list and any trailing result type.
+			var paramsText string
+			var resultParts []string
+			seenParams := false
+			for j := 0; j < int(child.NamedChildCount()); j++ {
+				nc := child.NamedChild(j)
+				if nc == nil {
+					continue
+				}
+				switch nc.Type() {
+				case "field_identifier":
+					// skip the name node
+				case "parameter_list":
+					paramsText = nodeText(nc, src)
+					seenParams = true
+				default:
+					if seenParams {
+						// Everything after the parameter_list is part of the return type.
+						resultParts = append(resultParts, nodeText(nc, src))
+					}
+				}
+			}
+			if paramsText == "" {
+				paramsText = "()"
+			}
+
+			var sigParts []string
+			sigParts = append(sigParts, methodName)
+			sigParts = append(sigParts, paramsText)
+			if len(resultParts) > 0 {
+				sigParts = append(sigParts, strings.Join(resultParts, " "))
+			}
+			sig := strings.Join(sigParts, " ")
+			sig = stripGoGenericParams(sig)
+
+			methods = append(methods, types.MethodSpec{
+				Name:      methodName,
+				Signature: sig,
+				Receiver:  "", // interface methods have no receiver
+			})
+
+		case "method_spec":
+			// method_spec: older grammar variant, same structure as method_elem.
+			nameNode := child.ChildByFieldName("name")
+			if nameNode == nil {
+				continue
+			}
+			methodName := nodeText(nameNode, src)
+			if methodName == "" {
+				continue
+			}
+			paramsNode := child.ChildByFieldName("parameters")
+			resultNode := child.ChildByFieldName("result")
+			var sigParts []string
+			sigParts = append(sigParts, methodName)
+			if paramsNode != nil {
+				sigParts = append(sigParts, nodeText(paramsNode, src))
+			} else {
+				sigParts = append(sigParts, "()")
+			}
+			if resultNode != nil {
+				sigParts = append(sigParts, nodeText(resultNode, src))
+			}
+			sig := stripGoGenericParams(strings.Join(sigParts, " "))
+			methods = append(methods, types.MethodSpec{
+				Name:      methodName,
+				Signature: sig,
+				Receiver:  "",
+			})
+
+		case "type_name", "qualified_type":
+			// Embedded interface — record as a placeholder so the linker knows
+			// this interface embeds another. Full method-set resolution from
+			// embedded interfaces is a linker-time concern.
+			embedded := nodeText(child, src)
+			if embedded != "" {
+				methods = append(methods, types.MethodSpec{
+					Name:      "<embedded:" + embedded + ">",
+					Signature: "",
+					Receiver:  "",
+				})
+			}
+		}
+	}
+	return methods
+}
+
+// stripGoGenericParams removes generic type parameter lists like "[T any]"
+// or "[K comparable, V any]" from a signature string. This is a textual
+// substitution only; we don't parse the type parameters.
+func stripGoGenericParams(sig string) string {
+	// Fast path: no brackets → nothing to strip.
+	if !strings.Contains(sig, "[") {
+		return sig
+	}
+	var result strings.Builder
+	depth := 0
+	for _, ch := range sig {
+		switch ch {
+		case '[':
+			depth++
+		case ']':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				result.WriteRune(ch)
+			}
+		}
+	}
+	// Collapse consecutive spaces that may result from stripping.
+	out := result.String()
+	for strings.Contains(out, "  ") {
+		out = strings.ReplaceAll(out, "  ", " ")
+	}
+	return strings.TrimSpace(out)
 }
 
 // extractGoDocComment looks for a comment node immediately preceding n.

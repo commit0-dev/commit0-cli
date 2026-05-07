@@ -14,6 +14,9 @@ type NodeMeta struct {
 	Kind      types.NodeKind
 	FilePath  string
 	IsTest    bool // true if FilePath contains "_test.go" or "_test.py"
+	// Methods holds the method set for class (interface and struct) nodes.
+	// Populated during BuildSymbolTable from CodeNode.Methods.
+	Methods []types.MethodSpec
 }
 
 // SymbolTable is the complete name→ID mapping built from ALL parsed files.
@@ -87,6 +90,7 @@ func BuildSymbolTable(nodes []types.CodeNode) *SymbolTable {
 			Kind:      n.Kind,
 			FilePath:  n.FilePath,
 			IsTest:    isTest,
+			Methods:   n.Methods,
 		}
 	}
 

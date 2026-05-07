@@ -366,6 +366,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		&linkers.DataFlowLinker{},
 		&linkers.FieldAccessLinker{},
 		&linkers.RouteLinker{},
+		&linkers.ImplementsLinker{}, // F3: interface satisfaction (#44)
 	})
 
 	apiSurfaceSvc := app.NewAPISurfaceService(graph, flowSvc, d.explainer, cfg)
