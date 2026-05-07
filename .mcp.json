@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "commit0": {
+      "type": "stdio",
+      "command": "./bin/commit0",
+      "args": ["mcp"],
+      "env": {
+        "SURREAL_URL": "ws://127.0.0.1:8001",
+        "SURREAL_USER": "root",
+        "SURREAL_PASS": "root"
+      }
+    }
+  }
+}
