@@ -41,10 +41,9 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
           cache: false   # golangci-lint-action manages its own cache
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
-          install-mode: binary   # release binary is built with Go matching the project toolchain; goinstall would fall back to the action runner's Go (1.25), which trips the v2 "language version too low" check
           working-directory: ${{ matrix.module }}
           args: -c ../.golangci.yml --timeout=5m
 
