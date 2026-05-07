@@ -13,14 +13,18 @@ import (
 // ── Fakes ─────────────────────────────────────────────────────────────────
 
 type fakeGitWalker struct {
-	commits    []domain.GitCommit
-	listErr    error
-	diffs      []domain.GitFileDiff
-	diffErr    error
-	fileData   []byte
-	fileErr    error
-	commitInfo *domain.GitCommit
-	infoErr    error
+	commits      []domain.GitCommit
+	listErr      error
+	diffs        []domain.GitFileDiff
+	diffErr      error
+	fileData     []byte
+	fileErr      error
+	commitInfo   *domain.GitCommit
+	infoErr      error
+	workingDiffs []domain.GitFileDiff
+	workingErr   error
+	rangeDiffs   []domain.GitFileDiff
+	rangeErr     error
 }
 
 func (g *fakeGitWalker) ListCommits(_ context.Context, _, _, _ string) ([]domain.GitCommit, error) {
@@ -37,6 +41,14 @@ func (g *fakeGitWalker) ReadFileAtCommit(_ context.Context, _, _, _ string) ([]b
 
 func (g *fakeGitWalker) CommitInfo(_ context.Context, _, _ string) (*domain.GitCommit, error) {
 	return g.commitInfo, g.infoErr
+}
+
+func (g *fakeGitWalker) DiffWorkingTree(_ context.Context, _ string) ([]domain.GitFileDiff, error) {
+	return g.workingDiffs, g.workingErr
+}
+
+func (g *fakeGitWalker) DiffRange(_ context.Context, _, _, _ string) ([]domain.GitFileDiff, error) {
+	return g.rangeDiffs, g.rangeErr
 }
 
 type fakeTemporalStore struct {

@@ -227,6 +227,14 @@ type GitWalker interface {
 	DiffCommit(ctx context.Context, repoPath, commitHash string) ([]GitFileDiff, error)
 	ReadFileAtCommit(ctx context.Context, repoPath, commitHash, filePath string) ([]byte, error)
 	CommitInfo(ctx context.Context, repoPath, commitHash string) (*GitCommit, error)
+
+	// DiffWorkingTree returns staged + unstaged changes vs HEAD.
+	// Each GitFileDiff includes the unified patch text in Patch.
+	DiffWorkingTree(ctx context.Context, repoPath string) ([]GitFileDiff, error)
+
+	// DiffRange returns the diff between two refs.
+	// toRef may be the literal "WORKING" to mean DiffWorkingTree.
+	DiffRange(ctx context.Context, repoPath, fromRef, toRef string) ([]GitFileDiff, error)
 }
 
 // ---------------------------------------------------------------------------

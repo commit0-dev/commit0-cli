@@ -164,6 +164,14 @@ func (f *fakeGitWalker) CommitInfo(_ context.Context, _, _ string) (*domain.GitC
 	return f.commitInfo, f.infoErr
 }
 
+func (f *fakeGitWalker) DiffWorkingTree(_ context.Context, _ string) ([]domain.GitFileDiff, error) {
+	return nil, nil
+}
+
+func (f *fakeGitWalker) DiffRange(_ context.Context, _, _, _ string) ([]domain.GitFileDiff, error) {
+	return nil, nil
+}
+
 var _ domain.GitWalker = (*fakeGitWalker)(nil)
 
 // fakeParser satisfies domain.Parser.

@@ -208,6 +208,7 @@ type serveServices struct {
 	agent      domain.AgentRunner
 	flow       *app.FieldFlowService
 	rootCause  *app.RootCauseAnalysisService
+	diffImpact *app.DiffImpactService
 	apiSurface *app.APISurfaceService
 	syncSvc    *app.SyncService
 	transport  domain.PeerTransport
@@ -238,6 +239,9 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 	flowSvc := app.NewFieldFlowService(graph, d.embedder, d.explainer, cfg)
 	gitW := gitadapter.NewWalker(log)
 	rootCauseSvc := app.NewRootCauseAnalysisService(querySvc, flowSvc, nil, graph, gitW, d.explainer, cfg)
+
+	// Diff impact service — git-aware blast fan-out.
+	diffImpactSvc := app.NewDiffImpactService(graph, blastSvc, gitW, d.explainer, cfg)
 
 	// Memory management (3-tier: working → session → persistent).
 	memMgr := memory.NewManager(d.db.AsMemoryStore(), d.embedder, nil, memory.DefaultBudgets())
@@ -417,6 +421,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		agent:      agentRunner,
 		flow:       flowSvc,
 		rootCause:  rootCauseSvc,
+		diffImpact: diffImpactSvc,
 		apiSurface: apiSurfaceSvc,
 		syncSvc:    syncSvc,
 		transport:  quicTransport,

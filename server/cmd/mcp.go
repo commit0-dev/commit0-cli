@@ -80,6 +80,7 @@ func runMCPServer(ctx context.Context, cfg *config.Config) error {
 		deps.BlastService = svcs.blast
 		deps.FieldFlowService = svcs.flow
 		deps.RootCauseService = svcs.rootCause
+		deps.DiffImpactService = svcs.diffImpact
 		deps.Graph = svcs.graph
 		defer svcs.cleanup()
 	}
@@ -133,8 +134,8 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 	}
 
 	tools := toolsResult.Tools
-	if len(tools) != 11 {
-		return fmt.Errorf("self-test: expected 11 tools, got %d", len(tools))
+	if len(tools) != 12 {
+		return fmt.Errorf("self-test: expected 12 tools, got %d", len(tools))
 	}
 
 	// Check names are sorted.
@@ -148,6 +149,7 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 
 	expectedTools := []string{
 		"commit0_blast",
+		"commit0_diff_impact",
 		"commit0_field_flow",
 		"commit0_find_root_cause",
 		"commit0_lookup",

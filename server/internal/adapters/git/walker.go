@@ -213,6 +213,191 @@ func (w *Walker) CommitInfo(ctx context.Context, repoPath, commitHash string) (*
 	}, nil
 }
 
+// DiffWorkingTree returns staged + unstaged changes compared to HEAD.
+// It shells out to "git diff HEAD" to get the unified diff patch text, and
+// "git diff HEAD --name-status" to populate the per-file status and paths.
+func (w *Walker) DiffWorkingTree(ctx context.Context, repoPath string) ([]domain.GitFileDiff, error) {
+	absPath, err := filepath.Abs(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("abs path: %w", err)
+	}
+
+	// Get file status and stats (staged + unstaged vs HEAD).
+	nameStatusOut, err := exec.CommandContext(ctx, "git", "-C", absPath,
+		"diff", "HEAD", "--name-status", "--no-color").Output()
+	if err != nil {
+		// HEAD may not exist (empty repo) — return empty slice.
+		w.log.Debug("git diff HEAD --name-status failed", "err", err)
+		return nil, nil
+	}
+
+	fileStats := parseNameStatus(string(nameStatusOut))
+	if len(fileStats) == 0 {
+		return nil, nil
+	}
+
+	// Get numeric stats (--numstat) for additions/deletions.
+	numstatOut, err := exec.CommandContext(ctx, "git", "-C", absPath,
+		"diff", "HEAD", "--numstat", "--no-color").Output()
+	if err == nil {
+		applyNumstat(string(numstatOut), fileStats)
+	}
+
+	// Get the unified diff patch.
+	patchOut, err := exec.CommandContext(ctx, "git", "-C", absPath,
+		"diff", "HEAD", "--no-color").Output()
+	if err == nil {
+		assignPatches(string(patchOut), fileStats)
+	}
+
+	diffs := fileStatsToDiffs(fileStats)
+	w.log.Debug("diff working tree", "repo", repoPath, "files", len(diffs))
+	return diffs, nil
+}
+
+// DiffRange returns the diff between two git refs.
+// If toRef is the literal "WORKING", it delegates to DiffWorkingTree.
+func (w *Walker) DiffRange(ctx context.Context, repoPath, fromRef, toRef string) ([]domain.GitFileDiff, error) {
+	if toRef == "WORKING" {
+		return w.DiffWorkingTree(ctx, repoPath)
+	}
+
+	absPath, err := filepath.Abs(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("abs path: %w", err)
+	}
+
+	rangeSpec := fromRef + ".." + toRef
+
+	// Get file name + status.
+	nameStatusOut, err := exec.CommandContext(ctx, "git", "-C", absPath,
+		"diff", rangeSpec, "--name-status", "--no-color").Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff %s --name-status: %w", rangeSpec, err)
+	}
+
+	fileStats := parseNameStatus(string(nameStatusOut))
+	if len(fileStats) == 0 {
+		return nil, nil
+	}
+
+	// Numeric stats for additions/deletions.
+	numstatOut, err := exec.CommandContext(ctx, "git", "-C", absPath,
+		"diff", rangeSpec, "--numstat", "--no-color").Output()
+	if err == nil {
+		applyNumstat(string(numstatOut), fileStats)
+	}
+
+	// Unified diff patch.
+	patchOut, err := exec.CommandContext(ctx, "git", "-C", absPath,
+		"diff", rangeSpec, "--no-color").Output()
+	if err == nil {
+		assignPatches(string(patchOut), fileStats)
+	}
+
+	diffs := fileStatsToDiffs(fileStats)
+	w.log.Debug("diff range", "repo", repoPath, "range", rangeSpec, "files", len(diffs))
+	return diffs, nil
+}
+
+// parseNameStatus parses "git diff --name-status" output into a map keyed by
+// the new (or only) file path.  Status letters: A=added, M=modified,
+// D=deleted, Rnn=renamed (e.g. R100), Cnn=copied.
+func parseNameStatus(output string) map[string]*domain.GitFileDiff {
+	fileStats := make(map[string]*domain.GitFileDiff)
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		statusCode := parts[0]
+		var status, path, oldPath string
+
+		switch {
+		case strings.HasPrefix(statusCode, "R"), strings.HasPrefix(statusCode, "C"):
+			if len(parts) < 3 {
+				continue
+			}
+			oldPath = parts[1]
+			path = parts[2]
+			status = "renamed"
+		case statusCode == "A":
+			path = parts[1]
+			status = "added"
+		case statusCode == "D":
+			path = parts[1]
+			status = "deleted"
+		default: // "M", "T", "U", etc.
+			path = parts[1]
+			status = "modified"
+		}
+
+		fileStats[path] = &domain.GitFileDiff{
+			Path:    path,
+			OldPath: oldPath,
+			Status:  status,
+		}
+	}
+	return fileStats
+}
+
+// applyNumstat merges additions/deletions from "git diff --numstat" output
+// into the existing fileStats map.
+func applyNumstat(output string, fileStats map[string]*domain.GitFileDiff) {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		// numstat format: "adds\tdels\tpath" — path may be "{old => new}" for renames
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		adds, _ := strconv.Atoi(parts[0])
+		dels, _ := strconv.Atoi(parts[1])
+		rawPath := parts[2]
+
+		// Resolve rename notation "{old/path => new/path}" or "path/{old => new}"
+		path := resolveRenameNotation(rawPath)
+
+		if d, ok := fileStats[path]; ok {
+			d.Additions = adds
+			d.Deletions = dels
+		}
+	}
+}
+
+// resolveRenameNotation converts git rename notation like "{old => new}/file" or
+// "prefix/{old => new}" to the new path.
+func resolveRenameNotation(path string) string {
+	open := strings.Index(path, "{")
+	arrow := strings.Index(path, " => ")
+	close := strings.Index(path, "}")
+	if open < 0 || arrow < 0 || close < 0 || arrow < open || close < arrow {
+		return path
+	}
+	prefix := path[:open]
+	newPart := path[arrow+4 : close]
+	suffix := path[close+1:]
+	return prefix + newPart + suffix
+}
+
+// fileStatsToDiffs converts the fileStats map into a slice.
+func fileStatsToDiffs(fileStats map[string]*domain.GitFileDiff) []domain.GitFileDiff {
+	diffs := make([]domain.GitFileDiff, 0, len(fileStats))
+	for _, d := range fileStats {
+		diffs = append(diffs, *d)
+	}
+	return diffs
+}
+
 // assignPatches parses a unified diff output and assigns patches to the
 // corresponding GitFileDiff entries keyed by file path.
 func assignPatches(patchText string, files map[string]*domain.GitFileDiff) {

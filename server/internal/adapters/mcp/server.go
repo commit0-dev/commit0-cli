@@ -23,12 +23,13 @@ const (
 // Callers set these fields after successfully wiring adapters; the server
 // falls back to dbUnavailableError() on first use if they remain nil.
 type Deps struct {
-	QueryService     *app.QueryService
-	TraceService     *app.TraceService
-	BlastService     *app.BlastService
-	FieldFlowService *app.FieldFlowService
-	RootCauseService *app.RootCauseAnalysisService
-	Graph            domain.OpenCodeGraph
+	QueryService      *app.QueryService
+	TraceService      *app.TraceService
+	BlastService      *app.BlastService
+	FieldFlowService  *app.FieldFlowService
+	RootCauseService  *app.RootCauseAnalysisService
+	DiffImpactService *app.DiffImpactService
+	Graph             domain.OpenCodeGraph
 	// DBAddr is shown in the unavailability error message when Graph is nil.
 	DBAddr string
 }
@@ -53,7 +54,8 @@ func New(deps Deps) *mcpsdk.Server {
 				"data flow + mutations), commit0_find_root_cause (commit-zero " +
 				"detection from a bug description). " +
 				"Tests: commit0_tests_for (which tests cover a symbol), " +
-				"commit0_subjects_for (which prod symbols a test exercises).",
+				"commit0_subjects_for (which prod symbols a test exercises). " +
+				"Diff: commit0_diff_impact (git-aware blast fan-out across a diff range).",
 		},
 	)
 
@@ -61,6 +63,7 @@ func New(deps Deps) *mcpsdk.Server {
 	registerTraceTools(server, deps, log)
 	registerTestsTools(server, deps, log)
 	registerSimilarTools(server, deps, log)
+	registerDiffTools(server, deps, log)
 
 	return server
 }
@@ -144,6 +147,18 @@ func rootCauseServiceFromDeps(deps Deps) (*app.RootCauseAnalysisService, *mcpsdk
 		return nil, dbUnavailableError(addr)
 	}
 	return deps.RootCauseService, nil
+}
+
+// diffImpactServiceFromDeps returns the DiffImpactService or a nil guard with an error.
+func diffImpactServiceFromDeps(deps Deps) (*app.DiffImpactService, *mcpsdk.CallToolResult) {
+	if deps.DiffImpactService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.DiffImpactService, nil
 }
 
 // RunStdio starts the MCP server on stdio transport, blocking until the client
