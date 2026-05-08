@@ -56,6 +56,8 @@ DEFINE FIELD OVERWRITE embed_provider  ON file TYPE option<string>;
 DEFINE FIELD OVERWRITE summary         ON file TYPE option<string>;
 DEFINE FIELD OVERWRITE concepts     ON file TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at   ON file TYPE datetime VALUE time::now();
+DEFINE FIELD IF NOT EXISTS confidence         ON file TYPE option<float> VALUE 1.0;
+DEFINE FIELD IF NOT EXISTS provenance         ON file TYPE option<object>;
 
 DEFINE FIELD OVERWRITE symbol_count ON file COMPUTED
     count(->defines->`function`) + count(->defines->class);
@@ -106,6 +108,10 @@ DEFINE FIELD IF NOT EXISTS last_modified_commit ON `function` TYPE option<string
 DEFINE FIELD IF NOT EXISTS last_modified_at     ON `function` TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS removed_commit       ON `function` TYPE option<string>;
 
+-- Confidence and provenance fields
+DEFINE FIELD IF NOT EXISTS confidence         ON `function` TYPE option<float> VALUE 1.0;
+DEFINE FIELD IF NOT EXISTS provenance         ON `function` TYPE option<object>;
+
 -- ─────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE class SCHEMAFULL CHANGEFEED 7d;
@@ -142,6 +148,10 @@ DEFINE FIELD IF NOT EXISTS introduced_at        ON class TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_modified_commit ON class TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS last_modified_at     ON class TYPE option<datetime>;
 
+-- Confidence and provenance fields
+DEFINE FIELD IF NOT EXISTS confidence         ON class TYPE option<float> VALUE 1.0;
+DEFINE FIELD IF NOT EXISTS provenance         ON class TYPE option<object>;
+
 -- ─────────────────────────────────────────
 
 DEFINE TABLE OVERWRITE module SCHEMAFULL CHANGEFEED 7d;
@@ -158,6 +168,8 @@ DEFINE FIELD OVERWRITE embed_provider  ON module TYPE option<string>;
 DEFINE FIELD OVERWRITE summary         ON module TYPE option<string>;
 DEFINE FIELD OVERWRITE concepts   ON module TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE indexed_at ON module TYPE datetime VALUE time::now();
+DEFINE FIELD IF NOT EXISTS confidence         ON module TYPE option<float> VALUE 1.0;
+DEFINE FIELD IF NOT EXISTS provenance         ON module TYPE option<object>;
 
 DEFINE FIELD OVERWRITE file_count ON module COMPUTED count(<-imports<-file);
 

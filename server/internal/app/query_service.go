@@ -19,13 +19,14 @@ import (
 
 // QueryRequest represents a natural language query.
 type QueryRequest struct {
-	Question  string
-	RepoSlug  string
-	NodeKinds []types.NodeKind
-	TopK      int
-	MinScore  float64
-	NoExplain bool
-	FilePath  string // filter results to this file/directory prefix
+	Question      string
+	RepoSlug      string
+	NodeKinds     []types.NodeKind
+	TopK          int
+	MinScore      float64
+	NoExplain     bool
+	FilePath      string  // filter results to this file/directory prefix
+	MinConfidence float64 // filter out nodes below this confidence (0 = no filter)
 }
 
 // QueryService handles semantic code search.
@@ -146,6 +147,16 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 		fused = filtered
 	}
 
+	if req.MinConfidence > 0 {
+		filtered := fused[:0]
+		for _, n := range fused {
+			if float64(n.Node.Confidence) >= req.MinConfidence {
+				filtered = append(filtered, n)
+			}
+		}
+		fused = filtered
+	}
+
 	if len(fused) > req.TopK {
 		fused = fused[:req.TopK]
 	}
@@ -219,6 +230,7 @@ func (qs *QueryService) Query(ctx context.Context, req QueryRequest) (*types.Que
 		StructuredExplanation: structuredExplan,
 		Query:                 req.Question,
 		RepoSlug:              req.RepoSlug,
+		Confidence:            computeNodeConfidence(fused),
 		Timing: types.TimingInfo{
 			EmbedMS:   embedMS,
 			SearchMS:  searchMS,
@@ -580,4 +592,26 @@ func (qs *QueryService) conceptRerank(fused []types.ScoredNode, question string)
 	})
 
 	return fused
+}
+
+func computeNodeConfidence(nodes []types.ScoredNode) *types.ConfidenceMetadata {
+	if len(nodes) == 0 {
+		return nil
+	}
+	var total float64
+	var low, high int
+	for _, n := range nodes {
+		c := float64(n.Node.Confidence)
+		total += c
+		if c < 0.7 {
+			low++
+		} else {
+			high++
+		}
+	}
+	return &types.ConfidenceMetadata{
+		AvgConfidence:       total / float64(len(nodes)),
+		LowConfidenceCount:  low,
+		HighConfidenceCount: high,
+	}
 }

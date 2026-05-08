@@ -91,6 +91,13 @@ const (
 	MutationFilter      MutationKind = "filter"       // conditional inclusion
 )
 
+// Provenance records the origin and method of a fact in the graph.
+type Provenance struct {
+	Source    string    `json:"source"` // "parser", "call_linker", "dataflow_linker", "implements_linker", "field_access_linker", "route_linker", "defines_linker", "manual", "webhook"
+	Method    string    `json:"method"` // "ast_extraction", "symbol_resolution", "type_inference", "heuristic", "user_edit"
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // CodeNode represents a single entity in the codebase (function, class, file, module).
 type CodeNode struct {
 	Language    string
@@ -122,6 +129,9 @@ type CodeNode struct {
 	IntroducedAt       *time.Time
 	LastModifiedCommit string
 	LastModifiedAt     *time.Time
+
+	Confidence float32     `json:",omitempty"`
+	Provenance *Provenance `json:",omitempty"`
 }
 
 // CodeEdge represents a relationship between two code nodes.
@@ -138,6 +148,9 @@ type CodeEdge struct {
 	IntroducedCommit string
 	IntroducedAt     *time.Time
 	RemovedCommit    string
+
+	Confidence float32     `json:",omitempty"`
+	Provenance *Provenance `json:",omitempty"`
 }
 
 // Repo represents a source code repository.

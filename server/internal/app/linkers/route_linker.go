@@ -1,6 +1,8 @@
 package linkers
 
 import (
+	"time"
+
 	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
@@ -22,6 +24,12 @@ func (l *RouteLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([]t
 		}
 		if isResolved(e.ToID) {
 			if _, ok := sym.Nodes[e.ToID]; ok {
+				e.Confidence = 0.95
+				e.Provenance = &types.Provenance{
+					Source:    "route_linker",
+					Method:    "route_handler_resolution",
+					CreatedAt: time.Now(),
+				}
 				stats.Resolved++
 				stats.Processed++
 				continue
@@ -32,9 +40,17 @@ func (l *RouteLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([]t
 		resolved, ok := sym.Resolve(e.ToID, e.FromID)
 		if ok {
 			e.ToID = resolved
+			e.Confidence = 0.95
 			stats.Resolved++
 		} else {
+			e.Confidence = 0.5
 			stats.Unresolved++
+		}
+
+		e.Provenance = &types.Provenance{
+			Source:    "route_linker",
+			Method:    "route_handler_resolution",
+			CreatedAt: time.Now(),
 		}
 	}
 

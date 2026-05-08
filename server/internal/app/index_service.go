@@ -528,6 +528,7 @@ func (is *IndexService) runStore(ctx context.Context, embedCh <-chan *embeddedFi
 			if err := storeCtx.Err(); err != nil {
 				return err
 			}
+			stampParserProvenance(embedded.Nodes)
 			if err := is.graph.PutBatch(storeCtx, embedded.Nodes, embedded.Edges); err != nil {
 				is.log.Error("upsert failed", "err", err)
 				run.addError()
@@ -918,4 +919,20 @@ func (is *IndexService) ReEmbed(ctx context.Context, repoSlug string, onProgress
 		NodesTotal:    total,
 		Provider:      is.cfg.EmbedProvider,
 	}, nil
+}
+
+func stampParserProvenance(nodes []types.CodeNode) {
+	now := time.Now()
+	for i := range nodes {
+		if nodes[i].Confidence == 0 {
+			nodes[i].Confidence = 1.0
+		}
+		if nodes[i].Provenance == nil {
+			nodes[i].Provenance = &types.Provenance{
+				Source:    "parser",
+				Method:    "ast_extraction",
+				CreatedAt: now,
+			}
+		}
+	}
 }
