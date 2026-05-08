@@ -129,6 +129,12 @@ func (a *SurrealAdapter) Range(ctx context.Context, filter types.EventFilter) ([
 	err := retry.WithRetry(ctx, 3, func() error {
 		results, err := surrealdb.Query[[]eventRow](ctx, a.readDB(), query, params)
 		if err != nil {
+			// Table missing → no events yet on a fresh instance. Return
+			// empty rather than 500 so consumers can poll before any
+			// event has been appended.
+			if strings.Contains(err.Error(), "does not exist") {
+				return nil
+			}
 			return err
 		}
 		if results == nil || len(*results) == 0 {
@@ -298,6 +304,10 @@ func (a *SurrealAdapter) Count(ctx context.Context, filter types.EventFilter) (i
 	err := retry.WithRetry(ctx, 3, func() error {
 		results, err := surrealdb.Query[[]countResult](ctx, a.readDB(), query, params)
 		if err != nil {
+			// Table missing → 0 (fresh instance).
+			if strings.Contains(err.Error(), "does not exist") {
+				return nil
+			}
 			return err
 		}
 		if results != nil && len(*results) > 0 && len((*results)[0].Result) > 0 {
