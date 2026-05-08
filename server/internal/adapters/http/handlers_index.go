@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -137,4 +138,82 @@ func (s *Server) handleIndexStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, tracker.Snapshot())
+}
+
+// handleIndexStream handles GET /api/v1/index/:job_id/stream — SSE stream of
+// indexing events: stage_start, graph_delta (nodes + edges), stage_done,
+// progress, done, error. Coexists with the poll endpoint (handleIndexStatus);
+// the indexer keeps running independently of any single consumer.
+//
+// Late attachers get a synthetic `progress` snapshot first (so the UI has
+// non-empty state immediately) and the terminal `done` event when the job
+// finishes — but they do NOT see graph_delta events that fired before they
+// connected. The poll endpoint is the source of truth for fully-attached
+// state; the stream is for live deltas.
+func (s *Server) handleIndexStream(c *gin.Context) {
+	jobID := c.Param("job_id")
+	tracker, ok := s.trackers.get(jobID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"message": "job not found"})
+		return
+	}
+
+	// Switch the response to SSE before subscribing so any error path above
+	// doesn't leave a half-open stream.
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	// SSE responses are long-lived; clear the per-write deadline so the
+	// pipeline can hold the connection open until the job finishes or the
+	// client disconnects. (Same pattern as handleAgentChat / handleTrace.)
+	if ctrl := http.NewResponseController(c.Writer); ctrl != nil {
+		_ = ctrl.SetWriteDeadline(time.Time{})
+	}
+
+	events, unsub := tracker.Subscribe()
+	defer unsub()
+
+	// Catch-up snapshot: emit one progress event so a late attacher sees the
+	// current state immediately rather than waiting for the next tick.
+	snap := tracker.Snapshot()
+	writeSSE(c, string(types.IndexEventProgress), types.IndexEvent{
+		Type: types.IndexEventProgress,
+		Progress: &types.ProgressSnapshot{
+			FilesIndexed: snap.FilesIndexed,
+			NodesCreated: snap.NodesCreated,
+			EdgesCreated: snap.EdgesCreated,
+			ElapsedMS:    snap.ElapsedMS,
+			CurrentStage: snap.CurrentStage,
+		},
+		EmittedAt: time.Now(),
+	})
+
+	// Already-finished job: emit a synthetic `done` and exit cleanly. This
+	// covers the case where a client polls the stream after completion to
+	// fetch the final summary in the same uniform way live consumers do.
+	if snap.Status == "completed" || snap.Status == "failed" {
+		writeSSE(c, string(types.IndexEventDone), types.IndexEvent{
+			Type:      types.IndexEventDone,
+			Done:      &snap,
+			EmittedAt: time.Now(),
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+	for {
+		select {
+		case evt, open := <-events:
+			if !open {
+				return
+			}
+			writeSSE(c, string(evt.Type), evt)
+		case <-ctx.Done():
+			// Client disconnected mid-stream — unsub via defer and let the
+			// indexer keep running (its lifetime is decoupled from this req).
+			return
+		}
+	}
 }

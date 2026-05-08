@@ -105,6 +105,14 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	startTime := time.Now()
 	run := &indexRun{onProgress: is.progressFn}
 
+	// Periodic progress emitter for the SSE stream. Cheap (just reads counters
+	// + fans out a small payload) and bounded by tracker's non-blocking emit.
+	progCtx, progCancel := context.WithCancel(ctx)
+	defer progCancel()
+	if is.tracker != nil {
+		go is.runProgressTicker(progCtx, 250*time.Millisecond)
+	}
+
 	repo, err := is.runSetup(ctx, &req, run)
 	if err != nil {
 		return nil, err
@@ -138,6 +146,24 @@ func (is *IndexService) Index(ctx context.Context, req IndexRequest) (*IndexResu
 	is.runPostPipeline(ctx, req, run)
 
 	return result, nil
+}
+
+// runProgressTicker fires periodic progress events to the SSE stream while the
+// pipeline is active. Stops when ctx is canceled (defer in Index).
+func (is *IndexService) runProgressTicker(ctx context.Context, every time.Duration) {
+	if is.tracker == nil {
+		return
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			is.tracker.EmitProgress()
+		}
+	}
 }
 
 // runSetup handles force-delete, git metadata, repo dedup, and repo upsert.
@@ -507,6 +533,10 @@ func (is *IndexService) runStore(ctx context.Context, embedCh <-chan *embeddedFi
 			if is.tracker != nil {
 				is.tracker.AddStored(len(embedded.Nodes), len(embedded.Edges))
 				is.tracker.IncrStage(types.StageStore, len(embedded.Nodes))
+				// Stream the just-persisted batch to any SSE consumers. Nodes
+				// arrive before edges within this delta because PutBatch
+				// commits them in that order. No-op when there's no consumer.
+				is.tracker.EmitGraphDelta(embedded.Nodes, embedded.Edges)
 			}
 			return nil
 		})
