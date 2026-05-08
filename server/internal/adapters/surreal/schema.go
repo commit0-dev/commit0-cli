@@ -14,7 +14,7 @@ import (
 // schemaVersion is the version number written to the schema_version table
 // by the DDL in schema.surql. Bump this when the schema changes.
 // Bump when: schema structure changes OR default embed dimension changes.
-const schemaVersion = 19 // 19: declare `implements` relation table (#44)
+const schemaVersion = 21 // 21: knowledge-graph tables (person/decision/incident/deploy/runbook/conversation) — PR 1.4, Issue #70
 
 // SchemaVersion returns the current schema version for external callers.
 func SchemaVersion() int { return schemaVersion }

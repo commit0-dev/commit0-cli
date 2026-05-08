@@ -242,6 +242,19 @@ func kindFromTable(table string) types.NodeKind {
 		return types.NodeFile
 	case "module":
 		return types.NodeModule
+	// Knowledge graph tables (PR 1.4, Issue #70).
+	case "person":
+		return types.NodePerson
+	case "decision":
+		return types.NodeDecision
+	case "incident":
+		return types.NodeIncident
+	case "deploy":
+		return types.NodeDeploy
+	case "runbook":
+		return types.NodeRunbook
+	case "conversation":
+		return types.NodeConversation
 	}
 	return types.NodeFunction
 }
@@ -307,7 +320,7 @@ func (a *SurrealAdapter) GetNode(ctx context.Context, id string) (*types.CodeNod
 // names like "ParseGoMod" instead of "treesitter.ParseGoMod".
 func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified string) (*types.CodeNode, error) {
 	// Try each node table in priority order.
-	tables := []string{"function", "class", "module", "file"}
+	tables := []string{"function", "class", "module", "file", "person", "decision", "incident", "deploy", "runbook", "conversation"}
 	const q = `SELECT * FROM $table WHERE repo = $repo_ref AND qualified = $qualified LIMIT 1;`
 
 	for _, table := range tables {
@@ -317,6 +330,11 @@ func (a *SurrealAdapter) GetNodeByQualified(ctx context.Context, repo, qualified
 			"qualified": qualified,
 		})
 		if err != nil {
+			// Knowledge tables may not exist yet on a cold instance; skip
+			// rather than fail the whole lookup.
+			if strings.Contains(err.Error(), "does not exist") {
+				continue
+			}
 			return nil, fmt.Errorf("get node by qualified %s/%s: %w", repo, qualified, err)
 		}
 		if results != nil && len(*results) > 0 && len((*results)[0].Result) > 0 {
@@ -826,15 +844,16 @@ func (a *SurrealAdapter) ListFilePaths(ctx context.Context, repoSlug string) ([]
 // ListAllNodes returns all nodes (function, class, file, module) for a repo with full data.
 // Used by GraphExporter for building sync bundles.
 func (a *SurrealAdapter) ListAllNodes(ctx context.Context, repoSlug string) ([]types.CodeNode, error) {
-	tables := []string{"`function`", "class", "file", "module"}
-	params := map[string]any{
+	// Code-graph tables join through the `repo` record reference (cascade delete).
+	codeTables := []string{"`function`", "class", "file", "module"}
+	codeParams := map[string]any{
 		"repo_ref": models.NewRecordID("repo", repoSlug),
 	}
 
 	var nodes []types.CodeNode
-	for _, table := range tables {
+	for _, table := range codeTables {
 		q := fmt.Sprintf("SELECT * FROM %s WHERE repo = $repo_ref;", table)
-		results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), q, params)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), q, codeParams)
 		if err != nil {
 			return nil, fmt.Errorf("list all nodes %s [%s]: %w", repoSlug, table, err)
 		}
@@ -842,6 +861,28 @@ func (a *SurrealAdapter) ListAllNodes(ctx context.Context, repoSlug string) ([]t
 			continue
 		}
 		kind := kindFromTable(strings.Trim(table, "`"))
+		for _, r := range (*results)[0].Result {
+			nodes = append(nodes, rowToCodeNode(r, kind))
+		}
+	}
+
+	// Knowledge-graph tables (PR 1.4) filter on `repo_slug` (string) — they
+	// don't carry a `repo` record reference because they're not produced by
+	// the indexer and don't need cascade-on-delete semantics.
+	knowledgeTables := []string{"person", "decision", "incident", "deploy", "runbook", "conversation"}
+	knowledgeParams := map[string]any{"slug": repoSlug}
+	for _, table := range knowledgeTables {
+		q := fmt.Sprintf("SELECT * FROM %s WHERE repo_slug = $slug;", table)
+		results, err := surrealdb.Query[[]nodeRow](ctx, a.readDB(), q, knowledgeParams)
+		if err != nil {
+			// Knowledge tables auto-create on first insert; skip silently
+			// when the table does not yet exist on a fresh instance.
+			continue
+		}
+		if results == nil || len(*results) == 0 {
+			continue
+		}
+		kind := kindFromTable(table)
 		for _, r := range (*results)[0].Result {
 			nodes = append(nodes, rowToCodeNode(r, kind))
 		}

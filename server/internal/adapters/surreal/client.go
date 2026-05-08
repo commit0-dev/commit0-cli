@@ -196,6 +196,19 @@ func nodeTable(kind string) string {
 		return "file"
 	case "module":
 		return "module"
+	// Knowledge graph kinds (PR 1.4, Issue #70).
+	case "person":
+		return "person"
+	case "decision":
+		return "decision"
+	case "incident":
+		return "incident"
+	case "deploy":
+		return "deploy"
+	case "runbook":
+		return "runbook"
+	case "conversation":
+		return "conversation"
 	default:
 		return "function" // safe fallback
 	}

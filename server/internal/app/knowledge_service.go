@@ -93,7 +93,7 @@ func (s *KnowledgeService) GetNode(ctx context.Context, id string) (*types.Knowl
 	if s.graph == nil {
 		return nil, domain.Unavailable("knowledge store not configured")
 	}
-	cn, err := s.graph.FindNode(ctx, "", id)
+	cn, err := s.graph.GetNode(ctx, id)
 	if err != nil {
 		return nil, err
 	}
