@@ -458,6 +458,24 @@ DEFINE FIELD OVERWRITE indexed_at   ON conversation TYPE datetime VALUE time::no
 DEFINE INDEX OVERWRITE conversation_id_idx ON conversation FIELDS repo_slug, qualified UNIQUE;
 
 -- ─────────────────────────────────────────
+-- 7d. Event Log (Append-only audit trail; PR 1.2, Issue #68)
+-- ─────────────────────────────────────────
+
+DEFINE TABLE IF NOT EXISTS event_log SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE type       ON event_log TYPE string;
+DEFINE FIELD OVERWRITE repo_slug  ON event_log TYPE string;
+DEFINE FIELD OVERWRITE author_id  ON event_log TYPE string VALUE "system";
+DEFINE FIELD OVERWRITE timestamp  ON event_log TYPE datetime VALUE time::now();
+DEFINE FIELD OVERWRITE payload    ON event_log TYPE option<object>;
+DEFINE FIELD OVERWRITE source     ON event_log TYPE string VALUE "indexer";
+
+DEFINE INDEX IF NOT EXISTS event_repo_idx   ON event_log FIELDS repo_slug;
+DEFINE INDEX IF NOT EXISTS event_type_idx   ON event_log FIELDS type;
+DEFINE INDEX IF NOT EXISTS event_time_idx   ON event_log FIELDS timestamp;
+DEFINE INDEX IF NOT EXISTS event_source_idx ON event_log FIELDS source;
+
+-- ─────────────────────────────────────────
 -- 8. Schema Version
 -- ─────────────────────────────────────────
 

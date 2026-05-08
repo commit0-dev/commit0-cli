@@ -27,6 +27,7 @@ type Server struct {
 	traceSvc     *app.TraceService
 	blastSvc     *app.BlastService
 	repoSvc      *app.RepoService
+	eventSvc     *app.EventService
 	graph        domain.OpenCodeGraph
 	agentRunner  domain.AgentRunner
 	flowSvc      *app.FieldFlowService
@@ -55,6 +56,7 @@ func NewServer(
 	traceSvc *app.TraceService,
 	blastSvc *app.BlastService,
 	repoSvc *app.RepoService,
+	eventSvc *app.EventService,
 	graph domain.OpenCodeGraph,
 	agentRunner domain.AgentRunner,
 	flowSvc *app.FieldFlowService,
@@ -76,6 +78,7 @@ func NewServer(
 		traceSvc:     traceSvc,
 		blastSvc:     blastSvc,
 		repoSvc:      repoSvc,
+		eventSvc:     eventSvc,
 		graph:        graph,
 		agentRunner:  agentRunner,
 		flowSvc:      flowSvc,
@@ -188,6 +191,14 @@ func (s *Server) registerRoutes() {
 		v1.DELETE("/knowledge/:id", kh.handleDelete)
 		v1.POST("/knowledge/link", kh.handleLink)
 		v1.POST("/ingest/markdown", kh.handleIngestMarkdown)
+	}
+
+	// Event log — append-only audit + SSE subscription (PR 1.2, Issue #68)
+	if s.eventSvc != nil {
+		events := NewEventHandlers(s.eventSvc)
+		v1.GET("/events", events.handleListEvents)
+		v1.GET("/events/stream", events.handleEventStream)
+		v1.GET("/events/count", events.handleEventCount)
 	}
 }
 
