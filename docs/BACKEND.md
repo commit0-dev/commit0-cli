@@ -304,6 +304,15 @@ commit0 mcp --self-test   # exits 0 if protocol round-trip works
 
 **Architecture:** `commit0 mcp` embeds the full adapter graph (same as `serve`) and calls services in-process — zero HTTP serialization tax. Boot fails gracefully if SurrealDB is unreachable; individual tool calls return a clear "run docker compose up surreal" message instead of crashing.
 
+**HTTP MCP transport (since #56):** `commit0 serve` mounts the same MCP server at **`POST /mcp`** using the [streamable-HTTP transport](https://modelcontextprotocol.io/) from `mcp-go-sdk`. This puts both the HTTP API and MCP in **the same process** so they share live in-memory state — most importantly the per-process `IndexService.trackerRegistry` that backs `commit0_index_status`. An index job started via `POST /api/v1/index` is now observable through the MCP `commit0_index_status` tool from any HTTP MCP client (Claude Code, Cursor, Cline, custom).
+
+Adding the HTTP MCP server to Claude Code:
+```bash
+claude mcp add --scope user --transport http commit0-http http://localhost:8080/mcp
+```
+
+The stdio entry point (`commit0 mcp`) remains for local-only IDE integrations that prefer subprocess transport.
+
 ---
 
 ## 10. Testing

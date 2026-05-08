@@ -13,6 +13,7 @@ import (
 
 	"github.com/commit0-dev/commit0/pkg/types"
 	httpAdapter "github.com/commit0-dev/commit0/server/internal/adapters/http"
+	mcpadapter "github.com/commit0-dev/commit0/server/internal/adapters/mcp"
 	"github.com/commit0-dev/commit0/server/internal/config"
 )
 
@@ -54,6 +55,26 @@ var serveCmd = &cobra.Command{
 			&cfg.Server,
 			cfg,
 		)
+
+		// Mount the MCP server on /mcp using the streamable-HTTP transport.
+		// Sharing the same service instances as the HTTP API closes #56:
+		// index jobs started via POST /api/v1/index become observable from
+		// MCP clients via commit0_index_status because both layers query the
+		// same in-memory IndexService.trackerRegistry.
+		server.SetMCPHandler(mcpadapter.Deps{
+			QueryService:      svcs.query,
+			TraceService:      svcs.trace,
+			BlastService:      svcs.blast,
+			FieldFlowService:  svcs.flow,
+			RootCauseService:  svcs.rootCause,
+			DiffImpactService: svcs.diffImpact,
+			IndexService:      svcs.index,
+			RepoService:       svcs.repo,
+			AnalysisService:   svcs.analysis,
+			APISurfaceService: svcs.apiSurface,
+			Graph:             svcs.graph,
+			DBAddr:            cfg.Surreal.URL,
+		})
 
 		// Start peer discovery (Consul or mDNS).
 		if svcs.discovery != nil {

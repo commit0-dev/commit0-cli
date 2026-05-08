@@ -10,7 +10,9 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	mcpadapter "github.com/commit0-dev/commit0/server/internal/adapters/mcp"
 	"github.com/commit0-dev/commit0/server/internal/app"
 	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
@@ -140,6 +142,30 @@ func (s *Server) registerRoutes() {
 	v1.GET("/nodes/lookup", s.handleNodeLookup)
 	v1.GET("/nodes/by-file", s.handleNodesByFile)
 	v1.GET("/nodes/:id/neighborhood", s.handleGetNeighborhood)
+}
+
+// SetMCPHandler wires the MCP server (same surface as `commit0 mcp`) into the
+// HTTP router at `/mcp` using the streamable-HTTP transport. Callers may pass
+// their already-constructed services via deps so the MCP server shares the
+// same IndexService instance — and therefore the same per-process tracker
+// registry — as the HTTP API. This closes the integration loop reported in
+// issue #56: index jobs started via POST /api/v1/index become observable
+// via the MCP commit0_index_status tool.
+//
+// Idempotent in the sense that calling it twice replaces the prior route.
+// Safe to call before Start; not safe to call after Shutdown.
+func (s *Server) SetMCPHandler(deps mcpadapter.Deps) {
+	mcpServer := mcpadapter.New(deps)
+	handler := mcpsdk.NewStreamableHTTPHandler(func(_ *http.Request) *mcpsdk.Server {
+		return mcpServer
+	}, &mcpsdk.StreamableHTTPOptions{})
+
+	// MCP streamable transport uses POST for client→server messages, GET for
+	// server-initiated SSE streams, and DELETE to terminate sessions. Mount
+	// the handler on Any so the SDK owns method dispatch.
+	s.router.Any("/mcp", gin.WrapH(handler))
+	s.router.Any("/mcp/", gin.WrapH(handler))
+	s.log.Info("MCP HTTP transport mounted", "path", "/mcp")
 }
 
 // Start binds the server to the configured port and blocks until stopped.
