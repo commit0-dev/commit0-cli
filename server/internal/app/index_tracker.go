@@ -53,6 +53,16 @@ type IndexTracker struct {
 	subsClosed bool
 }
 
+// JobID returns the job identifier this tracker was created for. Exposed so
+// IndexService can key its tracker registry by jobID without reaching into
+// unexported fields.
+func (t *IndexTracker) JobID() string {
+	// jobID is set once in NewIndexTracker and never mutated, so no lock is
+	// needed here. Snapshot() uses the same field under RLock for symmetry,
+	// but a plain read is race-free.
+	return t.jobID
+}
+
 // NewIndexTracker creates a tracker for a new index job.
 func NewIndexTracker(jobID, repoSlug string, cfg types.IndexConfig) *IndexTracker {
 	allStages := []types.IndexStage{

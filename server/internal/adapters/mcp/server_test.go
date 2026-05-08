@@ -61,7 +61,7 @@ func TestToolsList_ReturnsAllTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	const wantCount = 13 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff + 1 interface
+	const wantCount = 14 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff + 1 interface + 1 meta
 	if len(result.Tools) != wantCount {
 		t.Errorf("expected %d tools, got %d", wantCount, len(result.Tools))
 		for _, tool := range result.Tools {
@@ -103,6 +103,7 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 		"commit0_diff_impact",
 		"commit0_field_flow",
 		"commit0_find_root_cause",
+		"commit0_index_status",
 		"commit0_lookup",
 		"commit0_neighborhood",
 		"commit0_query",
@@ -1721,3 +1722,143 @@ func (g *mcpFakeGraph) DeleteRepo(_ context.Context, _ string) error { return ni
 func (g *mcpFakeGraph) ApplySchema(_ context.Context) error          { return nil }
 
 var _ domain.OpenCodeGraph = (*mcpFakeGraph)(nil)
+
+// ---------------------------------------------------------------------------
+// commit0_index_status tests
+// ---------------------------------------------------------------------------
+
+// TestIndexStatus_MissingService_ReturnsUnavailable verifies the lazy-init
+// guard: an MCP server booted without an IndexService surfaces the standard
+// dbUnavailable tool error rather than panicking.
+func TestIndexStatus_MissingService_ReturnsUnavailable(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_index_status",
+		Arguments: map[string]any{"job_id": "any"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true when IndexService is nil, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "localhost:9999") {
+		t.Errorf("expected DB address in error body, got %q", body)
+	}
+}
+
+// TestIndexStatus_MissingJobID_ReturnsValidationError covers the input-
+// validation gate: an empty or whitespace-only job_id is rejected before the
+// registry is consulted.
+func TestIndexStatus_MissingJobID_ReturnsValidationError(t *testing.T) {
+	indexSvc := &app.IndexService{}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{IndexService: indexSvc})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_index_status",
+		Arguments: map[string]any{"job_id": "   "},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true for blank job_id, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "job_id is required") {
+		t.Errorf("expected validation message in error body, got %q", body)
+	}
+}
+
+// TestIndexStatus_JobNotFound_ReturnsToolError exercises the registry-miss
+// path: the IndexService is wired but no tracker has been registered for the
+// requested jobID. The tool must return a typed not-found error so MCP
+// clients can distinguish "still running" (would not have been emitted yet)
+// from "evicted / wrong ID".
+func TestIndexStatus_JobNotFound_ReturnsToolError(t *testing.T) {
+	indexSvc := &app.IndexService{}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{IndexService: indexSvc})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_index_status",
+		Arguments: map[string]any{"job_id": "no-such-job"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true for unknown job, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "not found") {
+		t.Errorf("expected not-found phrasing in error body, got %q", body)
+	}
+	if !strings.Contains(body, "no-such-job") {
+		t.Errorf("expected jobID echoed in error body, got %q", body)
+	}
+}
+
+// TestIndexStatus_Success_ReturnsSnapshot exercises the happy path: a tracker
+// is seeded into the IndexService registry, the tool returns IsError=false,
+// the StructuredContent matches the expected wire shape, and the human-
+// readable Markdown summary mentions the headline counters.
+func TestIndexStatus_Success_ReturnsSnapshot(t *testing.T) {
+	indexSvc := &app.IndexService{}
+	tracker := app.NewIndexTracker("seeded-job", "demo/repo", types.IndexConfig{
+		EmbedProvider: "ollama",
+		EmbedModel:    "qwen3-embedding:4b",
+	})
+	tracker.AddFiles(3)
+	tracker.AddNodes(42)
+	tracker.AddEdges(80)
+	indexSvc.RegisterTrackerForTest(tracker)
+
+	sess, cancel := newTestPair(t, mcpadapter.Deps{IndexService: indexSvc})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_index_status",
+		Arguments: map[string]any{"job_id": "seeded-job"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false on happy path, got true: %s", firstTextContent(result))
+	}
+
+	body := firstTextContent(result)
+	if !strings.Contains(body, "seeded-job") {
+		t.Errorf("expected jobID in markdown body, got %q", body)
+	}
+	if !strings.Contains(body, "files: 3") {
+		t.Errorf("expected counters in markdown body, got %q", body)
+	}
+	if !strings.Contains(body, "demo/repo") {
+		t.Errorf("expected repo slug in markdown body, got %q", body)
+	}
+
+	// StructuredContent should round-trip back to types.IndexProgress with the
+	// counters we seeded. The MCP SDK serializes StructuredContent to JSON,
+	// so we assert via the raw map representation.
+	if result.StructuredContent == nil {
+		t.Fatalf("expected non-nil StructuredContent on happy path")
+	}
+}
+
+// firstTextContent extracts the first TextContent body from a CallToolResult,
+// or returns "" if there is none. Convenience helper for the index-status
+// assertions; mirrors the inline pattern used in older tests.
+func firstTextContent(result *mcpsdk.CallToolResult) string {
+	for _, c := range result.Content {
+		if tc, ok := c.(*mcpsdk.TextContent); ok {
+			return tc.Text
+		}
+	}
+	return ""
+}

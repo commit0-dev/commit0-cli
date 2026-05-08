@@ -52,6 +52,13 @@ type IndexService struct {
 	temporalSvc *TemporalService    // optional: set via SetTemporalService for commit-aware indexing
 	linkers     []domain.EdgeLinker // global cross-file edge resolution chain
 
+	// trackerRegistry holds *IndexTracker instances keyed by jobID for the
+	// duration of an index run plus a TTL window after Finish (see
+	// trackerEvictAfter in index_service_registry.go). Populated by
+	// IndexWithProgress; queried by GetTracker so MCP / HTTP polling can
+	// resolve a jobID to its tracker without holding a separate handle.
+	trackerRegistry sync.Map // jobID (string) -> trackerEntry
+
 	// extractGit is the injected git-metadata extractor. Defaults to the
 	// real ExtractGitMetadata; tests overwrite this field to feed canned
 	// metadata so Index can be exercised without a real git repo.
@@ -743,9 +750,13 @@ type ProgressFunc func(filesIndexed, nodesCreated int)
 func (is *IndexService) IndexWithProgress(ctx context.Context, req IndexRequest, onProgress ProgressFunc, tracker *IndexTracker) (*IndexResult, error) {
 	is.progressFn = onProgress
 	is.tracker = tracker
+	is.registerTracker(tracker)
 	defer func() {
 		is.progressFn = nil
 		is.tracker = nil
+		if tracker != nil {
+			is.markTrackerFinished(tracker.JobID())
+		}
 	}()
 	return is.Index(ctx, req)
 }

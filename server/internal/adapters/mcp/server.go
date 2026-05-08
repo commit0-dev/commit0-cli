@@ -29,6 +29,7 @@ type Deps struct {
 	FieldFlowService  *app.FieldFlowService
 	RootCauseService  *app.RootCauseAnalysisService
 	DiffImpactService *app.DiffImpactService
+	IndexService      *app.IndexService
 	Graph             domain.OpenCodeGraph
 	// DBAddr is shown in the unavailability error message when Graph is nil.
 	DBAddr string
@@ -57,7 +58,9 @@ func New(deps Deps) *mcpsdk.Server {
 				"commit0_subjects_for (which prod symbols a test exercises). " +
 				"Diff: commit0_diff_impact (git-aware blast fan-out across a diff range). " +
 				"Interfaces: commit0_resolve_interface (find all concrete types that " +
-				"satisfy a Go interface and optionally locate their DI wiring sites).",
+				"satisfy a Go interface and optionally locate their DI wiring sites). " +
+				"Meta: commit0_index_status (poll an indexing job by ID, even after it " +
+				"finishes — trackers are retained for ~30 minutes).",
 		},
 	)
 
@@ -67,6 +70,7 @@ func New(deps Deps) *mcpsdk.Server {
 	registerSimilarTools(server, deps, log)
 	registerDiffTools(server, deps, log)
 	registerInterfaceTools(server, deps, log)
+	registerMetaTools(server, deps, log)
 
 	return server
 }
@@ -162,6 +166,21 @@ func diffImpactServiceFromDeps(deps Deps) (*app.DiffImpactService, *mcpsdk.CallT
 		return nil, dbUnavailableError(addr)
 	}
 	return deps.DiffImpactService, nil
+}
+
+// indexServiceFromDeps returns the IndexService or a nil guard with an error.
+// Used by the meta tool group (commit0_index_status) to look up trackers by
+// jobID. Like the other guards, an unwired service surfaces dbUnavailableError
+// because the index registry can only be populated by a running server.
+func indexServiceFromDeps(deps Deps) (*app.IndexService, *mcpsdk.CallToolResult) {
+	if deps.IndexService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.IndexService, nil
 }
 
 // RunStdio starts the MCP server on stdio transport, blocking until the client
