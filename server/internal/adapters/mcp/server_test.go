@@ -61,7 +61,7 @@ func TestToolsList_ReturnsAllTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	const wantCount = 14 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff + 1 interface + 1 meta
+	const wantCount = 16 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff + 1 interface + 3 meta
 	if len(result.Tools) != wantCount {
 		t.Errorf("expected %d tools, got %d", wantCount, len(result.Tools))
 		for _, tool := range result.Tools {
@@ -104,6 +104,8 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 		"commit0_field_flow",
 		"commit0_find_root_cause",
 		"commit0_index_status",
+		"commit0_list_files",
+		"commit0_list_repos",
 		"commit0_lookup",
 		"commit0_neighborhood",
 		"commit0_query",
@@ -1660,6 +1662,10 @@ type mcpFakeGraph struct {
 	vectorErr        error
 	listEdgesResult  []types.CodeEdge
 	listNodesResult  []types.CodeNode // returned by ListNodes for diff-impact tests
+	listReposResult  []types.Repo     // returned by ListRepos for list-repos tests
+	listReposErr     error
+	lastListRepoSlug string          // captured by ListNodes for list-files assertions
+	lastListOpts     domain.ListOpts // captured by ListNodes for list-files assertions
 }
 
 func (g *mcpFakeGraph) PutNode(_ context.Context, _ *types.CodeNode) error { return nil }
@@ -1700,7 +1706,9 @@ func (g *mcpFakeGraph) VectorSearch(_ context.Context, _ []float32, _ domain.Vec
 func (g *mcpFakeGraph) TextSearch(_ context.Context, _ string, _ domain.TextSearchOpts) ([]types.ScoredNode, error) {
 	return nil, nil
 }
-func (g *mcpFakeGraph) ListNodes(_ context.Context, _ string, _ domain.ListOpts) ([]types.CodeNode, error) {
+func (g *mcpFakeGraph) ListNodes(_ context.Context, repo string, opts domain.ListOpts) ([]types.CodeNode, error) {
+	g.lastListRepoSlug = repo
+	g.lastListOpts = opts
 	return g.listNodesResult, nil
 }
 func (g *mcpFakeGraph) ListEdges(_ context.Context, _ string, _ []string) ([]types.CodeEdge, error) {
@@ -1711,7 +1719,9 @@ func (g *mcpFakeGraph) ListFilePaths(_ context.Context, _ string) ([]string, err
 }
 func (g *mcpFakeGraph) PutRepo(_ context.Context, _ *types.Repo) error           { return nil }
 func (g *mcpFakeGraph) GetRepo(_ context.Context, _ string) (*types.Repo, error) { return nil, nil }
-func (g *mcpFakeGraph) ListRepos(_ context.Context) ([]types.Repo, error)        { return nil, nil }
+func (g *mcpFakeGraph) ListRepos(_ context.Context) ([]types.Repo, error) {
+	return g.listReposResult, g.listReposErr
+}
 func (g *mcpFakeGraph) UpdateRepoIndexedAt(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }
@@ -1861,4 +1871,267 @@ func firstTextContent(result *mcpsdk.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// commit0_list_repos tests
+// ---------------------------------------------------------------------------
+
+// TestListRepos_MissingService_ReturnsUnavailable verifies that booting the
+// MCP server without a RepoService surfaces the standard dbUnavailable tool
+// error, not a panic.
+func TestListRepos_MissingService_ReturnsUnavailable(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_list_repos",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true when RepoService is nil, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "localhost:9999") {
+		t.Errorf("expected DB address in error body, got %q", body)
+	}
+}
+
+// TestListRepos_Success verifies the happy path: RepoService returns two
+// repos, the tool emits IsError=false, the structured payload contains both
+// slugs, and the Markdown summary mentions each.
+func TestListRepos_Success(t *testing.T) {
+	indexed := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	graph := &mcpFakeGraph{
+		listReposResult: []types.Repo{
+			{
+				Slug:          "alpha/repo",
+				Path:          "/srv/alpha",
+				DefaultBranch: "main",
+				Languages:     []string{"go"},
+				CreatedAt:     time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+				LastIndexedAt: &indexed,
+			},
+			{
+				Slug:          "beta/repo",
+				Path:          "/srv/beta",
+				DefaultBranch: "trunk",
+				Languages:     []string{"python", "rust"},
+			},
+		},
+	}
+	deps := mcpadapter.Deps{
+		Graph:       graph,
+		RepoService: app.NewRepoService(graph),
+	}
+	sess, cancel := newTestPair(t, deps)
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_list_repos",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false, got true: %s", firstTextContent(result))
+	}
+
+	body := firstTextContent(result)
+	if !strings.Contains(body, "alpha/repo") || !strings.Contains(body, "beta/repo") {
+		t.Errorf("expected both repo slugs in markdown body, got %q", body)
+	}
+	if !strings.Contains(body, "Repositories (2)") {
+		t.Errorf("expected count header in markdown body, got %q", body)
+	}
+
+	sc, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+	repos, _ := sc["repos"].([]any)
+	if len(repos) != 2 {
+		t.Fatalf("structured repos: got %d, want 2", len(repos))
+	}
+	first, _ := repos[0].(map[string]any)
+	if slug, _ := first["slug"].(string); slug != "alpha/repo" {
+		t.Errorf("repos[0].slug = %q, want %q", slug, "alpha/repo")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_list_files tests
+// ---------------------------------------------------------------------------
+
+// TestListFiles_MissingRepoSlug_ReturnsValidationError covers the
+// input-validation gate: an empty repo_slug must fail before the graph is
+// consulted.
+func TestListFiles_MissingRepoSlug_ReturnsValidationError(t *testing.T) {
+	graph := &mcpFakeGraph{}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_list_files",
+		Arguments: map[string]any{"repo_slug": "   "},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true for blank repo_slug, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "repo_slug is required") {
+		t.Errorf("expected validation message in error body, got %q", body)
+	}
+	if graph.lastListRepoSlug != "" {
+		t.Errorf("graph.ListNodes was called despite validation failure (slug=%q)", graph.lastListRepoSlug)
+	}
+}
+
+// TestListFiles_Success exercises the happy path: the graph returns three
+// file-kind nodes for the requested repo and prefix, the tool returns them
+// in the structured payload, and the Markdown summary contains each path.
+func TestListFiles_Success(t *testing.T) {
+	graph := &mcpFakeGraph{
+		listNodesResult: []types.CodeNode{
+			{ID: "n1", FilePath: "internal/app/repo_service.go", Language: "go", Kind: types.NodeFile},
+			{ID: "n2", FilePath: "internal/app/index_service.go", Language: "go", Kind: types.NodeFile},
+			{ID: "n3", FilePath: "internal/app/query_service.go", Language: "go", Kind: types.NodeFile},
+		},
+	}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_list_files",
+		Arguments: map[string]any{
+			"repo_slug":   "demo/repo",
+			"path_prefix": "internal/app/",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false, got true: %s", firstTextContent(result))
+	}
+
+	if graph.lastListRepoSlug != "demo/repo" {
+		t.Errorf("ListNodes called with repo %q, want %q", graph.lastListRepoSlug, "demo/repo")
+	}
+	if graph.lastListOpts.FilePath != "internal/app/" {
+		t.Errorf("ListNodes opts.FilePath = %q, want %q", graph.lastListOpts.FilePath, "internal/app/")
+	}
+	if len(graph.lastListOpts.Labels) == 0 || graph.lastListOpts.Labels[0] != "file" {
+		t.Errorf("ListNodes opts.Labels = %v, want [file]", graph.lastListOpts.Labels)
+	}
+
+	sc, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map structured content, got %T", result.StructuredContent)
+	}
+	files, _ := sc["files"].([]any)
+	if len(files) != 3 {
+		t.Fatalf("structured files: got %d, want 3", len(files))
+	}
+	if truncated, _ := sc["truncated"].(bool); truncated {
+		t.Errorf("expected truncated=false for 3 results within default limit")
+	}
+
+	body := firstTextContent(result)
+	for _, want := range []string{"repo_service.go", "index_service.go", "query_service.go"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %q in markdown body, got %q", want, body)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// node:// resource tests
+// ---------------------------------------------------------------------------
+
+// TestNodeResource_Read_ReturnsNodeBody verifies that a resources/read for a
+// concrete node://<id> URI dispatches to the registered template handler,
+// pulls the matching CodeNode from the graph, and returns its Body as text
+// content.
+func TestNodeResource_Read_ReturnsNodeBody(t *testing.T) {
+	want := "func ServeRepo() {}\n"
+	graph := &mcpFakeGraph{
+		nodesByID: map[string]*types.CodeNode{
+			"abc-123": {
+				ID:       "abc-123",
+				FilePath: "server/main.go",
+				Body:     want,
+			},
+		},
+	}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	result, err := sess.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{
+		URI: "node://abc-123",
+	})
+	if err != nil {
+		t.Fatalf("ReadResource: %v", err)
+	}
+	if len(result.Contents) != 1 {
+		t.Fatalf("expected exactly 1 content entry, got %d", len(result.Contents))
+	}
+	c := result.Contents[0]
+	if c.Text != want {
+		t.Errorf("body text = %q, want %q", c.Text, want)
+	}
+	if c.URI != "node://abc-123" {
+		t.Errorf("content URI = %q, want %q", c.URI, "node://abc-123")
+	}
+	if c.MIMEType != "text/plain" {
+		t.Errorf("MIMEType = %q, want text/plain", c.MIMEType)
+	}
+}
+
+// TestNodeResource_NotFound_ReturnsResourceError verifies the not-found
+// branch: when the graph holds no node with the requested ID, the SDK
+// surfaces a JSON-RPC error to the client (via ResourceNotFoundError).
+func TestNodeResource_NotFound_ReturnsResourceError(t *testing.T) {
+	graph := &mcpFakeGraph{
+		nodesByID: map[string]*types.CodeNode{},
+	}
+	sess, cancel := newTestPair(t, mcpadapter.Deps{Graph: graph})
+	defer cancel()
+
+	_, err := sess.ReadResource(context.Background(), &mcpsdk.ReadResourceParams{
+		URI: "node://missing-id",
+	})
+	if err == nil {
+		t.Fatalf("expected ReadResource to fail for missing node, got nil error")
+	}
+}
+
+// TestNodeResource_ListedAsTemplate verifies that the registered template is
+// advertised on resources/templates/list — without it, MCP clients would not
+// know the node:// scheme is available.
+func TestNodeResource_ListedAsTemplate(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{})
+	defer cancel()
+
+	res, err := sess.ListResourceTemplates(context.Background(), &mcpsdk.ListResourceTemplatesParams{})
+	if err != nil {
+		t.Fatalf("ListResourceTemplates: %v", err)
+	}
+	found := false
+	for _, tmpl := range res.ResourceTemplates {
+		if strings.HasPrefix(tmpl.URITemplate, "node://") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected node:// template in ListResourceTemplates result, got %+v", res.ResourceTemplates)
+	}
 }

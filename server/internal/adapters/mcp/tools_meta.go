@@ -12,11 +12,20 @@ import (
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
+// listFilesDefaultLimit is the per-call cap when the caller does not specify
+// a Limit. listFilesMaxLimit clamps requests with very large limits to protect
+// the database.
+const (
+	listFilesDefaultLimit = 100
+	listFilesMaxLimit     = 1000
+)
+
 // registerMetaTools adds the meta tool group (index status, list repos,
-// list files) to the MCP server. Subsequent slices in the meta+security
-// roadmap fold list_repos and list_files into this same registrar.
+// list files) to the MCP server.
 func registerMetaTools(server *mcpsdk.Server, deps Deps, log *slog.Logger) {
 	addCommit0IndexStatus(server, deps, log)
+	addCommit0ListRepos(server, deps, log)
+	addCommit0ListFiles(server, deps, log)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,4 +112,123 @@ func indexStatusMarkdown(p types.IndexProgress) string {
 			cov.SummaryCoverage, cov.EmbedCoverage, cov.StoreCoverage, cov.EdgeResolution)
 	}
 	return b.String()
+}
+
+// ---------------------------------------------------------------------------
+// Tool: commit0_list_repos
+// ---------------------------------------------------------------------------
+
+// listReposInput is the typed input for commit0_list_repos. The tool takes
+// no arguments; the empty struct exists to satisfy the SDK's typed handler
+// signature.
+type listReposInput struct{}
+
+func addCommit0ListRepos(server *mcpsdk.Server, deps Deps, log *slog.Logger) {
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name: "commit0_list_repos",
+		Description: "Enumerate every repository indexed by commit0. Returns slug, " +
+			"path, default branch, languages, and last_indexed_at for each repo. " +
+			"Use this as the discovery step before calling any tool that requires " +
+			"a repo_slug argument.",
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, _ listReposInput) (*mcpsdk.CallToolResult, any, error) {
+		repoSvc, errResult := repoServiceFromDeps(deps)
+		if errResult != nil {
+			return errResult, nil, nil
+		}
+
+		repos, err := repoSvc.ListRepos(ctx)
+		if err != nil {
+			log.Warn("commit0_list_repos failed", "err", err)
+			return toolError(err), nil, nil
+		}
+
+		out := ListReposToolResult{Repos: make([]RepoOut, 0, len(repos))}
+		for _, repo := range repos {
+			out.Repos = append(out.Repos, repoOut(repo))
+		}
+
+		return &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{
+				&mcpsdk.TextContent{Text: listReposMarkdown(out)},
+			},
+			StructuredContent: out,
+		}, nil, nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Tool: commit0_list_files
+// ---------------------------------------------------------------------------
+
+// listFilesInput is the typed input for commit0_list_files.
+type listFilesInput struct {
+	RepoSlug   string `json:"repo_slug"             jsonschema:"Repository slug returned by commit0_list_repos. Required."`
+	PathPrefix string `json:"path_prefix,omitempty" jsonschema:"Optional file-path prefix filter (substring match against the start of the file_path)."`
+	Limit      int    `json:"limit,omitempty"       jsonschema:"Maximum number of files to return. Defaults to 100; capped at 1000."`
+}
+
+func addCommit0ListFiles(server *mcpsdk.Server, deps Deps, log *slog.Logger) {
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name: "commit0_list_files",
+		Description: "Enumerate file nodes for one repository, optionally filtered by " +
+			"path prefix. Each result is a file-kind CodeNode reference (id, " +
+			"file_path, language, last_modified_at) — bodies are not returned. " +
+			"Use this to discover the on-disk layout of an indexed repo before " +
+			"calling commit0_show_node or commit0_query.",
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, input listFilesInput) (*mcpsdk.CallToolResult, any, error) {
+		repoSlug := strings.TrimSpace(input.RepoSlug)
+		if repoSlug == "" {
+			return toolError(domain.Validation("repo_slug is required")), nil, nil
+		}
+
+		graph, errResult := graphFromDeps(deps)
+		if errResult != nil {
+			return errResult, nil, nil
+		}
+
+		limit := input.Limit
+		if limit <= 0 {
+			limit = listFilesDefaultLimit
+		}
+		if limit > listFilesMaxLimit {
+			limit = listFilesMaxLimit
+		}
+
+		// Request limit+1 so we can detect truncation without a second call;
+		// trim back to limit before serializing.
+		queryLimit := limit + 1
+
+		nodes, err := graph.ListNodes(ctx, repoSlug, domain.ListOpts{
+			Labels:   []string{"file"},
+			FilePath: input.PathPrefix,
+			Limit:    queryLimit,
+		})
+		if err != nil {
+			log.Warn("commit0_list_files failed", "repo", repoSlug, "err", err)
+			return toolError(err), nil, nil
+		}
+
+		truncated := len(nodes) > limit
+		if truncated {
+			nodes = nodes[:limit]
+		}
+
+		out := ListFilesToolResult{
+			RepoSlug:   repoSlug,
+			PathPrefix: input.PathPrefix,
+			Files:      make([]FileNodeOut, 0, len(nodes)),
+			Truncated:  truncated,
+			Limit:      limit,
+		}
+		for _, node := range nodes {
+			out.Files = append(out.Files, fileNodeOut(node))
+		}
+
+		return &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{
+				&mcpsdk.TextContent{Text: listFilesMarkdown(out)},
+			},
+			StructuredContent: out,
+		}, nil, nil
+	})
 }

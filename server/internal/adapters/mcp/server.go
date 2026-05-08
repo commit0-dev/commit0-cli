@@ -30,6 +30,7 @@ type Deps struct {
 	RootCauseService  *app.RootCauseAnalysisService
 	DiffImpactService *app.DiffImpactService
 	IndexService      *app.IndexService
+	RepoService       *app.RepoService
 	Graph             domain.OpenCodeGraph
 	// DBAddr is shown in the unavailability error message when Graph is nil.
 	DBAddr string
@@ -60,7 +61,11 @@ func New(deps Deps) *mcpsdk.Server {
 				"Interfaces: commit0_resolve_interface (find all concrete types that " +
 				"satisfy a Go interface and optionally locate their DI wiring sites). " +
 				"Meta: commit0_index_status (poll an indexing job by ID, even after it " +
-				"finishes — trackers are retained for ~30 minutes).",
+				"finishes — trackers are retained for ~30 minutes), " +
+				"commit0_list_repos (enumerate every indexed repository), " +
+				"commit0_list_files (enumerate file nodes in a repository, optionally " +
+				"by path prefix). " +
+				"Resources: node://<id> (read the full body of a CodeNode by graph ID).",
 		},
 	)
 
@@ -71,6 +76,7 @@ func New(deps Deps) *mcpsdk.Server {
 	registerDiffTools(server, deps, log)
 	registerInterfaceTools(server, deps, log)
 	registerMetaTools(server, deps, log)
+	registerNodeResource(server, deps, log)
 
 	return server
 }
@@ -181,6 +187,21 @@ func indexServiceFromDeps(deps Deps) (*app.IndexService, *mcpsdk.CallToolResult)
 		return nil, dbUnavailableError(addr)
 	}
 	return deps.IndexService, nil
+}
+
+// repoServiceFromDeps returns the RepoService or a nil guard with an error.
+// Used by the meta tool group (commit0_list_repos) to enumerate repositories;
+// like the other guards, an unwired service surfaces dbUnavailableError because
+// the repo registry can only be populated by a running server.
+func repoServiceFromDeps(deps Deps) (*app.RepoService, *mcpsdk.CallToolResult) {
+	if deps.RepoService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.RepoService, nil
 }
 
 // RunStdio starts the MCP server on stdio transport, blocking until the client
