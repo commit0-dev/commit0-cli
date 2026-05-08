@@ -210,6 +210,7 @@ type serveServices struct {
 	rootCause  *app.RootCauseAnalysisService
 	diffImpact *app.DiffImpactService
 	apiSurface *app.APISurfaceService
+	analysis   *app.AnalysisService
 	syncSvc    *app.SyncService
 	transport  domain.PeerTransport
 	discovery  domain.PeerDiscovery
@@ -371,6 +372,11 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 
 	apiSurfaceSvc := app.NewAPISurfaceService(graph, flowSvc, d.explainer, cfg)
 
+	// Security scanner: taint analysis + auth-gap detection over the same graph.
+	// LLM verification is best-effort; nil explainer just disables the false-
+	// positive filter and the scanner falls back to pure graph reasoning.
+	analysisSvc := app.NewAnalysisService(graph, flowSvc, d.explainer)
+
 	// Sync service (P2P graph sync).
 	var syncSvc *app.SyncService
 	var quicTransport domain.PeerTransport
@@ -424,6 +430,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		rootCause:  rootCauseSvc,
 		diffImpact: diffImpactSvc,
 		apiSurface: apiSurfaceSvc,
+		analysis:   analysisSvc,
 		syncSvc:    syncSvc,
 		transport:  quicTransport,
 		discovery:  disc,

@@ -259,14 +259,34 @@ commit0 ships a **stdio MCP server** (`commit0 mcp`) that exposes code intellige
 
 **Design reference:** [`docs/references/mcp-server-design.md`](references/mcp-server-design.md)
 
-**Tools shipped (v1 — search group):**
+**Tools shipped (18 total — search, trace, tests, diff, interface, meta, security, api):**
 
-| Tool | Maps to | Description |
-|------|---------|-------------|
-| `commit0_query` | `app.QueryService.Query` | Hybrid semantic + BM25 search, RRF-fused |
-| `commit0_lookup` | `domain.OpenCodeGraph.FindNode` | Pure index lookup by qualified name |
-| `commit0_neighborhood` | `domain.OpenCodeGraph.Neighbors` | One-hop graph context (callers/callees/flows) |
-| `commit0_show_node` | `domain.OpenCodeGraph.GetNode` | Full node body retrieval |
+| Group | Tool | Maps to | Description |
+|-------|------|---------|-------------|
+| Search | `commit0_query` | `app.QueryService.Query` | Hybrid semantic + BM25 search, RRF-fused |
+| Search | `commit0_lookup` | `domain.OpenCodeGraph.FindNode` | Pure index lookup by qualified name |
+| Search | `commit0_neighborhood` | `domain.OpenCodeGraph.Neighbors` | One-hop graph context (callers/callees/flows) |
+| Search | `commit0_show_node` | `domain.OpenCodeGraph.GetNode` | Full node body retrieval |
+| Search | `commit0_similar_to` | HNSW neighbor lookup by node ID | Find similar code by embedding |
+| Trace | `commit0_trace` | `app.TraceService` | Forward / reverse call chain |
+| Trace | `commit0_blast` | `app.BlastService` | Transitive impact of a change |
+| Trace | `commit0_field_flow` | `app.FieldFlowService` | Field-level data flow + mutations |
+| Trace | `commit0_find_root_cause` | `app.RootCauseAnalysisService` | Commit-zero detection (uses `notifications/progress`) |
+| Tests | `commit0_tests_for` | OCG.Neighbors via `tests` edge | Tests covering a symbol |
+| Tests | `commit0_subjects_for` | OCG.Neighbors reverse via `tests` edge | Symbols a test exercises |
+| Diff | `commit0_diff_impact` | `app.DiffImpactService.Analyze` | Git-aware blast fan-out across a diff range |
+| Interface | `commit0_resolve_interface` | OCG.Neighbors via `implements` edge | All concrete types satisfying a Go interface |
+| Meta | `commit0_index_status` | `app.IndexService.GetTracker → Snapshot` | Poll an indexing job by ID (registry retains finished trackers ~30 min) |
+| Meta | `commit0_list_repos` | `app.RepoService.ListRepos` | Enumerate every indexed repository |
+| Meta | `commit0_list_files` | `OCG.ListNodes(Labels=[file])` | Enumerate file nodes for a repo (path-prefix + limit) |
+| Security | `commit0_scan_security` | `app.AnalysisService.Scan` | Taint + auth-gap analysis with `severity_min` filter |
+| API | `commit0_api_surface` | `app.APISurfaceService.Discover` (+ `GenerateOpenAPI`) | HTTP route discovery; `format=summary` or `format=openapi` |
+
+**Resources shipped (1):**
+
+| URI template | Maps to | Description |
+|--------------|---------|-------------|
+| `node://{+id}` | `OCG.GetNode` | Read the full body of one CodeNode by graph ID. Reserved-expansion `{+id}` accepts SurrealDB record IDs containing slashes, colons, and other reserved characters. |
 
 **Adding to Claude Code:**
 ```bash
@@ -294,5 +314,7 @@ commit0 mcp --self-test   # exits 0 if protocol round-trip works
 | HTTP handlers | `internal/adapters/http/handlers_test.go` | `httptest.NewRecorder` with Gin test context |
 | HTTP clients | `internal/adapters/openrouter/client_test.go` | `httptest.NewServer` |
 | MCP tools | `internal/adapters/mcp/server_test.go` | `mcpsdk.NewInMemoryTransports()` pair; no DB needed |
+| MCP integration (in-mem) | `internal/adapters/mcp/integration_test.go` | Runs every `go test`; round-trips all 18 tools + the `node://` resource against stub services |
+| MCP integration (subprocess) | `internal/adapters/mcp/integration_subprocess_test.go` | `//go:build integration`. Spawns `./bin/commit0 mcp` via `mcpsdk.CommandTransport`. Run: `make build-server && cd server && go test -tags integration ./internal/adapters/mcp/...` |
 | Integration | `internal/adapters/*/` | Requires running SurrealDB and API keys |
 | Compile-time | Adapter files | `var _ domain.OpenCodeGraph = (*adapter)(nil)` |

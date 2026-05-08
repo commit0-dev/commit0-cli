@@ -31,6 +31,8 @@ type Deps struct {
 	DiffImpactService *app.DiffImpactService
 	IndexService      *app.IndexService
 	RepoService       *app.RepoService
+	AnalysisService   *app.AnalysisService
+	APISurfaceService *app.APISurfaceService
 	Graph             domain.OpenCodeGraph
 	// DBAddr is shown in the unavailability error message when Graph is nil.
 	DBAddr string
@@ -65,6 +67,11 @@ func New(deps Deps) *mcpsdk.Server {
 				"commit0_list_repos (enumerate every indexed repository), " +
 				"commit0_list_files (enumerate file nodes in a repository, optionally " +
 				"by path prefix). " +
+				"Security: commit0_scan_security (taint + auth-gap analysis over the " +
+				"code graph; severity_min filters out lower-severity issues). " +
+				"API: commit0_api_surface (HTTP route discovery from the graph; " +
+				"format=summary returns endpoints + bindings, format=openapi emits " +
+				"an OpenAPI 3.0 JSON spec). " +
 				"Resources: node://<id> (read the full body of a CodeNode by graph ID).",
 		},
 	)
@@ -76,6 +83,8 @@ func New(deps Deps) *mcpsdk.Server {
 	registerDiffTools(server, deps, log)
 	registerInterfaceTools(server, deps, log)
 	registerMetaTools(server, deps, log)
+	registerSecurityTools(server, deps, log)
+	registerAPITools(server, deps, log)
 	registerNodeResource(server, deps, log)
 
 	return server
@@ -202,6 +211,34 @@ func repoServiceFromDeps(deps Deps) (*app.RepoService, *mcpsdk.CallToolResult) {
 		return nil, dbUnavailableError(addr)
 	}
 	return deps.RepoService, nil
+}
+
+// analysisServiceFromDeps returns the AnalysisService or a nil guard with an
+// error. Used by commit0_scan_security; like the other guards, an unwired
+// service surfaces dbUnavailableError because the security scanner depends on
+// the same OpenCodeGraph that needs SurrealDB to be reachable.
+func analysisServiceFromDeps(deps Deps) (*app.AnalysisService, *mcpsdk.CallToolResult) {
+	if deps.AnalysisService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.AnalysisService, nil
+}
+
+// apiSurfaceServiceFromDeps returns the APISurfaceService or a nil guard with
+// an error. Used by commit0_api_surface to discover routes and emit OpenAPI.
+func apiSurfaceServiceFromDeps(deps Deps) (*app.APISurfaceService, *mcpsdk.CallToolResult) {
+	if deps.APISurfaceService == nil {
+		addr := deps.DBAddr
+		if addr == "" {
+			addr = "localhost:8000"
+		}
+		return nil, dbUnavailableError(addr)
+	}
+	return deps.APISurfaceService, nil
 }
 
 // RunStdio starts the MCP server on stdio transport, blocking until the client

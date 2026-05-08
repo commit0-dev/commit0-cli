@@ -83,6 +83,8 @@ func runMCPServer(ctx context.Context, cfg *config.Config) error {
 		deps.DiffImpactService = svcs.diffImpact
 		deps.IndexService = svcs.index
 		deps.RepoService = svcs.repo
+		deps.AnalysisService = svcs.analysis
+		deps.APISurfaceService = svcs.apiSurface
 		deps.Graph = svcs.graph
 		defer svcs.cleanup()
 	}
@@ -94,7 +96,7 @@ func runMCPServer(ctx context.Context, cfg *config.Config) error {
 // runSelfTest executes an in-process round-trip:
 //  1. Initialize the server with an in-memory transport.
 //  2. Assert capabilities include "tools".
-//  3. List tools — expect 16 tools with sorted names.
+//  3. List tools — expect 18 tools with sorted names.
 //  4. Call commit0_query with a synthetic query (will return a db-unavailable
 //     tool error, but the protocol round-trip is valid).
 //  5. Print "OK" and exit 0; print diagnostic and exit 1 on failure.
@@ -136,8 +138,8 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 	}
 
 	tools := toolsResult.Tools
-	if len(tools) != 16 {
-		return fmt.Errorf("self-test: expected 16 tools, got %d", len(tools))
+	if len(tools) != 18 {
+		return fmt.Errorf("self-test: expected 18 tools, got %d", len(tools))
 	}
 
 	// Check names are sorted.
@@ -150,6 +152,7 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 	}
 
 	expectedTools := []string{
+		"commit0_api_surface",
 		"commit0_blast",
 		"commit0_diff_impact",
 		"commit0_field_flow",
@@ -161,6 +164,7 @@ func runSelfTest(ctx context.Context, cfg *config.Config) error {
 		"commit0_neighborhood",
 		"commit0_query",
 		"commit0_resolve_interface",
+		"commit0_scan_security",
 		"commit0_show_node",
 		"commit0_similar_to",
 		"commit0_subjects_for",

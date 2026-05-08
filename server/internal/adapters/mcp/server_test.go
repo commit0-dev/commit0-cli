@@ -12,6 +12,7 @@ import (
 	"github.com/commit0-dev/commit0/pkg/types"
 	mcpadapter "github.com/commit0-dev/commit0/server/internal/adapters/mcp"
 	"github.com/commit0-dev/commit0/server/internal/app"
+	"github.com/commit0-dev/commit0/server/internal/config"
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
 
@@ -61,7 +62,7 @@ func TestToolsList_ReturnsAllTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	const wantCount = 16 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff + 1 interface + 3 meta
+	const wantCount = 18 // 4 search + 1 similar + 4 trace/analysis + 2 tests/subjects + 1 diff + 1 interface + 3 meta + 1 security + 1 api
 	if len(result.Tools) != wantCount {
 		t.Errorf("expected %d tools, got %d", wantCount, len(result.Tools))
 		for _, tool := range result.Tools {
@@ -99,6 +100,7 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 	}
 
 	want := []string{
+		"commit0_api_surface",
 		"commit0_blast",
 		"commit0_diff_impact",
 		"commit0_field_flow",
@@ -110,6 +112,7 @@ func TestToolsList_ExpectedNames(t *testing.T) {
 		"commit0_neighborhood",
 		"commit0_query",
 		"commit0_resolve_interface",
+		"commit0_scan_security",
 		"commit0_show_node",
 		"commit0_similar_to",
 		"commit0_subjects_for",
@@ -2133,5 +2136,272 @@ func TestNodeResource_ListedAsTemplate(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected node:// template in ListResourceTemplates result, got %+v", res.ResourceTemplates)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_scan_security tests
+// ---------------------------------------------------------------------------
+
+// newAnalysisDepsForTest builds a Deps with a real AnalysisService backed by
+// a stub graph — convenient for happy-path tests because AnalysisService has
+// no exported way to inject a fake.
+func newAnalysisDepsForTest(graph domain.OpenCodeGraph) mcpadapter.Deps {
+	cfg := &config.Config{}
+	flowSvc := app.NewFieldFlowService(graph, nil, nil, cfg)
+	return mcpadapter.Deps{
+		Graph:           graph,
+		AnalysisService: app.NewAnalysisService(graph, flowSvc, nil),
+	}
+}
+
+// TestScanSecurity_MissingService_ReturnsUnavailable verifies the lazy-init
+// guard for commit0_scan_security.
+func TestScanSecurity_MissingService_ReturnsUnavailable(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_scan_security",
+		Arguments: map[string]any{"repo_slug": "demo"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true when AnalysisService nil, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "localhost:9999") {
+		t.Errorf("expected DB address in error body, got %q", body)
+	}
+}
+
+// TestScanSecurity_MissingRepoSlug_ReturnsValidationError covers the
+// input-validation gate.
+func TestScanSecurity_MissingRepoSlug_ReturnsValidationError(t *testing.T) {
+	sess, cancel := newTestPair(t, newAnalysisDepsForTest(&mcpFakeGraph{}))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_scan_security",
+		Arguments: map[string]any{"repo_slug": "  "},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true for blank repo_slug, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "repo_slug is required") {
+		t.Errorf("expected validation message in error body, got %q", body)
+	}
+}
+
+// TestScanSecurity_InvalidSeverityMin_ReturnsValidationError verifies that
+// arbitrary severity strings are rejected before the scanner runs.
+func TestScanSecurity_InvalidSeverityMin_ReturnsValidationError(t *testing.T) {
+	sess, cancel := newTestPair(t, newAnalysisDepsForTest(&mcpFakeGraph{}))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_scan_security",
+		Arguments: map[string]any{
+			"repo_slug":    "demo",
+			"severity_min": "bogus",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true for invalid severity_min, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "severity_min must be one of") {
+		t.Errorf("expected validation message in error body, got %q", body)
+	}
+}
+
+// TestScanSecurity_EmptyGraph_ReturnsZeroIssues exercises the happy path with
+// a stub graph that returns no nodes/edges. The scanner finds nothing and the
+// tool emits IsError=false with an empty Issues array.
+func TestScanSecurity_EmptyGraph_ReturnsZeroIssues(t *testing.T) {
+	sess, cancel := newTestPair(t, newAnalysisDepsForTest(&mcpFakeGraph{}))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_scan_security",
+		Arguments: map[string]any{"repo_slug": "demo"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false on empty-graph happy path, got true: %s", firstTextContent(result))
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "Security scan") {
+		t.Errorf("expected 'Security scan' header in body, got %q", body)
+	}
+	if !strings.Contains(body, "issues: 0") {
+		t.Errorf("expected 'issues: 0' in body, got %q", body)
+	}
+
+	sc, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured content map, got %T", result.StructuredContent)
+	}
+	if got, _ := sc["issue_count"].(float64); got != 0 {
+		t.Errorf("issue_count = %v, want 0", got)
+	}
+	if got, _ := sc["repo_slug"].(string); got != "demo" {
+		t.Errorf("repo_slug = %q, want %q", got, "demo")
+	}
+}
+
+// TestScanSecurity_SeverityMin_FilterApplied builds a result with two issues
+// of differing severity and verifies the client-side severity_min filter
+// drops the lower one. Backed by a small in-package wrapper that exercises
+// scanSecurityResultOut directly so we don't depend on the full graph stack.
+func TestScanSecurity_SeverityMin_FilterApplied(t *testing.T) {
+	scan := &app.AnalysisScanResult{
+		Issues: []app.AnalysisIssue{
+			{Severity: "critical", Category: "sql-injection", Title: "C1", File: "a.go", Line: 1},
+			{Severity: "low", Category: "info-disclosure", Title: "L1", File: "b.go", Line: 2},
+		},
+		ScannedNodes: 7,
+	}
+
+	all := mcpadapter.ScanSecurityResultOutForTest("demo", scan, "")
+	if all.IssueCount != 2 {
+		t.Errorf("severity_min='' kept %d issues, want 2", all.IssueCount)
+	}
+	high := mcpadapter.ScanSecurityResultOutForTest("demo", scan, "high")
+	if high.IssueCount != 1 || high.Issues[0].Title != "C1" {
+		t.Errorf("severity_min='high' got %+v, want only C1", high.Issues)
+	}
+	critical := mcpadapter.ScanSecurityResultOutForTest("demo", scan, "critical")
+	if critical.IssueCount != 1 || critical.Issues[0].Severity != "critical" {
+		t.Errorf("severity_min='critical' got %+v, want only critical", critical.Issues)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commit0_api_surface tests
+// ---------------------------------------------------------------------------
+
+// newAPISurfaceDepsForTest mirrors newAnalysisDepsForTest for the api-surface
+// flow.
+func newAPISurfaceDepsForTest(graph domain.OpenCodeGraph) mcpadapter.Deps {
+	cfg := &config.Config{}
+	flowSvc := app.NewFieldFlowService(graph, nil, nil, cfg)
+	return mcpadapter.Deps{
+		Graph:             graph,
+		APISurfaceService: app.NewAPISurfaceService(graph, flowSvc, nil, cfg),
+	}
+}
+
+// TestAPISurface_MissingService_ReturnsUnavailable verifies the lazy-init
+// guard for commit0_api_surface.
+func TestAPISurface_MissingService_ReturnsUnavailable(t *testing.T) {
+	sess, cancel := newTestPair(t, mcpadapter.Deps{DBAddr: "localhost:9999"})
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_api_surface",
+		Arguments: map[string]any{"repo_slug": "demo"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true when APISurfaceService nil, got false")
+	}
+}
+
+// TestAPISurface_InvalidFormat_ReturnsValidationError.
+func TestAPISurface_InvalidFormat_ReturnsValidationError(t *testing.T) {
+	sess, cancel := newTestPair(t, newAPISurfaceDepsForTest(&mcpFakeGraph{}))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_api_surface",
+		Arguments: map[string]any{
+			"repo_slug": "demo",
+			"format":    "yaml",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true for invalid format, got false")
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "summary") || !strings.Contains(body, "openapi") {
+		t.Errorf("expected validation message listing valid formats, got %q", body)
+	}
+}
+
+// TestAPISurface_Summary_EmptyGraph emits the typed APISurface summary with
+// zero endpoints when the graph has no route edges.
+func TestAPISurface_Summary_EmptyGraph(t *testing.T) {
+	sess, cancel := newTestPair(t, newAPISurfaceDepsForTest(&mcpFakeGraph{}))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "commit0_api_surface",
+		Arguments: map[string]any{"repo_slug": "demo"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false, got true: %s", firstTextContent(result))
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "API surface") {
+		t.Errorf("expected 'API surface' header in body, got %q", body)
+	}
+	if !strings.Contains(body, "0 endpoints") {
+		t.Errorf("expected '0 endpoints' header, got %q", body)
+	}
+}
+
+// TestAPISurface_OpenAPI_EmptyGraph emits the OpenAPI 3.0 JSON wrapper for an
+// empty graph. The TextContent must parse as valid JSON announcing
+// openapi 3.0; the StructuredContent wrapper must report endpoints_count=0.
+func TestAPISurface_OpenAPI_EmptyGraph(t *testing.T) {
+	sess, cancel := newTestPair(t, newAPISurfaceDepsForTest(&mcpFakeGraph{}))
+	defer cancel()
+
+	result, err := sess.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "commit0_api_surface",
+		Arguments: map[string]any{
+			"repo_slug": "demo",
+			"format":    "openapi",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false, got true: %s", firstTextContent(result))
+	}
+	body := firstTextContent(result)
+	if !strings.Contains(body, "\"openapi\"") || !strings.Contains(body, "3.0.0") {
+		t.Errorf("expected OpenAPI 3.0.0 declaration in body, got %q", body)
+	}
+	sc, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured content map, got %T", result.StructuredContent)
+	}
+	if got, _ := sc["format"].(string); got != "openapi" {
+		t.Errorf("format = %q, want openapi", got)
+	}
+	if got, _ := sc["endpoints_count"].(float64); got != 0 {
+		t.Errorf("endpoints_count = %v, want 0", got)
 	}
 }
