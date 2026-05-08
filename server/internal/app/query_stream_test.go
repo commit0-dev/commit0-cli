@@ -272,14 +272,12 @@ func TestQueryStreamEmptyQuestion(t *testing.T) {
 	}
 
 	// Should have emitted an error event.
-	select {
-	case evt, ok := <-events:
-		if !ok {
-			t.Fatal("channel closed without error event")
-		}
-		if evt.Type != types.QueryEventError {
-			t.Errorf("expected error event, got %s", evt.Type)
-		}
+	evt, ok := <-events
+	if !ok {
+		t.Fatal("channel closed without error event")
+	}
+	if evt.Type != types.QueryEventError {
+		t.Errorf("expected error event, got %s", evt.Type)
 	}
 }
 
@@ -306,5 +304,374 @@ func TestQueryStreamVectorSearchError(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected error from QueryStream")
+	}
+}
+
+// fakeStreamingExplainer implements domain.LLMExplainer for the streaming
+// query test. Drives both the structured (ExplainStructured) and the chunked
+// (Explain) paths so QueryStream's explanation branches all get exercised.
+type fakeStreamingExplainer struct {
+	chunks       []domain.ExplainChunk
+	chunkErr     error
+	structuredOK bool
+	rawJSON      []byte
+}
+
+func (f *fakeStreamingExplainer) Explain(ctx context.Context, req domain.ExplainRequest) (<-chan domain.ExplainChunk, error) {
+	if f.chunkErr != nil {
+		return nil, f.chunkErr
+	}
+	ch := make(chan domain.ExplainChunk, len(f.chunks)+1)
+	for _, c := range f.chunks {
+		ch <- c
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (f *fakeStreamingExplainer) ExplainStructured(ctx context.Context, req domain.ExplainRequest) ([]byte, error) {
+	if f.structuredOK {
+		return f.rawJSON, nil
+	}
+	return nil, domain.NotFound("no structured")
+}
+
+// TestQueryStreamWithChunkedExplainer drives the streaming explanation path:
+// ExplainStructured returns no result, so the function falls through to
+// Explain which yields tokens. Each non-empty chunk emits an
+// explanation_token event; the Done flag terminates the loop cleanly.
+func TestQueryStreamWithChunkedExplainer(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{
+		Query: config.QueryConfig{DefaultTopK: 10, MinScore: 0.0},
+	}
+
+	vectorHits := []types.ScoredNode{{
+		Node:        types.CodeNode{ID: "func:pkg.A", Qualified: "pkg.A", Kind: types.NodeFunction},
+		VectorScore: 0.9,
+	}}
+	embedder := &fakeStreamingEmbedder{query: make([]float32, 256)}
+	graph := &fakeStreamingGraph{vectorHits: vectorHits, neighbors: &domain.Neighborhood{}}
+	explainer := &fakeStreamingExplainer{
+		chunks: []domain.ExplainChunk{
+			{Text: "first "},
+			{Text: "second "},
+			{Text: "third", Done: true},
+		},
+	}
+
+	qs := NewQueryService(embedder, graph, explainer, cfg)
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{
+		Question: "test query",
+		RepoSlug: "test-repo",
+		TopK:     10,
+		// NoExplain false → exercises explainer branch
+	}, events)
+	if err != nil {
+		t.Fatalf("QueryStream: %v", err)
+	}
+
+	tokens := 0
+	var doneEvt *types.QueryEvent
+	for evt := range events {
+		if evt.Type == types.QueryEventExplanationToken {
+			tokens++
+		}
+		if evt.Type == types.QueryEventDone {
+			e := evt
+			doneEvt = &e
+		}
+	}
+	if tokens != 3 {
+		t.Errorf("expected 3 explanation_token events, got %d", tokens)
+	}
+	if doneEvt == nil || doneEvt.Done == nil {
+		t.Fatal("expected terminal done event with payload")
+	}
+	if doneEvt.Done.Explanation == "" {
+		t.Errorf("expected accumulated explanation, got empty")
+	}
+}
+
+// TestQueryStreamWithStructuredExplainer covers the path where
+// ExplainStructured returns valid JSON — QueryStream short-circuits the
+// chunked Explain branch.
+func TestQueryStreamWithStructuredExplainer(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{
+		Query: config.QueryConfig{DefaultTopK: 10, MinScore: 0.0},
+	}
+	vectorHits := []types.ScoredNode{{
+		Node:        types.CodeNode{ID: "func:pkg.A", Qualified: "pkg.A", Kind: types.NodeFunction},
+		VectorScore: 0.9,
+	}}
+	embedder := &fakeStreamingEmbedder{query: make([]float32, 256)}
+	graph := &fakeStreamingGraph{vectorHits: vectorHits, neighbors: &domain.Neighborhood{}}
+	explainer := &fakeStreamingExplainer{
+		structuredOK: true,
+		rawJSON:      []byte(`{"overview":"structured ok","key_findings":[]}`),
+	}
+
+	qs := NewQueryService(embedder, graph, explainer, cfg)
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{
+		Question: "test query",
+		RepoSlug: "test-repo",
+		TopK:     10,
+	}, events)
+	if err != nil {
+		t.Fatalf("QueryStream: %v", err)
+	}
+	var done *types.QueryEvent
+	tokenCount := 0
+	for evt := range events {
+		if evt.Type == types.QueryEventExplanationToken {
+			tokenCount++
+		}
+		if evt.Type == types.QueryEventDone {
+			e := evt
+			done = &e
+		}
+	}
+	if tokenCount != 0 {
+		t.Errorf("structured path should NOT emit token events, got %d", tokenCount)
+	}
+	if done == nil || done.Done == nil || done.Done.StructuredExplanation == nil {
+		t.Fatalf("expected structured explanation in done event, got %+v", done)
+	}
+	if done.Done.Explanation != "structured ok" {
+		t.Errorf("expected overview as flat explanation, got %q", done.Done.Explanation)
+	}
+}
+
+// TestQueryStreamFilePathFilter exercises the file-path prefix filter.
+func TestQueryStreamFilePathFilter(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10, MinScore: 0.0}}
+
+	hits := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "function:a", Qualified: "a", FilePath: "server/a.go", Kind: types.NodeFunction}, VectorScore: 0.9},
+		{Node: types.CodeNode{ID: "function:b", Qualified: "b", FilePath: "client/b.go", Kind: types.NodeFunction}, VectorScore: 0.8},
+	}
+	embedder := &fakeStreamingEmbedder{query: make([]float32, 256)}
+	graph := &fakeStreamingGraph{vectorHits: hits, neighbors: &domain.Neighborhood{}}
+	qs := NewQueryService(embedder, graph, nil, cfg)
+
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{
+		Question: "test query",
+		RepoSlug: "test-repo",
+		TopK:     10,
+		FilePath: "server/", // only "server/a.go" should survive
+	}, events)
+	if err != nil {
+		t.Fatalf("QueryStream: %v", err)
+	}
+	var done *types.QueryEvent
+	for evt := range events {
+		if evt.Type == types.QueryEventDone {
+			e := evt
+			done = &e
+		}
+	}
+	if done == nil || done.Done == nil {
+		t.Fatal("missing done event")
+	}
+	for _, n := range done.Done.Nodes {
+		if n.Node.FilePath != "server/a.go" {
+			t.Errorf("file-path filter let through %q", n.Node.FilePath)
+		}
+	}
+}
+
+// TestQueryStreamTopKTruncation pushes more results than TopK to exercise
+// the trim branch in QueryStream.
+func TestQueryStreamTopKTruncation(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 3, MinScore: 0.0}}
+
+	// Generate 8 distinct hits; TopK is 2 → output capped at 2.
+	hits := make([]types.ScoredNode, 8)
+	for i := range hits {
+		hits[i] = types.ScoredNode{
+			Node:        types.CodeNode{ID: "function:n", Qualified: "n", Kind: types.NodeFunction},
+			VectorScore: 0.9 - float64(i)*0.01,
+		}
+	}
+	embedder := &fakeStreamingEmbedder{query: make([]float32, 256)}
+	graph := &fakeStreamingGraph{vectorHits: hits, neighbors: &domain.Neighborhood{}}
+	qs := NewQueryService(embedder, graph, nil, cfg)
+
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{
+		Question: "test query",
+		RepoSlug: "test-repo",
+		TopK:     2, // smaller than fused size to trigger truncation
+	}, events)
+	if err != nil {
+		t.Fatalf("QueryStream: %v", err)
+	}
+	var done *types.QueryEvent
+	for evt := range events {
+		if evt.Type == types.QueryEventDone {
+			e := evt
+			done = &e
+		}
+	}
+	if done == nil || done.Done == nil {
+		t.Fatal("missing done event")
+	}
+	if len(done.Done.Nodes) > 2 {
+		t.Errorf("TopK trim missed: got %d nodes, want <= 2", len(done.Done.Nodes))
+	}
+}
+
+// TestQueryStreamChunkError covers the explain-chunk-error branch in
+// QueryStream — when the LLM streams a chunk whose Error is non-nil, the
+// loop must break cleanly without panicking and the final done event still
+// land.
+func TestQueryStreamChunkError(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10, MinScore: 0.0}}
+	vectorHits := []types.ScoredNode{{
+		Node:        types.CodeNode{ID: "func:pkg.A", Qualified: "pkg.A", Kind: types.NodeFunction},
+		VectorScore: 0.9,
+	}}
+	embedder := &fakeStreamingEmbedder{query: make([]float32, 256)}
+	graph := &fakeStreamingGraph{vectorHits: vectorHits, neighbors: &domain.Neighborhood{}}
+	explainer := &fakeStreamingExplainer{
+		chunks: []domain.ExplainChunk{
+			{Text: "partial "},
+			{Error: domain.NotFound("provider gave up")},
+			{Text: "should not arrive"},
+		},
+	}
+
+	qs := NewQueryService(embedder, graph, explainer, cfg)
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{Question: "q", RepoSlug: "r", TopK: 10}, events)
+	if err != nil {
+		t.Fatalf("QueryStream: %v", err)
+	}
+	tokens := 0
+	var done *types.QueryEvent
+	for evt := range events {
+		if evt.Type == types.QueryEventExplanationToken {
+			tokens++
+		}
+		if evt.Type == types.QueryEventDone {
+			e := evt
+			done = &e
+		}
+	}
+	if tokens != 1 {
+		t.Errorf("expected 1 token before chunk error, got %d", tokens)
+	}
+	if done == nil {
+		t.Fatal("expected done event even after chunk error")
+	}
+}
+
+// TestQueryStreamExplainError covers the case where Explain itself returns
+// an error (provider unreachable). QueryStream must keep going and emit done
+// with no explanation rather than fail the whole search.
+func TestQueryStreamExplainError(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10, MinScore: 0.0}}
+	vectorHits := []types.ScoredNode{{
+		Node:        types.CodeNode{ID: "func:pkg.A", Qualified: "pkg.A", Kind: types.NodeFunction},
+		VectorScore: 0.9,
+	}}
+	embedder := &fakeStreamingEmbedder{query: make([]float32, 256)}
+	graph := &fakeStreamingGraph{vectorHits: vectorHits, neighbors: &domain.Neighborhood{}}
+	explainer := &fakeStreamingExplainer{chunkErr: domain.NotFound("LLM down")}
+
+	qs := NewQueryService(embedder, graph, explainer, cfg)
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{Question: "q", RepoSlug: "r", TopK: 10}, events)
+	if err != nil {
+		t.Fatalf("QueryStream should soft-fail when LLM is down, got: %v", err)
+	}
+	var done *types.QueryEvent
+	for evt := range events {
+		if evt.Type == types.QueryEventDone {
+			e := evt
+			done = &e
+		}
+	}
+	if done == nil || done.Done == nil {
+		t.Fatal("expected done event")
+	}
+	if done.Done.Explanation != "" {
+		t.Errorf("expected empty explanation when LLM fails, got %q", done.Done.Explanation)
+	}
+}
+
+// TestQueryStreamWithStructuredExplainerInvalidJSON drops back to the
+// chunked path when the structured response is unparsable.
+func TestQueryStreamWithStructuredExplainerInvalidJSON(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10, MinScore: 0.0}}
+	vectorHits := []types.ScoredNode{{
+		Node:        types.CodeNode{ID: "func:pkg.A", Qualified: "pkg.A", Kind: types.NodeFunction},
+		VectorScore: 0.9,
+	}}
+	embedder := &fakeStreamingEmbedder{query: make([]float32, 256)}
+	graph := &fakeStreamingGraph{vectorHits: vectorHits, neighbors: &domain.Neighborhood{}}
+	explainer := &fakeStreamingExplainer{
+		structuredOK: true,
+		rawJSON:      []byte(`not json`),
+		chunks:       []domain.ExplainChunk{{Text: "fallback ", Done: true}},
+	}
+
+	qs := NewQueryService(embedder, graph, explainer, cfg)
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{Question: "q", RepoSlug: "r", TopK: 10}, events)
+	if err != nil {
+		t.Fatalf("QueryStream: %v", err)
+	}
+	var done *types.QueryEvent
+	tokens := 0
+	for evt := range events {
+		if evt.Type == types.QueryEventExplanationToken {
+			tokens++
+		}
+		if evt.Type == types.QueryEventDone {
+			e := evt
+			done = &e
+		}
+	}
+	if tokens == 0 {
+		t.Errorf("expected fallback chunked tokens after invalid structured JSON")
+	}
+	if done == nil || done.Done.StructuredExplanation != nil {
+		t.Errorf("structured should be nil after parse failure, got %+v", done)
+	}
+}
+
+// TestQueryStreamEmbedderError covers the embed-failure path.
+func TestQueryStreamEmbedderError(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10, MinScore: 0.0}}
+
+	embedder := &fakeStreamingEmbedder{err: domain.Validation("embed boom")}
+	graph := &fakeStreamingGraph{}
+	qs := NewQueryService(embedder, graph, nil, cfg)
+
+	events := make(chan types.QueryEvent, 256)
+	err := qs.QueryStream(ctx, QueryRequest{Question: "q", RepoSlug: "r"}, events)
+	if err == nil {
+		t.Fatal("expected embed error")
+	}
+	// Channel must drain to a closed state, not block.
+	gotErrEvent := false
+	for evt := range events {
+		if evt.Type == types.QueryEventError {
+			gotErrEvent = true
+		}
+	}
+	if !gotErrEvent {
+		t.Errorf("expected error event in stream")
 	}
 }

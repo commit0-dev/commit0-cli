@@ -260,7 +260,7 @@ type QueryEvent struct {
 	MS           int64          `json:"ms,omitempty"`
 	Hit          *ScoredNode    `json:"hit,omitempty"`
 	TopKAfterRRF []ScoredNode   `json:"top_k_after_rrf,omitempty"`
-	Neighbours   []ScoredNode   `json:"neighbours,omitempty"`
+	Neighbors    []ScoredNode   `json:"neighbors,omitempty"`
 	FinalOrder   []ScoredNode   `json:"final_order,omitempty"`
 	Delta        string         `json:"delta,omitempty"`
 	Done         *QueryResult   `json:"done,omitempty"`

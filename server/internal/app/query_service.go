@@ -334,9 +334,9 @@ func (qs *QueryService) QueryStream(ctx context.Context, req QueryRequest, event
 		newNeighbors = expanded[len(fused):]
 	}
 	emitEvent(events, types.QueryEvent{
-		Type:       types.QueryEventExpanded,
-		Neighbours: newNeighbors,
-		EmittedAt:  time.Now(),
+		Type:      types.QueryEventExpanded,
+		Neighbors: newNeighbors,
+		EmittedAt: time.Now(),
 	})
 
 	reranked := qs.conceptRerank(expanded, req.Question)
