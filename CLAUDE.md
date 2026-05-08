@@ -26,11 +26,22 @@ The `[ROADMAP]` Issue is **persistent cross-session memory**. Treat it like a da
    gh issue list --label roadmap --json number,state | jq 'length'   # must be 1
    ```
 2. **NEVER close the ROADMAP.** Not when a milestone ships. Not when direction pivots. Not when scope changes. Closing it deletes the cross-session memory.
-3. **NEVER write `Closes #<roadmap-id>` in a PR body.** Use `Refs #<roadmap-id>`. The `Closes` directive is reserved for scope-bound items (features, bugs, milestones) — never for the ROADMAP itself. Pre-flight check before every `gh pr create`:
-   ```bash
-   ROADMAP=$(gh issue list --label roadmap --state open --json number --jq '.[0].number')
-   echo "$PR_BODY" | grep -E "^Closes #${ROADMAP}\b" && { echo "VIOLATION — change to Refs"; exit 1; }
-   ```
+3. **NEVER write the close-keyword form `<close-verb> #<roadmap-id>` ANYWHERE in a PR body, commit message, or merge message.** The forbidden verbs are `Close`, `Closes`, `Closed`, `Fix`, `Fixes`, `Fixed`, `Resolve`, `Resolves`, `Resolved` (case-insensitive). Use `Refs #<roadmap-id>` instead.
+   - **Backticks do not protect you.** GitHub's auto-close scanner is regex-based and matches the literal pattern even when it appears inside backticks, code blocks, or quoted prose. Paraphrase ("the close-keyword form", "C-l-o-s-e-s with hyphens", "the auto-close directive") rather than write the literal.
+   - **Describing a past violation triggers a new violation.** When narrating a lesson-learned in a PR body, never reproduce the offending string — paraphrase it.
+   - **Pre-flight before every `gh pr create` or `gh pr edit --body`:**
+     ```bash
+     ROADMAP=$(gh issue list --label roadmap --state open --json number --jq '.[0].number')
+     echo "$PR_BODY" | grep -iE "(close[sd]?|fix(es|ed)?|resolve[sd]?) +#${ROADMAP}\b" \
+         && { echo "VIOLATION — close-keyword targeting ROADMAP found in body"; exit 1; }
+     ```
+   - **Pre-flight before merging a PR (squash messages inherit the body):**
+     ```bash
+     gh pr view "$PR_NUM" --json body --jq .body \
+         | grep -iE "(close[sd]?|fix(es|ed)?|resolve[sd]?) +#${ROADMAP}\b" \
+         && { echo "VIOLATION — pre-merge: paraphrase before merge"; exit 1; }
+     ```
+   The close-keyword family is reserved for scope-bound items (features, bugs, milestones) — never for the ROADMAP itself.
 4. **NEVER open a second roadmap.** No `[ROADMAP-2]`, no `[ROADMAP] phase 2`, no parallel tracker for a "new direction." If the existing ROADMAP doesn't fit, **update its body** and post a comment.
 5. **Milestones land as comments on the ROADMAP, not as state transitions.** When a milestone ships: the milestone Issue (scope-bound) gets `Closes #<milestone>`; the ROADMAP gets `Refs #<roadmap>` plus a comment summarising what shipped, what's next, and any blockers.
 6. **Pre-flight before every `gh issue close`:** verify the issue does NOT carry the `roadmap` label.
@@ -38,7 +49,10 @@ The `[ROADMAP]` Issue is **persistent cross-session memory**. Treat it like a da
    gh issue view "$N" --json labels --jq '.labels[].name' | grep -qx roadmap && { echo "VIOLATION — do not close ROADMAP"; exit 1; }
    ```
 7. **If you discover the rule was violated** (closed ROADMAP, second roadmap-labelled issue, `Closes #<roadmap>` in a merged PR): reopen the canonical ROADMAP, remove the `roadmap` label from any imposter, fold the imposter's content into a comment on the canonical one, post a corrective explanation. Do not silently continue.
-8. **Lesson learned 2026-05-08.** Closed canonical ROADMAP #15 by letting `Closes #15` ride in PR #59's body, then opened a forbidden `[ROADMAP-2]` #62. Corrective action shipped the same session: reopened #15, folded #62's content as a comment, removed the `roadmap` label from #62, closed #62 with explanation. The rule above exists because the rule was insufficiently loud before. Don't break it again.
+8. **Lessons learned 2026-05-08.** Two violations of this rule landed and were corrected in the same session:
+   - **Violation 1.** Canonical ROADMAP #15 was closed by a close-keyword targeting it in PR #59's body. A forbidden `[ROADMAP-2]` #62 was then opened. Corrective: reopened #15, folded #62 as a comment, removed the `roadmap` label from #62, closed #62 with explanation.
+   - **Violation 2.** The lesson-from-Violation-1 PR (#64) re-closed #15 because its commit message *described* the prior close-keyword using the literal string inside backticks. GitHub's auto-close scanner does not respect backticks. Corrective: reopened #15 again, amended rule #3 above to forbid any literal close-keyword targeting the ROADMAP anywhere in a PR body — including narrative descriptions of past violations. The literal must be paraphrased.
+   Do not reproduce either pattern. When narrating these lessons in future PR bodies, paraphrase rather than reproduce the offending string verbatim.
 
 ### Session start
 
