@@ -53,6 +53,15 @@ services:
       OLLAMA_EMBED_MODEL: qwen3-embedding:4b
     ports:
       - "${SERVER_PORT:-8080}:8080"
+    volumes:
+      # Bind-mount the repo root (read-only) into /workspace so the indexer can
+      # see the source. POST /api/v1/index with repo_path=/workspace then walks
+      # this tree. Closes #57. Read-only is sufficient because indexing only
+      # reads files; outputs land in SurrealDB.
+      - type: bind
+        source: .
+        target: /workspace
+        read_only: true
     depends_on:
       surreal:
         condition: service_healthy
