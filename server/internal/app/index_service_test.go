@@ -3884,3 +3884,31 @@ func TestRunPostPipeline_TemporalSvc_Error(t *testing.T) {
 		t.Fatalf("Index: %v", err)
 	}
 }
+
+func TestStampParserProvenance(t *testing.T) {
+	nodes := []types.CodeNode{
+		{ID: "a"},                  // no confidence, no provenance
+		{ID: "b", Confidence: 0.5}, // confidence set, no provenance
+		{ID: "c", Provenance: &types.Provenance{Source: "external"}}, // provenance set
+	}
+	stampParserProvenance(nodes)
+
+	if nodes[0].Confidence != 1.0 {
+		t.Errorf("nodes[0].Confidence = %f, want 1.0", nodes[0].Confidence)
+	}
+	if nodes[0].Provenance == nil || nodes[0].Provenance.Source != "parser" {
+		t.Errorf("nodes[0].Provenance source = %v, want parser", nodes[0].Provenance)
+	}
+	if nodes[1].Confidence != 0.5 {
+		t.Errorf("nodes[1].Confidence overwritten: %f, want 0.5", nodes[1].Confidence)
+	}
+	if nodes[1].Provenance == nil || nodes[1].Provenance.Source != "parser" {
+		t.Errorf("nodes[1].Provenance not stamped")
+	}
+	if nodes[2].Provenance.Source != "external" {
+		t.Errorf("nodes[2].Provenance overwritten: %s, want external", nodes[2].Provenance.Source)
+	}
+	if nodes[2].Confidence != 1.0 {
+		t.Errorf("nodes[2].Confidence = %f, want 1.0 (defaulted)", nodes[2].Confidence)
+	}
+}
