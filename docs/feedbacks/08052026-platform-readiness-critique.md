@@ -7,7 +7,7 @@
 | Audience | commit0 maintainers; future-self when revisiting direction |
 | Status | Captured for reference. Not a plan. Not approved scope. |
 | Triggered by | Session 2026-05-08 (PRs #55, #58, #59, #60, #61 merged — 18-tool MCP surface live, HTTP MCP transport at `/mcp`, docker bind-mount, integration loop closed) |
-| Related ROADMAP | (this doc seeds a new `[ROADMAP-2]` issue — see References) |
+| Related ROADMAP | Tracked as a comment update on the canonical ROADMAP #15 (the project's single, persistent roadmap — never closed, never replaced). |
 
 ---
 
@@ -28,7 +28,7 @@ Until those three decisions are made and the consequences followed, more MCP too
 **Is:** an honest critique from the perspective of someone we want as a customer. The voice is sharper than usual on purpose — the goal is signal, not consensus.
 
 **Isn't:**
-- A roadmap. A separate ROADMAP issue tracks scope.
+- A roadmap. The canonical ROADMAP issue (#15) tracks scope; this doc is input.
 - A negation of what's already shipped. Several things are right (see *Calibration* below).
 - A rejection of MCP. MCP is fine; it's the framing that needs work.
 
@@ -229,11 +229,11 @@ Three months on these decisions will yield more value than three months on the n
 
 ## References
 
-- This session's merged PRs: #55 (`commit0_index_status` + tracker registry), #58 (`list_repos` + `list_files` + `node://` resource), #59 (`scan_security` + `api_surface` + integration tests), #60 (docker bind-mount fix for #57), #61 (HTTP MCP at `/mcp` for #56).
-- Closed issues this session: #15 (ROADMAP — 18-tool surface), #28 (meta + security tools), #56 (HTTP↔MCP integration loop), #57 (docker volume mount).
-- Plan file (single-shot vision; this doc supersedes its scope): `~/.claude/plans/commit0-integrative-assistant-and-live-wiki.md`.
-- Captured cultural rules in `CLAUDE.md`: dogfood-commit0; one feature per PR; full English identifiers; co-author trailer; PR title format.
-- New ROADMAP-2 issue (created from this doc): see GitHub.
+- This session's merged PRs: #55 (`commit0_index_status` + tracker registry), #58 (`list_repos` + `list_files` + `node://` resource), #59 (`scan_security` + `api_surface` + integration tests), #60 (docker bind-mount fix for #57), #61 (HTTP MCP at `/mcp` for #56), #63 (this critique doc), #64 (`CLAUDE.md` ROADMAP discipline hardening).
+- Closed issues this session: #28 (meta + security tools), #56 (HTTP↔MCP integration loop), #57 (docker volume mount). The canonical ROADMAP #15 was briefly closed in error this session by PR #59's body — see *Document history* below.
+- Canonical ROADMAP: #15. Platform-direction work tracks as a comment update on #15, not as a new issue. Single canonical roadmap is a hard rule (`CLAUDE.md` → *ROADMAP — IMMUTABLE RULES*).
+- Plan file (single-shot vision; superseded in scope by this doc): `~/.claude/plans/commit0-integrative-assistant-and-live-wiki.md`.
+- Captured cultural rules in `CLAUDE.md`: ROADMAP — IMMUTABLE RULES (with mechanical pre-flight checks); dogfood-commit0; one feature per PR; full English identifiers; co-author trailer; PR title format.
 
 ---
 
@@ -244,7 +244,24 @@ This document is **input to direction-setting**, not direction itself. The maint
 1. Read it.
 2. Disagree with the parts that deserve disagreement.
 3. Make the three foundational decisions explicitly (yes/no, with rationale).
-4. Open the new `[ROADMAP-2]` issue with the chosen direction and link this doc.
+4. Post the chosen direction as a comment on the canonical ROADMAP #15. (Do **not** open a new roadmap; the project follows the "one canonical roadmap, never close, never split" rule — see `CLAUDE.md` → *ROADMAP — IMMUTABLE RULES*.)
 5. Revisit this doc after the next major milestone (3 months out) to check what the team's view confirmed and what was overstated.
 
 The point of writing it down is so the disagreements happen on the document, not in someone's head over six months of gradual drift.
+
+---
+
+## Document history
+
+This doc was first written and merged in PR #63 with references to a `[ROADMAP-2]` issue (#62) that was opened to track the platform-direction work. That was a violation of the project's "one canonical ROADMAP" rule: the canonical ROADMAP #15 had also been closed the same session by `Closes #15` riding in PR #59's body.
+
+Corrective action shipped the same session:
+
+1. Reopened #15.
+2. Removed the `roadmap` label from #62 and closed it with an explanation.
+3. Folded #62's content into a comment on #15.
+4. Hardened `CLAUDE.md` with explicit ROADMAP rules and mechanical pre-flight checks (PR #64) so the violation cannot mechanically recur.
+
+This revision (post-#64) updates references throughout the document to reflect the canonical state: **#15 is the single ROADMAP**, platform-direction work tracks as comments on #15, and `[ROADMAP-2]` no longer exists as a label-bearing tracker. Earlier readings of this doc that reference `[ROADMAP-2]` should be considered stale.
+
+The original violation and corrective are recorded in `CLAUDE.md` (lesson-learned 2026-05-08) so future sessions inherit the precedent.
