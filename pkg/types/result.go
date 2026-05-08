@@ -234,6 +234,41 @@ type ChatEvent struct {
 }
 
 // ---------------------------------------------------------------------------
+// Streaming query events (SSE)
+// ---------------------------------------------------------------------------
+
+// QueryEventType identifies an SSE event variant on the semantic search stream.
+type QueryEventType string
+
+const (
+	QueryEventEmbeddingDone    QueryEventType = "embedding_done"
+	QueryEventVectorHit        QueryEventType = "vector_hit"
+	QueryEventFTSHit           QueryEventType = "fts_hit"
+	QueryEventFused            QueryEventType = "fused"
+	QueryEventExpanded         QueryEventType = "expanded"
+	QueryEventReranked         QueryEventType = "reranked"
+	QueryEventExplanationToken QueryEventType = "explanation_token"
+	QueryEventDone             QueryEventType = "done"
+	QueryEventError            QueryEventType = "error"
+)
+
+// QueryEvent is one frame on the semantic search SSE stream.
+type QueryEvent struct {
+	Type         QueryEventType `json:"type"`
+	EmittedAt    time.Time      `json:"emitted_at"`
+	Dims         int            `json:"dims,omitempty"`
+	MS           int64          `json:"ms,omitempty"`
+	Hit          *ScoredNode    `json:"hit,omitempty"`
+	TopKAfterRRF []ScoredNode   `json:"top_k_after_rrf,omitempty"`
+	Neighbors    []ScoredNode   `json:"neighbors,omitempty"`
+	FinalOrder   []ScoredNode   `json:"final_order,omitempty"`
+	Delta        string         `json:"delta,omitempty"`
+	Done         *QueryResult   `json:"done,omitempty"`
+	Message      string         `json:"message,omitempty"`
+	Stage        string         `json:"stage,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
 // Memory Management
 // ---------------------------------------------------------------------------
 
