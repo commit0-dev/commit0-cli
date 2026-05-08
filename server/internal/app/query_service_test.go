@@ -65,6 +65,37 @@ func TestQueryServiceQuerySuccess(t *testing.T) {
 	}
 }
 
+func TestQueryServiceMinConfidenceFilter(t *testing.T) {
+	embedder := &stubEmbedder{queryVec: []float32{0.1, 0.2, 0.3}}
+
+	store := newStubGraphStore()
+	store.vectorResults = []types.ScoredNode{
+		{Node: types.CodeNode{ID: "high", Qualified: "pkg.High", Confidence: 0.9}, VectorScore: 0.9, FusedScore: 0.9},
+		{Node: types.CodeNode{ID: "low", Qualified: "pkg.Low", Confidence: 0.2}, VectorScore: 0.8, FusedScore: 0.8},
+		{Node: types.CodeNode{ID: "mid", Qualified: "pkg.Mid", Confidence: 0.5}, VectorScore: 0.7, FusedScore: 0.7},
+	}
+
+	cfg := &config.Config{Query: config.QueryConfig{DefaultTopK: 10, RRFKConstant: 60}}
+	svc := NewQueryService(embedder, store, nil, cfg)
+
+	result, err := svc.Query(context.Background(), QueryRequest{
+		Question:      "find",
+		RepoSlug:      "my-repo",
+		MinConfidence: 0.5,
+	})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	for _, n := range result.Nodes {
+		if n.Node.Qualified == "pkg.Low" {
+			t.Errorf("low-confidence node leaked through filter")
+		}
+	}
+	if result.Confidence == nil {
+		t.Fatal("confidence metadata missing")
+	}
+}
+
 func TestQueryServiceQueryEmbedFails(t *testing.T) {
 	embedder := &stubEmbedder{
 		err: domain.RateLimit("too fast"),
@@ -734,5 +765,35 @@ func TestConceptRerank_NoConcepts(t *testing.T) {
 	// No concepts, no boost (unless centrality)
 	if result[0].FusedScore != 1.0 {
 		t.Errorf("No concepts should not boost, expected 1.0, got %.2f", result[0].FusedScore)
+	}
+}
+
+func TestComputeNodeConfidence(t *testing.T) {
+	if got := computeNodeConfidence(nil); got != nil {
+		t.Errorf("nil input: got %+v, want nil", got)
+	}
+	if got := computeNodeConfidence([]types.ScoredNode{}); got != nil {
+		t.Errorf("empty slice: got %+v, want nil", got)
+	}
+
+	nodes := []types.ScoredNode{
+		{Node: types.CodeNode{ID: "a", Confidence: 1.0}},
+		{Node: types.CodeNode{ID: "b", Confidence: 0.25}},
+		{Node: types.CodeNode{ID: "c", Confidence: 0.5}},
+		{Node: types.CodeNode{ID: "d", Confidence: 0.75}},
+	}
+	got := computeNodeConfidence(nodes)
+	if got == nil {
+		t.Fatal("got nil, want metadata")
+	}
+	wantAvg := (1.0 + 0.25 + 0.5 + 0.75) / 4
+	if got.AvgConfidence < wantAvg-0.001 || got.AvgConfidence > wantAvg+0.001 {
+		t.Errorf("AvgConfidence = %f, want %f", got.AvgConfidence, wantAvg)
+	}
+	if got.LowConfidenceCount != 2 {
+		t.Errorf("LowConfidenceCount = %d, want 2 (0.25 and 0.5)", got.LowConfidenceCount)
+	}
+	if got.HighConfidenceCount != 2 {
+		t.Errorf("HighConfidenceCount = %d, want 2 (1.0 and 0.75)", got.HighConfidenceCount)
 	}
 }

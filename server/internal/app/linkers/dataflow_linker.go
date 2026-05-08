@@ -1,6 +1,8 @@
 package linkers
 
 import (
+	"time"
+
 	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/domain"
 )
@@ -22,6 +24,12 @@ func (l *DataFlowLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) (
 			continue
 		}
 		if isResolved(e.ToID) {
+			e.Confidence = 1.0
+			e.Provenance = &types.Provenance{
+				Source:    "dataflow_linker",
+				Method:    "symbol_resolution",
+				CreatedAt: time.Now(),
+			}
 			continue
 		}
 		stats.Processed++
@@ -29,9 +37,17 @@ func (l *DataFlowLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) (
 		resolved, ok := sym.Resolve(e.ToID, e.FromID)
 		if ok {
 			e.ToID = resolved
+			e.Confidence = 0.9
 			stats.Resolved++
 		} else {
+			e.Confidence = 0.5
 			stats.Unresolved++
+		}
+
+		e.Provenance = &types.Provenance{
+			Source:    "dataflow_linker",
+			Method:    "symbol_resolution",
+			CreatedAt: time.Now(),
 		}
 	}
 

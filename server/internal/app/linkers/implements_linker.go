@@ -2,6 +2,7 @@ package linkers
 
 import (
 	"strings"
+	"time"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/domain"
@@ -86,6 +87,7 @@ func (l *ImplementsLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable)
 
 	// --- Phase B: match structs against interfaces ---
 	stats.Processed = len(interfaces)
+	now := time.Now()
 
 	for _, iface := range interfaces {
 		// Skip empty interfaces — every type satisfies them, which is noise.
@@ -102,9 +104,15 @@ func (l *ImplementsLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable)
 			}
 			if coversInterface(concrete.methodSet, iface.methodSet) {
 				edges = append(edges, types.CodeEdge{
-					Kind:   types.EdgeImplements,
-					FromID: concrete.id,
-					ToID:   iface.id,
+					Kind:       types.EdgeImplements,
+					FromID:     concrete.id,
+					ToID:       iface.id,
+					Confidence: 0.9,
+					Provenance: &types.Provenance{
+						Source:    "implements_linker",
+						Method:    "method_set_matching",
+						CreatedAt: now,
+					},
 				})
 				stats.Resolved++
 			}

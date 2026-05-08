@@ -2,6 +2,7 @@ package linkers
 
 import (
 	"strings"
+	"time"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/domain"
@@ -38,9 +39,16 @@ func (l *CallLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([]ty
 		if e.Kind != types.EdgeCalls {
 			continue
 		}
+
 		if isResolved(e.ToID) {
 			// Already resolved — still classify the edge label.
 			e.Kind = classifyCallKind(e.FromID, sym)
+			e.Confidence = 1.0
+			e.Provenance = &types.Provenance{
+				Source:    "call_linker",
+				Method:    "pre_resolved",
+				CreatedAt: time.Now(),
+			}
 			continue
 		}
 		stats.Processed++
@@ -48,9 +56,17 @@ func (l *CallLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([]ty
 		resolved, ok := sym.Resolve(e.ToID, e.FromID)
 		if ok {
 			e.ToID = resolved
+			e.Confidence = 1.0
 			stats.Resolved++
 		} else {
+			e.Confidence = 0.5
 			stats.Unresolved++
+		}
+
+		e.Provenance = &types.Provenance{
+			Source:    "call_linker",
+			Method:    "symbol_resolution",
+			CreatedAt: time.Now(),
 		}
 
 		// Classify the edge label based on the caller's context.

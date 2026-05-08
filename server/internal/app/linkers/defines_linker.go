@@ -2,6 +2,7 @@ package linkers
 
 import (
 	"strings"
+	"time"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/domain"
@@ -32,6 +33,7 @@ func (l *DefinesLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([
 
 	// Generate defines edges
 	var definesEdges []types.CodeEdge
+	now := time.Now()
 
 	for _, meta := range sym.Nodes {
 		if meta.Kind == types.NodeFile || meta.Kind == types.NodeModule {
@@ -57,16 +59,28 @@ func (l *DefinesLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable) ([
 
 		if ownerClassID != "" {
 			definesEdges = append(definesEdges, types.CodeEdge{
-				Kind:   types.EdgeDefines,
-				FromID: ownerClassID,
-				ToID:   meta.ID,
+				Kind:       types.EdgeDefines,
+				FromID:     ownerClassID,
+				ToID:       meta.ID,
+				Confidence: 1.0,
+				Provenance: &types.Provenance{
+					Source:    "defines_linker",
+					Method:    "structural_generation",
+					CreatedAt: now,
+				},
 			})
 			stats.Resolved++
 		} else if fileID != "" {
 			definesEdges = append(definesEdges, types.CodeEdge{
-				Kind:   types.EdgeDefines,
-				FromID: fileID,
-				ToID:   meta.ID,
+				Kind:       types.EdgeDefines,
+				FromID:     fileID,
+				ToID:       meta.ID,
+				Confidence: 1.0,
+				Provenance: &types.Provenance{
+					Source:    "defines_linker",
+					Method:    "structural_generation",
+					CreatedAt: now,
+				},
 			})
 			stats.Resolved++
 		}

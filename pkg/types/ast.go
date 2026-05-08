@@ -91,6 +91,13 @@ const (
 	MutationFilter      MutationKind = "filter"       // conditional inclusion
 )
 
+// Provenance records the origin and method of a fact in the graph.
+type Provenance struct {
+	Source    string    `json:"source"` // "parser", "call_linker", "dataflow_linker", "implements_linker", "field_access_linker", "route_linker", "defines_linker", "manual", "webhook"
+	Method    string    `json:"method"` // "ast_extraction", "symbol_resolution", "type_inference", "heuristic", "user_edit"
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // CodeNode represents a single entity in the codebase (function, class, file, module).
 type CodeNode struct {
 	Language    string
@@ -127,6 +134,11 @@ type CodeNode struct {
 	// (visible to anyone with access to the repository). Knowledge nodes
 	// can carry "team:<id>" or "user:<id>" for private decisions/runbooks.
 	AccessScope AccessScope `json:"access_scope,omitempty"`
+
+	// Confidence and Provenance carry per-node trust metadata: how sure
+	// the source is and where it came from. See PR #71.
+	Confidence float32     `json:",omitempty"`
+	Provenance *Provenance `json:",omitempty"`
 }
 
 // CodeEdge represents a relationship between two code nodes.
@@ -146,6 +158,10 @@ type CodeEdge struct {
 
 	// AccessScope classifies who may see this edge. Defaults to "public".
 	AccessScope AccessScope `json:"access_scope,omitempty"`
+
+	// Confidence and Provenance carry per-edge trust metadata. See PR #71.
+	Confidence float32     `json:",omitempty"`
+	Provenance *Provenance `json:",omitempty"`
 }
 
 // Repo represents a source code repository.

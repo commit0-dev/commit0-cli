@@ -10,6 +10,7 @@ type QueryResult struct {
 	RepoSlug              string
 	Nodes                 []ScoredNode
 	Timing                TimingInfo
+	Confidence            *ConfidenceMetadata `json:"Confidence,omitempty"`
 }
 
 // ScoredNode wraps a CodeNode with relevance scores.
@@ -29,6 +30,7 @@ type TraceResult struct {
 	Tree                  []TraceHop
 	Root                  CodeNode
 	Timing                TimingInfo
+	Confidence            *ConfidenceMetadata `json:"Confidence,omitempty"`
 }
 
 // TraceHop represents a single hop in a trace tree.
@@ -48,6 +50,7 @@ type BlastResult struct {
 	Affected          []AffectedNode
 	Target            CodeNode
 	Timing            TimingInfo
+	Confidence        *ConfidenceMetadata `json:"Confidence,omitempty"`
 }
 
 // AffectedNode represents a node affected by a change.
@@ -139,6 +142,15 @@ type TimingInfo struct {
 	GraphMS   int64 // Time spent on graph operations
 	ExplainMS int64 // Time spent generating explanations
 	TotalMS   int64 // Total operation time
+}
+
+// ConfidenceMetadata summarizes the confidence profile of a result set.
+type ConfidenceMetadata struct {
+	AvgConfidence       float64 `json:"avg_confidence"`
+	LowConfidenceCount  int     `json:"low_confidence_count"`
+	HighConfidenceCount int     `json:"high_confidence_count"`
+	UnresolvedEdgeCount int     `json:"unresolved_edge_count"`
+	TotalEdgeCount      int     `json:"total_edge_count"`
 }
 
 // ---------------------------------------------------------------------------

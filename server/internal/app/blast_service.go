@@ -22,6 +22,7 @@ type BlastRequest struct {
 	NoExplain      bool
 	EdgeLabels     []string // which edge types to follow. Empty = ["calls"].
 	IncludeContext bool     // when true, populate CallSiteExcerpt/CallExpression/CallLine on each affected node
+	MinConfidence  float64  // filter out edges below this confidence (0 = no filter)
 }
 
 // BlastService analyzes code change impact.
@@ -104,6 +105,16 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 	affected = deduplicateAffected(affected)
 	sortAffectedByHopCount(affected)
 
+	if req.MinConfidence > 0 {
+		filtered := affected[:0]
+		for _, a := range affected {
+			if float64(a.Node.Confidence) >= req.MinConfidence {
+				filtered = append(filtered, a)
+			}
+		}
+		affected = filtered
+	}
+
 	// Optionally enrich with call-site context (non-fatal).
 	if req.IncludeContext {
 		if enrichErr := EnrichAffectedWithCallSites(ctx, bs.graph, req.RepoSlug, affected); enrichErr != nil {
@@ -172,6 +183,7 @@ func (bs *BlastService) Blast(ctx context.Context, req BlastRequest) (*types.Bla
 		Affected:          affected,
 		Summary:           explanation,
 		StructuredSummary: structuredSummary,
+		Confidence:        computeBlastConfidence(affected),
 		Timing: types.TimingInfo{
 			GraphMS: time.Since(graphStart).Milliseconds(),
 			TotalMS: time.Since(startTime).Milliseconds(),
@@ -215,4 +227,26 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func computeBlastConfidence(affected []types.AffectedNode) *types.ConfidenceMetadata {
+	if len(affected) == 0 {
+		return nil
+	}
+	var total float64
+	var low, high int
+	for _, a := range affected {
+		c := float64(a.Node.Confidence)
+		total += c
+		if c < 0.7 {
+			low++
+		} else {
+			high++
+		}
+	}
+	return &types.ConfidenceMetadata{
+		AvgConfidence:       total / float64(len(affected)),
+		LowConfidenceCount:  low,
+		HighConfidenceCount: high,
+	}
 }

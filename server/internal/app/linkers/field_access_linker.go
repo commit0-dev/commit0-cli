@@ -2,6 +2,7 @@ package linkers
 
 import (
 	"strings"
+	"time"
 
 	"github.com/commit0-dev/commit0/pkg/types"
 	"github.com/commit0-dev/commit0/server/internal/domain"
@@ -38,6 +39,12 @@ func (l *FieldAccessLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable
 		// Check if already resolved (has a known class: prefix with a real node)
 		if isResolved(e.ToID) {
 			if _, ok := sym.Nodes[e.ToID]; ok {
+				e.Confidence = 0.85
+				e.Provenance = &types.Provenance{
+					Source:    "field_access_linker",
+					Method:    "symbol_resolution",
+					CreatedAt: time.Now(),
+				}
 				stats.Resolved++
 				continue
 			}
@@ -48,6 +55,12 @@ func (l *FieldAccessLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable
 		// the parent struct is "app.IndexService" → "class:app⋅IndexService"
 		fromMeta, ok := sym.Nodes[e.FromID]
 		if !ok {
+			e.Confidence = 0.5
+			e.Provenance = &types.Provenance{
+				Source:    "field_access_linker",
+				Method:    "unresolved",
+				CreatedAt: time.Now(),
+			}
 			stats.Unresolved++
 			continue
 		}
@@ -60,6 +73,12 @@ func (l *FieldAccessLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable
 			parentQualified := strings.Join(parts[:len(parts)-1], ".")
 			if id, exists := sym.QualifiedToID[parentQualified]; exists {
 				e.ToID = id
+				e.Confidence = 0.85
+				e.Provenance = &types.Provenance{
+					Source:    "field_access_linker",
+					Method:    "symbol_resolution",
+					CreatedAt: time.Now(),
+				}
 				stats.Resolved++
 				continue
 			}
@@ -67,8 +86,7 @@ func (l *FieldAccessLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable
 
 		// Fallback: try to match the operand text against known class names
 		// ToID format is "class:OPERAND" — extract the operand
-		if strings.HasPrefix(e.ToID, "class:") {
-			operand := strings.TrimPrefix(e.ToID, "class:")
+		if operand, found := strings.CutPrefix(e.ToID, "class:"); found {
 			operand = strings.ReplaceAll(operand, "⋅", ".")
 
 			// Try packageName.OperandAsType
@@ -77,12 +95,24 @@ func (l *FieldAccessLinker) Link(edges []types.CodeEdge, sym *domain.SymbolTable
 				candidate := pkg + "." + strings.ToUpper(operand[:1]) + operand[1:]
 				if id, ok := sym.QualifiedToID[candidate]; ok {
 					e.ToID = id
+					e.Confidence = 0.85
+					e.Provenance = &types.Provenance{
+						Source:    "field_access_linker",
+						Method:    "symbol_resolution",
+						CreatedAt: time.Now(),
+					}
 					stats.Resolved++
 					continue
 				}
 			}
 		}
 
+		e.Confidence = 0.5
+		e.Provenance = &types.Provenance{
+			Source:    "field_access_linker",
+			Method:    "unresolved",
+			CreatedAt: time.Now(),
+		}
 		stats.Unresolved++
 	}
 

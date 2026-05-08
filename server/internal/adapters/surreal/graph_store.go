@@ -20,6 +20,12 @@ import (
 // Raw DB row structs — used for unmarshalling SurrealDB query results.
 // ---------------------------------------------------------------------------
 
+type provenanceRow struct {
+	Source    string     `json:"source"`
+	Method    string     `json:"method"`
+	CreatedAt *time.Time `json:"created_at"`
+}
+
 type nodeRow struct {
 	ID                 *models.RecordID `json:"id"`
 	Docstring          string           `json:"docstring"`
@@ -42,6 +48,8 @@ type nodeRow struct {
 	IntroducedAt       *time.Time       `json:"introduced_at"`
 	LastModifiedCommit string           `json:"last_modified_commit"`
 	LastModifiedAt     *time.Time       `json:"last_modified_at"`
+	Confidence         float32          `json:"confidence"`
+	Provenance         *provenanceRow   `json:"provenance"`
 }
 
 type repoRow struct {
@@ -66,7 +74,7 @@ func rowToCodeNode(r nodeRow, kind types.NodeKind) types.CodeNode {
 	if r.ID != nil {
 		id = fmt.Sprintf("%s:%v", r.ID.Table, r.ID.ID)
 	}
-	return types.CodeNode{
+	node := types.CodeNode{
 		ID:                 id,
 		Kind:               kind,
 		Name:               r.Name,
@@ -88,7 +96,18 @@ func rowToCodeNode(r nodeRow, kind types.NodeKind) types.CodeNode {
 		IntroducedAt:       r.IntroducedAt,
 		LastModifiedCommit: r.LastModifiedCommit,
 		LastModifiedAt:     r.LastModifiedAt,
+		Confidence:         r.Confidence,
 	}
+	if r.Provenance != nil {
+		node.Provenance = &types.Provenance{
+			Source: r.Provenance.Source,
+			Method: r.Provenance.Method,
+		}
+		if r.Provenance.CreatedAt != nil {
+			node.Provenance.CreatedAt = *r.Provenance.CreatedAt
+		}
+	}
+	return node
 }
 
 // nodeParams builds the SurrealQL variable map for upsert operations.
@@ -127,6 +146,15 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		concepts = node.Concepts
 	}
 
+	var provenance any = models.None
+	if node.Provenance != nil {
+		provenance = map[string]any{
+			"source":     node.Provenance.Source,
+			"method":     node.Provenance.Method,
+			"created_at": node.Provenance.CreatedAt,
+		}
+	}
+
 	// Content map uses schema field names directly (repo, file — not repo_ref, file_ref).
 	// record_id is separate (used in UPSERT type::record($record_id)).
 	return map[string]any{
@@ -147,6 +175,8 @@ func nodeParams(node *types.CodeNode) map[string]any {
 		"content_hash": node.ContentHash,
 		"embedding":    embedding,
 		"visibility":   defaultVisibility(node.Visibility),
+		"confidence":   node.Confidence,
+		"provenance":   provenance,
 		"repo":         repoRef,
 		"file":         fileRef,
 	}
@@ -221,6 +251,16 @@ func genericEdgeParams(edge *types.CodeEdge, repoSlug string) map[string]any {
 			props[k] = n
 		} else {
 			props[k] = v
+		}
+	}
+	if edge.Confidence > 0 {
+		props["confidence"] = edge.Confidence
+	}
+	if edge.Provenance != nil {
+		props["provenance"] = map[string]any{
+			"source":     edge.Provenance.Source,
+			"method":     edge.Provenance.Method,
+			"created_at": edge.Provenance.CreatedAt,
 		}
 	}
 

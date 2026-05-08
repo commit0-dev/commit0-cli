@@ -327,6 +327,74 @@ func TestBlastServiceBlastWithManyAffected(t *testing.T) {
 	}
 }
 
+func TestBlastServiceMinConfidenceFilter(t *testing.T) {
+	store := newStubGraphStore()
+	store.nodesByQ["my-repo::pkg.UserService.Create"] = &types.CodeNode{
+		ID:        "f1",
+		Qualified: "pkg.UserService.Create",
+		Kind:      types.NodeFunction,
+	}
+	store.affected = []types.AffectedNode{
+		{Node: types.CodeNode{ID: "f2", Qualified: "pkg.High", Confidence: 0.9}, HopCount: 1},
+		{Node: types.CodeNode{ID: "f3", Qualified: "pkg.Low", Confidence: 0.3}, HopCount: 1},
+		{Node: types.CodeNode{ID: "f4", Qualified: "pkg.Mid", Confidence: 0.5}, HopCount: 1},
+	}
+
+	cfg := &config.Config{}
+	svc := NewBlastService(store, nil, cfg)
+
+	// MinConfidence=0.5 should keep High (0.9) and Mid (0.5), drop Low (0.3).
+	result, err := svc.Blast(context.Background(), BlastRequest{
+		Symbol:        "pkg.UserService.Create",
+		RepoSlug:      "my-repo",
+		MinConfidence: 0.5,
+	})
+	if err != nil {
+		t.Fatalf("Blast failed: %v", err)
+	}
+	if len(result.Affected) != 2 {
+		t.Fatalf("Affected = %d, want 2 after MinConfidence filter", len(result.Affected))
+	}
+	for _, a := range result.Affected {
+		if a.Node.Qualified == "pkg.Low" {
+			t.Errorf("Low confidence node should have been filtered")
+		}
+	}
+	if result.Confidence == nil {
+		t.Fatal("Confidence metadata missing")
+	}
+}
+
+func TestComputeBlastConfidence(t *testing.T) {
+	if got := computeBlastConfidence(nil); got != nil {
+		t.Errorf("empty input: got %+v, want nil", got)
+	}
+	if got := computeBlastConfidence([]types.AffectedNode{}); got != nil {
+		t.Errorf("empty slice: got %+v, want nil", got)
+	}
+
+	affected := []types.AffectedNode{
+		{Node: types.CodeNode{ID: "a", Confidence: 0.9}},
+		{Node: types.CodeNode{ID: "b", Confidence: 0.5}},
+		{Node: types.CodeNode{ID: "c", Confidence: 0.3}},
+		{Node: types.CodeNode{ID: "d", Confidence: 1.0}},
+	}
+	got := computeBlastConfidence(affected)
+	if got == nil {
+		t.Fatal("got nil, want metadata")
+	}
+	wantAvg := (0.9 + 0.5 + 0.3 + 1.0) / 4
+	if got.AvgConfidence < wantAvg-0.001 || got.AvgConfidence > wantAvg+0.001 {
+		t.Errorf("AvgConfidence = %f, want %f", got.AvgConfidence, wantAvg)
+	}
+	if got.LowConfidenceCount != 2 {
+		t.Errorf("LowConfidenceCount = %d, want 2", got.LowConfidenceCount)
+	}
+	if got.HighConfidenceCount != 2 {
+		t.Errorf("HighConfidenceCount = %d, want 2", got.HighConfidenceCount)
+	}
+}
+
 func TestMinInt(t *testing.T) {
 	if got := minInt(3, 5); got != 3 {
 		t.Errorf("minInt(3,5) = %d, want 3", got)
