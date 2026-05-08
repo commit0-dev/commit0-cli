@@ -24,7 +24,7 @@ func NewEventHandlers(eventService *app.EventService) *EventHandlers {
 
 // handleListEvents handles GET /api/v1/events
 // Query parameters: repo, source, type, since, until
-// Returns: {events: [...], count: N}
+// Returns: {events: [...], count: N}.
 func (h *EventHandlers) handleListEvents(c *gin.Context) {
 	filter := types.EventFilter{
 		RepoSlug: c.Query("repo"),
@@ -67,7 +67,7 @@ func (h *EventHandlers) handleListEvents(c *gin.Context) {
 
 // handleEventStream handles GET /api/v1/events/stream (SSE)
 // Query parameters: repo, source, type
-// Returns: Server-Sent Events stream of matching events
+// Returns: Server-Sent Events stream of matching events.
 func (h *EventHandlers) handleEventStream(c *gin.Context) {
 	filter := types.EventFilter{
 		RepoSlug: c.Query("repo"),
@@ -107,7 +107,7 @@ func (h *EventHandlers) handleEventStream(c *gin.Context) {
 
 // handleEventCount handles GET /api/v1/events/count
 // Query parameters: repo
-// Returns: {count: N}
+// Returns: {count: N}.
 func (h *EventHandlers) handleEventCount(c *gin.Context) {
 	filter := types.EventFilter{
 		RepoSlug: c.Query("repo"),
