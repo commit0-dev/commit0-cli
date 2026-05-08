@@ -17,6 +17,7 @@ const (
 	ErrSyncConflict  = types.ErrSyncConflict
 	ErrAuthFailed    = types.ErrAuthFailed
 	ErrOutOfScope    = types.ErrOutOfScope
+	ErrUnavailable   = types.ErrUnavailable
 )
 
 type AmbiguousSymbolError = types.AmbiguousSymbolError
@@ -32,4 +33,5 @@ var (
 	SyncConflict  = types.SyncConflict
 	AuthFailed    = types.AuthFailed
 	OutOfScope    = types.OutOfScope
+	Unavailable   = types.Unavailable
 )

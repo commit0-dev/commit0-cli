@@ -122,6 +122,11 @@ type CodeNode struct {
 	IntroducedAt       *time.Time
 	LastModifiedCommit string
 	LastModifiedAt     *time.Time
+
+	// AccessScope classifies who may see this node. Defaults to "public"
+	// (visible to anyone with access to the repository). Knowledge nodes
+	// can carry "team:<id>" or "user:<id>" for private decisions/runbooks.
+	AccessScope AccessScope `json:"access_scope,omitempty"`
 }
 
 // CodeEdge represents a relationship between two code nodes.
@@ -138,6 +143,9 @@ type CodeEdge struct {
 	IntroducedCommit string
 	IntroducedAt     *time.Time
 	RemovedCommit    string
+
+	// AccessScope classifies who may see this edge. Defaults to "public".
+	AccessScope AccessScope `json:"access_scope,omitempty"`
 }
 
 // Repo represents a source code repository.

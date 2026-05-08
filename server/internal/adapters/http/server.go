@@ -36,6 +36,7 @@ type Server struct {
 	syncSvc      *app.SyncService
 	peerStore    domain.PeerStore
 	scopeStore   domain.ScopeStore
+	identitySvc  *app.IdentityService
 	cfg          *config.ServerConfig
 	fullCfg      *config.Config
 	log          *slog.Logger
@@ -43,6 +44,10 @@ type Server struct {
 }
 
 // NewServer constructs the HTTP server, registers middleware and routes.
+//
+// identitySvc is optional — pass nil for single-tenant deployments without
+// identity persistence. The middleware degrades to a no-op (every request
+// is anonymous) when nil.
 func NewServer(
 	indexSvc *app.IndexService,
 	querySvc *app.QueryService,
@@ -55,6 +60,7 @@ func NewServer(
 	tempSvc *app.TemporalService,
 	rootCauseSvc *app.RootCauseAnalysisService,
 	apiSurfSvc *app.APISurfaceService,
+	identitySvc *app.IdentityService,
 	cfg *config.ServerConfig,
 	fullCfg ...*config.Config,
 ) *Server {
@@ -74,6 +80,7 @@ func NewServer(
 		tempSvc:      tempSvc,
 		rootCauseSvc: rootCauseSvc,
 		apiSurfSvc:   apiSurfSvc,
+		identitySvc:  identitySvc,
 		cfg:          cfg,
 		log:          slog.Default(),
 		trackers:     newIndexTrackerStore(),
@@ -93,7 +100,12 @@ func (s *Server) registerMiddleware() {
 	s.router.Use(cors.New(cors.Config{
 		AllowOrigins: s.cfg.CORSOrigins,
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodDelete},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", HeaderUserID},
 	}))
+	// Identity middleware runs after CORS so preflight OPTIONS short-circuits
+	// before we do any DB work, but before route handlers so they all see
+	// the resolved Identity in ctx.
+	s.router.Use(IdentityMiddleware(s.identitySvc))
 }
 
 func (s *Server) registerRoutes() {
@@ -142,6 +154,26 @@ func (s *Server) registerRoutes() {
 	v1.GET("/nodes/lookup", s.handleNodeLookup)
 	v1.GET("/nodes/by-file", s.handleNodesByFile)
 	v1.GET("/nodes/:id/neighborhood", s.handleGetNeighborhood)
+
+	// Identity — Users + Teams + Memberships (PR 1.3, Issue #69, ROADMAP #15)
+	if s.identitySvc != nil {
+		ih := NewIdentityHandlers(s.identitySvc)
+		v1.GET("/whoami", ih.handleWhoAmI)
+
+		v1.POST("/users", ih.handleCreateUser)
+		v1.GET("/users", ih.handleListUsers)
+		v1.GET("/users/:id", ih.handleGetUser)
+		v1.DELETE("/users/:id", ih.handleDeleteUser)
+
+		v1.POST("/teams", ih.handleCreateTeam)
+		v1.GET("/teams", ih.handleListTeams)
+		v1.GET("/teams/:id", ih.handleGetTeam)
+		v1.DELETE("/teams/:id", ih.handleDeleteTeam)
+
+		v1.POST("/teams/:id/members", ih.handleAddMember)
+		v1.GET("/teams/:id/members", ih.handleListMembers)
+		v1.DELETE("/teams/:id/members/:user_id", ih.handleRemoveMember)
+	}
 }
 
 // SetMCPHandler wires the MCP server (same surface as `commit0 mcp`) into the

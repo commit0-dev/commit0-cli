@@ -334,6 +334,36 @@ DEFINE FIELD OVERWRITE peer_name  ON sync_scope TYPE string;
 DEFINE INDEX IF NOT EXISTS scope_repo_idx ON sync_scope FIELDS repo_slug;
 
 -- ─────────────────────────────────────────
+-- 7b. Identity — Users, Teams, Memberships (PR 1.3, ROADMAP #15, Issue #69)
+-- ─────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE user SCHEMAFULL;
+DEFINE FIELD OVERWRITE user_id      ON user TYPE string ASSERT string::len($value) > 0;
+DEFINE FIELD OVERWRITE email        ON user TYPE string ASSERT string::len($value) > 2 AND string::contains($value, "@");
+DEFINE FIELD OVERWRITE display_name ON user TYPE string;
+DEFINE FIELD OVERWRITE created_at   ON user TYPE datetime VALUE time::now();
+DEFINE FIELD OVERWRITE updated_at   ON user TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE user_id_idx    ON user FIELDS user_id UNIQUE;
+DEFINE INDEX OVERWRITE user_email_idx ON user FIELDS email   UNIQUE;
+
+DEFINE TABLE OVERWRITE team SCHEMAFULL;
+DEFINE FIELD OVERWRITE team_id     ON team TYPE string ASSERT string::len($value) > 0;
+DEFINE FIELD OVERWRITE name        ON team TYPE string;
+DEFINE FIELD OVERWRITE description ON team TYPE option<string>;
+DEFINE FIELD OVERWRITE created_at  ON team TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE team_id_idx ON team FIELDS team_id UNIQUE;
+
+DEFINE TABLE OVERWRITE team_membership SCHEMAFULL;
+DEFINE FIELD OVERWRITE user_id   ON team_membership TYPE string;
+DEFINE FIELD OVERWRITE team_id   ON team_membership TYPE string;
+DEFINE FIELD OVERWRITE role      ON team_membership TYPE string
+    ASSERT $value IN ["owner", "member"];
+DEFINE FIELD OVERWRITE joined_at ON team_membership TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE membership_pk_idx   ON team_membership FIELDS user_id, team_id UNIQUE;
+DEFINE INDEX OVERWRITE membership_team_idx ON team_membership FIELDS team_id;
+DEFINE INDEX OVERWRITE membership_user_idx ON team_membership FIELDS user_id;
+
+-- ─────────────────────────────────────────
 -- 8. Schema Version
 -- ─────────────────────────────────────────
 

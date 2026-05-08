@@ -15,6 +15,7 @@ const (
 	ErrSyncConflict  ErrorCode = "sync_conflict"
 	ErrAuthFailed    ErrorCode = "auth_failed"
 	ErrOutOfScope    ErrorCode = "out_of_scope"
+	ErrUnavailable   ErrorCode = "unavailable"
 )
 
 // DomainError represents an error within the domain layer.
@@ -77,6 +78,13 @@ func AuthFailed(msg string) *DomainError {
 // OutOfScope creates an out-of-scope error.
 func OutOfScope(msg string) *DomainError {
 	return &DomainError{Code: ErrOutOfScope, Message: msg}
+}
+
+// Unavailable creates an unavailable error — the requested operation
+// cannot complete because the underlying resource (database, store,
+// upstream service) is not configured or is offline.
+func Unavailable(msg string) *DomainError {
+	return &DomainError{Code: ErrUnavailable, Message: msg}
 }
 
 // AmbiguousSymbolError is returned when a short symbol name matches

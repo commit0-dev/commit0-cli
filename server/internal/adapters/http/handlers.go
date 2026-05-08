@@ -594,6 +594,16 @@ func writeError(c *gin.Context, err error) {
 			c.JSON(http.StatusBadRequest, gin.H{"message": de.Message})
 		case domain.ErrConflict:
 			c.JSON(http.StatusConflict, gin.H{"message": de.Message})
+		case domain.ErrAuthFailed:
+			c.JSON(http.StatusUnauthorized, gin.H{"message": de.Message})
+		case domain.ErrOutOfScope:
+			c.JSON(http.StatusForbidden, gin.H{"message": de.Message})
+		case domain.ErrUnavailable:
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": de.Message})
+		case domain.ErrRateLimit:
+			c.JSON(http.StatusTooManyRequests, gin.H{"message": de.Message})
+		case domain.ErrTimeout:
+			c.JSON(http.StatusGatewayTimeout, gin.H{"message": de.Message})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		}

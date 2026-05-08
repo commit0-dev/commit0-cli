@@ -247,7 +247,7 @@ func newTestServer(store *httpTestGraphStore, embedder *httpTestEmbedder, explai
 		ReadTimeoutSec:  30,
 		WriteTimeoutSec: 120,
 	}
-	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, store, nil, nil, nil, nil, nil, serverCfg)
+	return NewServer(indexSvc, querySvc, traceSvc, blastSvc, repoSvc, store, nil, nil, nil, nil, nil, nil, serverCfg)
 }
 
 func defaultTestServer() *Server {
@@ -587,7 +587,31 @@ func TestWriteErrorGeneric(t *testing.T) {
 func TestWriteErrorRateLimit(t *testing.T) {
 	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/", nil))
 	writeError(c, domain.RateLimit("too fast"))
-	assertStatus(t, rec, http.StatusInternalServerError)
+	assertStatus(t, rec, http.StatusTooManyRequests)
+}
+
+func TestWriteErrorTimeout(t *testing.T) {
+	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/", nil))
+	writeError(c, domain.Timeout("slow", nil))
+	assertStatus(t, rec, http.StatusGatewayTimeout)
+}
+
+func TestWriteErrorAuthFailed(t *testing.T) {
+	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/", nil))
+	writeError(c, domain.AuthFailed("bad token"))
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestWriteErrorOutOfScope(t *testing.T) {
+	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/", nil))
+	writeError(c, domain.OutOfScope("not allowed"))
+	assertStatus(t, rec, http.StatusForbidden)
+}
+
+func TestWriteErrorUnavailable(t *testing.T) {
+	c, rec := ginCtx(httptest.NewRequest(http.MethodGet, "/", nil))
+	writeError(c, domain.Unavailable("storage down"))
+	assertStatus(t, rec, http.StatusServiceUnavailable)
 }
 
 // ---------------------------------------------------------------------------

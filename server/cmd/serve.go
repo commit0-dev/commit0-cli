@@ -52,6 +52,7 @@ var serveCmd = &cobra.Command{
 			nil, // temporal: enterprise feature
 			svcs.rootCause,
 			svcs.apiSurface,
+			svcs.identity,
 			&cfg.Server,
 			cfg,
 		)
