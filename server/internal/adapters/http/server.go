@@ -37,6 +37,7 @@ type Server struct {
 	peerStore    domain.PeerStore
 	scopeStore   domain.ScopeStore
 	identitySvc  *app.IdentityService
+	knowledgeSvc *app.KnowledgeService
 	cfg          *config.ServerConfig
 	fullCfg      *config.Config
 	log          *slog.Logger
@@ -61,6 +62,7 @@ func NewServer(
 	rootCauseSvc *app.RootCauseAnalysisService,
 	apiSurfSvc *app.APISurfaceService,
 	identitySvc *app.IdentityService,
+	knowledgeSvc *app.KnowledgeService,
 	cfg *config.ServerConfig,
 	fullCfg ...*config.Config,
 ) *Server {
@@ -81,6 +83,7 @@ func NewServer(
 		rootCauseSvc: rootCauseSvc,
 		apiSurfSvc:   apiSurfSvc,
 		identitySvc:  identitySvc,
+		knowledgeSvc: knowledgeSvc,
 		cfg:          cfg,
 		log:          slog.Default(),
 		trackers:     newIndexTrackerStore(),
@@ -173,6 +176,18 @@ func (s *Server) registerRoutes() {
 		v1.POST("/teams/:id/members", ih.handleAddMember)
 		v1.GET("/teams/:id/members", ih.handleListMembers)
 		v1.DELETE("/teams/:id/members/:user_id", ih.handleRemoveMember)
+	}
+
+	// Knowledge graph — Decisions, Incidents, Deploys, Runbooks, People,
+	// Conversations (PR 1.4, Issue #70, ROADMAP #15)
+	if s.knowledgeSvc != nil {
+		kh := NewKnowledgeHandlers(s.knowledgeSvc)
+		v1.POST("/knowledge", kh.handleCreate)
+		v1.GET("/knowledge", kh.handleList)
+		v1.GET("/knowledge/:id", kh.handleGet)
+		v1.DELETE("/knowledge/:id", kh.handleDelete)
+		v1.POST("/knowledge/link", kh.handleLink)
+		v1.POST("/ingest/markdown", kh.handleIngestMarkdown)
 	}
 }
 

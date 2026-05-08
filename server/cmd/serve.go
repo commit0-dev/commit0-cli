@@ -53,6 +53,7 @@ var serveCmd = &cobra.Command{
 			svcs.rootCause,
 			svcs.apiSurface,
 			svcs.identity,
+			svcs.knowledge,
 			&cfg.Server,
 			cfg,
 		)

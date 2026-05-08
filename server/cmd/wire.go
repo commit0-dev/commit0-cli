@@ -217,6 +217,7 @@ type serveServices struct {
 	peerStore  domain.PeerStore
 	scopeStore domain.ScopeStore
 	identity   *app.IdentityService
+	knowledge  *app.KnowledgeService
 	memMgr     *memory.Manager
 	sessionSvc app.SessionStore
 	cleanup    func()
@@ -438,6 +439,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		peerStore:  d.db.AsPeerStore(),
 		scopeStore: d.db.AsScopeStore(),
 		identity:   app.NewIdentityService(d.db.AsUserStore(), d.db.AsTeamStore()),
+		knowledge:  app.NewKnowledgeService(graph, d.embedder),
 		memMgr:     memMgr,
 		sessionSvc: sessionSvc,
 		cleanup:    cleanup,

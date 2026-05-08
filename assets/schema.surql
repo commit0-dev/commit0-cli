@@ -364,6 +364,88 @@ DEFINE INDEX OVERWRITE membership_team_idx ON team_membership FIELDS team_id;
 DEFINE INDEX OVERWRITE membership_user_idx ON team_membership FIELDS user_id;
 
 -- ─────────────────────────────────────────
+-- 7c. Knowledge Graph — Decisions, Incidents, Deploys, Runbooks, People, Conversations
+--      (PR 1.4, ROADMAP #15, Issue #70)
+-- ─────────────────────────────────────────
+--
+-- Knowledge nodes share storage with code nodes by reusing the existing
+-- per-kind table model. New kinds get new tables; the SCHEMAFULL/HNSW/FTS
+-- machinery is identical to function/class tables so vector + text search
+-- transparently includes knowledge entries.
+
+DEFINE TABLE OVERWRITE person SCHEMAFULL CHANGEFEED 7d;
+DEFINE FIELD OVERWRITE name         ON person TYPE string;
+DEFINE FIELD OVERWRITE qualified    ON person TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON person TYPE string;
+DEFINE FIELD OVERWRITE body         ON person TYPE option<string>;
+DEFINE FIELD OVERWRITE summary      ON person TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON person TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE embedding    ON person TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE access_scope ON person TYPE string VALUE "public";
+DEFINE FIELD OVERWRITE indexed_at   ON person TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE person_id_idx ON person FIELDS repo_slug, qualified UNIQUE;
+
+DEFINE TABLE OVERWRITE decision SCHEMAFULL CHANGEFEED 7d;
+DEFINE FIELD OVERWRITE name         ON decision TYPE string;
+DEFINE FIELD OVERWRITE qualified    ON decision TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON decision TYPE string;
+DEFINE FIELD OVERWRITE body         ON decision TYPE option<string>;
+DEFINE FIELD OVERWRITE summary      ON decision TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON decision TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE embedding    ON decision TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE access_scope ON decision TYPE string VALUE "public";
+DEFINE FIELD OVERWRITE indexed_at   ON decision TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE decision_id_idx ON decision FIELDS repo_slug, qualified UNIQUE;
+
+DEFINE TABLE OVERWRITE incident SCHEMAFULL CHANGEFEED 7d;
+DEFINE FIELD OVERWRITE name         ON incident TYPE string;
+DEFINE FIELD OVERWRITE qualified    ON incident TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON incident TYPE string;
+DEFINE FIELD OVERWRITE body         ON incident TYPE option<string>;
+DEFINE FIELD OVERWRITE summary      ON incident TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON incident TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE embedding    ON incident TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE access_scope ON incident TYPE string VALUE "public";
+DEFINE FIELD OVERWRITE indexed_at   ON incident TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE incident_id_idx ON incident FIELDS repo_slug, qualified UNIQUE;
+
+DEFINE TABLE OVERWRITE deploy SCHEMAFULL CHANGEFEED 7d;
+DEFINE FIELD OVERWRITE name         ON deploy TYPE string;
+DEFINE FIELD OVERWRITE qualified    ON deploy TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON deploy TYPE string;
+DEFINE FIELD OVERWRITE body         ON deploy TYPE option<string>;
+DEFINE FIELD OVERWRITE summary      ON deploy TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON deploy TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE embedding    ON deploy TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE access_scope ON deploy TYPE string VALUE "public";
+DEFINE FIELD OVERWRITE indexed_at   ON deploy TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE deploy_id_idx ON deploy FIELDS repo_slug, qualified UNIQUE;
+
+DEFINE TABLE OVERWRITE runbook SCHEMAFULL CHANGEFEED 7d;
+DEFINE FIELD OVERWRITE name         ON runbook TYPE string;
+DEFINE FIELD OVERWRITE qualified    ON runbook TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON runbook TYPE string;
+DEFINE FIELD OVERWRITE body         ON runbook TYPE option<string>;
+DEFINE FIELD OVERWRITE summary      ON runbook TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON runbook TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE embedding    ON runbook TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE access_scope ON runbook TYPE string VALUE "public";
+DEFINE FIELD OVERWRITE indexed_at   ON runbook TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE runbook_id_idx ON runbook FIELDS repo_slug, qualified UNIQUE;
+
+DEFINE TABLE OVERWRITE conversation SCHEMAFULL CHANGEFEED 7d;
+DEFINE FIELD OVERWRITE name         ON conversation TYPE string;
+DEFINE FIELD OVERWRITE qualified    ON conversation TYPE string;
+DEFINE FIELD OVERWRITE repo_slug    ON conversation TYPE string;
+DEFINE FIELD OVERWRITE body         ON conversation TYPE option<string>;
+DEFINE FIELD OVERWRITE summary      ON conversation TYPE option<string>;
+DEFINE FIELD OVERWRITE concepts     ON conversation TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE embedding    ON conversation TYPE option<array<float>>;
+DEFINE FIELD OVERWRITE access_scope ON conversation TYPE string VALUE "public";
+DEFINE FIELD OVERWRITE indexed_at   ON conversation TYPE datetime VALUE time::now();
+DEFINE INDEX OVERWRITE conversation_id_idx ON conversation FIELDS repo_slug, qualified UNIQUE;
+
+-- ─────────────────────────────────────────
 -- 8. Schema Version
 -- ─────────────────────────────────────────
 
