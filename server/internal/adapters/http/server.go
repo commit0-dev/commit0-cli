@@ -27,6 +27,7 @@ type Server struct {
 	traceSvc     *app.TraceService
 	blastSvc     *app.BlastService
 	repoSvc      *app.RepoService
+	eventSvc     *app.EventService
 	graph        domain.OpenCodeGraph
 	agentRunner  domain.AgentRunner
 	flowSvc      *app.FieldFlowService
@@ -49,6 +50,7 @@ func NewServer(
 	traceSvc *app.TraceService,
 	blastSvc *app.BlastService,
 	repoSvc *app.RepoService,
+	eventSvc *app.EventService,
 	graph domain.OpenCodeGraph,
 	agentRunner domain.AgentRunner,
 	flowSvc *app.FieldFlowService,
@@ -68,6 +70,7 @@ func NewServer(
 		traceSvc:     traceSvc,
 		blastSvc:     blastSvc,
 		repoSvc:      repoSvc,
+		eventSvc:     eventSvc,
 		graph:        graph,
 		agentRunner:  agentRunner,
 		flowSvc:      flowSvc,
@@ -142,6 +145,12 @@ func (s *Server) registerRoutes() {
 	v1.GET("/nodes/lookup", s.handleNodeLookup)
 	v1.GET("/nodes/by-file", s.handleNodesByFile)
 	v1.GET("/nodes/:id/neighborhood", s.handleGetNeighborhood)
+
+	// Event log
+	events := NewEventHandlers(s.eventSvc)
+	v1.GET("/events", events.handleListEvents)
+	v1.GET("/events/stream", events.handleEventStream)
+	v1.GET("/events/count", events.handleEventCount)
 }
 
 // SetMCPHandler wires the MCP server (same surface as `commit0 mcp`) into the

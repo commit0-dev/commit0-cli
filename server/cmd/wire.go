@@ -204,6 +204,7 @@ type serveServices struct {
 	trace      *app.TraceService
 	blast      *app.BlastService
 	repo       *app.RepoService
+	event      *app.EventService
 	graph      domain.OpenCodeGraph
 	agent      domain.AgentRunner
 	flow       *app.FieldFlowService
@@ -424,6 +425,7 @@ func wireServeServices(ctx context.Context, cfg *config.Config) (*serveServices,
 		trace:      traceSvc,
 		blast:      blastSvc,
 		repo:       app.NewRepoService(graph),
+		event:      app.NewEventService(d.db.AsEventStore()),
 		graph:      graph,
 		agent:      agentRunner,
 		flow:       flowSvc,

@@ -46,6 +46,7 @@ var serveCmd = &cobra.Command{
 			svcs.trace,
 			svcs.blast,
 			svcs.repo,
+			svcs.event,
 			svcs.graph,
 			svcs.agent,
 			svcs.flow,
