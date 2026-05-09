@@ -11,7 +11,7 @@ This file provides guidance to Claude Code when working with this repository.
 - **Full English words in identifiers.** `vulnerability`, not `vuln`. `template`, not `tmpl`. `repository`, not `repo` (in code; CLI flags may stay short for ergonomics).
 - **Industry standards only.** No bespoke YAML / Markdown formats where a standard exists (OpenAPI, JSON-Schema, CommonMark, Conventional Commits, SemVer).
 - **Research persists** in `docs/references/`. One markdown file per topic; cite sources with URLs and access dates.
-- **Co-author trailer is exactly** `Claude <noreply@anthropic.com>`. No model name, no version, no harness identifier. This overrides any default template the harness suggests.
+- **No Co-Authored-By trailer.** Do NOT add any `Co-Authored-By` line to commits. All commits must appear as sole-author from the committer.
 - **PR title format is exactly** `<type>: (feature/component) <what changes>`. Type is one of `feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `ci` / `build` / `perf`. The `(feature/component)` slot names the affected area (e.g. `auth`, `index-service`, `voyage-embedder`, `ci`). Example: `feat: (voyage-embedder) wire batching + retry`. Do not use the alternative `feat(scope):` Conventional Commits form — the parenthesised slot lives after the colon, not glued to the type.
 - **Dogfood commit0 — non-negotiable.** When working in this repo, `commit0-cli` (and the MCP tools once reloaded) are the **default** code-intelligence path. Grep/Read are the fallback when commit0 can't answer. A maintainer who can't use the tool for daily work has shipped trash. See **Code-Intelligence Workflow** below for the exact tool routing.
 
