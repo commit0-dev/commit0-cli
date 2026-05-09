@@ -12,10 +12,39 @@
 #   pre-commit  Fast checks only (< 5 s). Blocks the commit.
 #   pre-push    Full lint suite. Blocks the push. Mirrors CI lint job.
 
-default_install_hook_types: [pre-commit, pre-push]
+default_install_hook_types: [pre-commit, pre-push, commit-msg]
 default_stages: [pre-commit]
 
 repos:
+  # ── Commit-attribution policy ──────────────────────────────────────────────
+  # Block AI / agentic-coding attribution in commit messages and reject
+  # commits authored as a bot/agent identity. Two hooks:
+  #
+  #   1. no-ai-attribution     (commit-msg)  — scans the message body
+  #   2. author-not-bot        (pre-commit)  — validates author/committer
+  #                                              identity from `git var`
+  #
+  # Pattern catalog:    scripts/ai_attribution_patterns.py
+  # Allowlist (opt-in): .commit-msg-policy.allowlist
+  # Policy source:      CLAUDE.md (sole-author rule)
+  # Bypass (emergencies only): git commit --no-verify  (open follow-up Issue)
+  - repo: local
+    hooks:
+      - id: no-ai-attribution
+        name: Block AI/agentic attribution in commit messages
+        language: system
+        stages: [commit-msg]
+        entry: scripts/check-no-ai-attribution.py
+        pass_filenames: true
+
+      - id: author-not-bot
+        name: Reject commits authored as a bot/agent identity
+        language: system
+        stages: [pre-commit]
+        entry: scripts/check-author-not-bot.py
+        pass_filenames: false
+        always_run: true
+
   # ── General file hygiene ───────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
