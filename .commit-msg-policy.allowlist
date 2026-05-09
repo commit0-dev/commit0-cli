@@ -1,0 +1,19 @@
+# commit-msg policy allowlist
+#
+# One substring per line. Blank lines and `#` comments ignored.
+# A violation is suppressed when ANY allowlisted substring (case-insensitive)
+# appears in the offending line.
+#
+# Use sparingly. Bypass-by-allowlist is auditable in git history;
+# bypass-by-`--no-verify` is not. Per CLAUDE.md, every emergency bypass
+# also requires a follow-up Issue.
+#
+# Defaults: filenames of policy docs that legitimately reference vendor
+# names. CLAUDE.md is also exempt at the regex level (the catalog uses a
+# negative lookahead for `\.md`), but listing the literal here makes the
+# exemption visible to humans reviewing this file.
+
+CLAUDE.md
+GEMINI.md
+GPT.md
+docs/references/

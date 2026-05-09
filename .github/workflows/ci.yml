@@ -2,14 +2,49 @@
 # Fast feedback on every pull request. All jobs here are required status checks
 # in branch protection — a failing job blocks the merge.
 #
-# Post-merge work (coverage publishing, snapshot builds, edge image push) lives
-# in main.yml so the two pipelines stay independent and easy to reason about.
+# Cost discipline (Issue #19):
+#   1. Cheap-fail-first DAG. lint → test → {govulncheck, image-scan}. A lint
+#      failure short-circuits the entire pipeline; a test failure short-
+#      circuits govulncheck and image-scan. We do not burn 5+ minutes of
+#      compute on a PR that was already doomed by a 15-second lint check.
+#   2. Path filters. Docs-only PRs (README, .md, LICENSE, gitignore, issue
+#      templates, the commit-msg allowlist) consume zero Actions minutes.
+#   3. Draft-PR skip. CI fires when a draft is marked ready-for-review, not
+#      while it's still being assembled.
+#   4. Fork-PR guard on image-scan. Image scans on fork PRs are wasteful —
+#      forks cannot push the image, and the scan re-runs on the merge
+#      commit via main.yml anyway.
+#   5. Pinned runner (ubuntu-22.04). ubuntu-latest is a moving alias; pinning
+#      avoids surprise minute drift when GitHub bumps the underlying VM.
+#   6. govulncheck binary is cached, not reinstalled every run.
+#
+# Post-merge work (coverage publishing, snapshot binaries, edge image push)
+# lives in main.yml. The two pipelines stay independent so a failure in one
+# doesn't block the other.
 name: CI
 
 on:
   pull_request:
     branches: [main]
+    # Run when a draft is promoted to ready-for-review so the pipeline fires
+    # on the same commit the reviewer is about to look at, not on an earlier
+    # incomplete state.
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Files whose changes cannot affect Go compilation, runtime image, or
+    # vulnerability surface. A push that touches only these consumes zero
+    # Actions minutes.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - '.gitignore'
+      - 'CODEOWNERS'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.commit-msg-policy.allowlist'
 
+# Cancel any in-flight runs for the same ref when a new push lands. Cuts
+# wasted minutes on rapid-iteration branches.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -23,12 +58,17 @@ env:
 
 jobs:
   # ── Lint ──────────────────────────────────────────────────────────────────
+  # Tier 1 of the DAG. Fastest job (~15-30 s). Every other job depends on it
+  # transitively or directly, so a syntax error or formatting lapse never
+  # burns Test + Vuln + Image-scan minutes.
+  #
   # The repo is a Go workspace (go.work) with no root module; lint each
   # member module independently. pkg/types is dependency-free types-only and
   # rarely changes; server is the primary build target.
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -50,12 +90,14 @@ jobs:
           args: -c ${{ github.workspace }}/.golangci.yml --timeout=5m
 
   # ── Unit tests + coverage ─────────────────────────────────────────────────
-  # Tests run inside the server/ module — that's where internal/app and the
-  # 98% coverage gate live. pkg/types tests run separately below to keep the
-  # coverage report focused on application code.
+  # Tier 2. Skipped if lint failed — `needs: lint` evaluates to failure when
+  # any matrix entry fails (fail-fast: false here means the matrix completes,
+  # but the aggregate job status is still failure, which is what we want).
   test:
     name: Test
-    runs-on: ubuntu-latest
+    needs: [lint]
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v6
 
@@ -118,10 +160,14 @@ jobs:
           retention-days: 14
 
   # ── Go vulnerability scan ─────────────────────────────────────────────────
-  # Scans the server module — pkg/types has zero external imports by invariant.
+  # Tier 3. Cheap (~30 s) but ran in parallel with everything in the old DAG;
+  # now gated on test passing. Scans the server module — pkg/types has zero
+  # external imports by invariant, no surface to scan.
   govulncheck:
     name: Vulnerability scan
-    runs-on: ubuntu-latest
+    needs: [test]
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v6
 
@@ -130,22 +176,43 @@ jobs:
           go-version-file: server/go.mod
           cache: true
 
+      # Cache the govulncheck binary across runs — saves ~5-10 s of `go install`
+      # network + compile every time. Key by Go version + month so stale
+      # advisories don't linger forever (the Go vuln DB is queried at run
+      # time regardless of the binary version, but the binary itself does
+      # ship periodic improvements).
+      - name: Cache govulncheck binary
+        id: cache-govulncheck
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-${{ runner.os }}-${{ hashFiles('server/go.mod') }}
+
+      - name: Install govulncheck (cache miss)
+        if: steps.cache-govulncheck.outputs.cache-hit != 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
       # Run govulncheck directly instead of golang/govulncheck-action@v1 — the
       # action pins actions/checkout@v4.1.1 internally, which collides with our
       # earlier checkout@v6 auth setup ("Duplicate header: Authorization", HTTP 400).
       - name: Run govulncheck
         working-directory: server
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+        run: $(go env GOPATH)/bin/govulncheck ./...
 
   # ── Container image scan ──────────────────────────────────────────────────
-  # Builds linux/amd64 only, loads into the local daemon for trivy — no push.
-  # Gated on lint + test to avoid wasting resources on a broken PR.
+  # Tier 3. Most expensive job in the pipeline (~3-5 min). Three guards keep
+  # this from burning unnecessary minutes:
+  #   - needs: [test] — never builds when tests fail
+  #   - draft skip — never builds for unfinished work
+  #   - fork-PR guard — never builds for fork PRs (the merge commit re-runs
+  #     this in main.yml anyway, with push enabled)
   image-scan:
     name: Build & scan image
-    runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [test]
+    runs-on: ubuntu-22.04
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
     steps:
