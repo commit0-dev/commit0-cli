@@ -1,20 +1,3 @@
-# ── Post-merge Pipeline ────────────────────────────────────────────────────────
-# Runs after a PR is merged (or on direct push) to main. Verifies the merge
-# commit, publishes coverage, builds snapshot binaries, and pushes the edge
-# container image.
-#
-# Cost discipline (Issue #19):
-#   1. Cheap-fail-first DAG. lint → test → {govulncheck, goreleaser, image}.
-#      A test failure on main never wastes 4 minutes of QEMU emulation
-#      building a multi-arch image we can't ship.
-#   2. Path filters. Docs-only merges to main consume zero Actions minutes.
-#      The edge image and snapshot binaries don't need to rebuild because a
-#      README typo got fixed.
-#   3. Pinned runner (ubuntu-22.04).
-#   4. govulncheck binary cached across runs.
-#
-# PR quality checks (lint, test, vuln scan, image scan) live in ci.yml — this
-# workflow focuses on artifacts and publishing.
 name: Main
 
 on:
@@ -42,9 +25,6 @@ env:
   CGO_ENABLED: "1"
 
 jobs:
-  # ── Lint ──────────────────────────────────────────────────────────────────
-  # Safety net for the merge commit — catches issues that slipped through
-  # (admin bypass, merge conflict resolution, etc.).
   lint:
     name: Lint
     runs-on: ubuntu-22.04
@@ -54,39 +34,31 @@ jobs:
         module: [server, pkg/types]
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ matrix.module }}/go.mod
           cache: false
-
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
           working-directory: ${{ matrix.module }}
           args: -c ${{ github.workspace }}/.golangci.yml --timeout=5m
 
-  # ── Unit tests + coverage publishing ──────────────────────────────────────
-  # Tier 2 — gated on lint to avoid wasting ~3 min when an admin-bypass
-  # merge slipped past the PR gate.
   test:
     name: Test
     needs: [lint]
     runs-on: ubuntu-22.04
     permissions:
-      contents: write   # ncruces/go-coverage-report writes to the repo Wiki
+      contents: write
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache: true
-
       - name: Test pkg/types
         working-directory: pkg/types
         run: go test -race -count=1 -timeout=2m ./...
-
       - name: Run server tests with coverage
         working-directory: server
         run: |
@@ -95,7 +67,6 @@ jobs:
             -covermode=atomic \
             -coverpkg=./internal/app/... \
             ./...
-
       - name: Write coverage summary
         if: always()
         working-directory: server
@@ -108,22 +79,19 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| **Total** | **${COVERAGE}%** |"
-            echo "| Threshold | 96% (ratcheting back to 98%, see #17) |"
+            echo "| Threshold | 96% |"
             echo ""
             echo "### Per-function breakdown"
             echo '```'
             go tool cover -func=coverage.out
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage
           path: server/coverage.out
           retention-days: 14
-
-      # Publish coverage report + trend chart to the repo Wiki.
       - uses: ncruces/go-coverage-report@v0
         with:
           coverage-file: server/coverage.out
@@ -132,39 +100,29 @@ jobs:
           amend: true
         continue-on-error: true
 
-  # ── Go vulnerability scan ─────────────────────────────────────────────────
-  # Tier 3 — gated on test to avoid auditing a broken main.
   govulncheck:
     name: Vulnerability scan
     needs: [test]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache: true
-
       - name: Cache govulncheck binary
         id: cache-govulncheck
         uses: actions/cache@v4
         with:
           path: ~/go/bin/govulncheck
           key: govulncheck-${{ runner.os }}-${{ hashFiles('server/go.mod') }}
-
       - name: Install govulncheck (cache miss)
         if: steps.cache-govulncheck.outputs.cache-hit != 'true'
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
       - name: Run govulncheck
         working-directory: server
         run: $(go env GOPATH)/bin/govulncheck ./...
 
-  # ── GoReleaser snapshot ───────────────────────────────────────────────────
-  # Validates .goreleaser.yaml and builds linux/amd64 + linux/arm64 binaries.
-  # Tier 3 — gated on test. arm64 builds use a cross-compiler (not QEMU)
-  # so the cost is moderate.
   goreleaser:
     name: GoReleaser snapshot
     needs: [test]
@@ -172,40 +130,31 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0   # goreleaser needs full history for changelog
-
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache: true
-
       - name: Install arm64 cross-compiler
         run: sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
-
       - name: Validate .goreleaser.yaml
         uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: check
-
-      - name: Snapshot build (linux/amd64 + linux/arm64)
+      - name: Snapshot build
         uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: build --snapshot --clean --id linux
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: actions/upload-artifact@v4
         with:
           name: snapshot-linux
           path: dist/
           retention-days: 3
 
-  # ── Edge container image ──────────────────────────────────────────────────
-  # Tier 3 — gated on test. The most expensive job: multi-arch build via
-  # buildx + native arm64 cross-compile, push to ghcr.io, SBOM + SLSA
-  # provenance, Trivy scan + SARIF upload.
   image:
     name: Build, push & scan edge image
     needs: [test]
@@ -216,17 +165,13 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v6
-
       - uses: docker/setup-qemu-action@v3
-
       - uses: docker/setup-buildx-action@v3
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: docker/metadata-action@v6
         id: meta
         with:
@@ -234,7 +179,6 @@ jobs:
           tags: |
             type=raw,value=edge
             type=sha,prefix=sha-,format=short
-
       - uses: docker/build-push-action@v7
         id: build
         with:
@@ -250,7 +194,6 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@0.35.0
         with:
@@ -260,7 +203,6 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
-
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
