@@ -3,7 +3,7 @@ module github.com/commit0-dev/commit0/server
 go 1.26.3
 
 require (
-	github.com/cloudwego/eino v0.8.8
+	github.com/cloudwego/eino v0.8.13
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260409083444-42d9d11b55f4
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.9
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.12
