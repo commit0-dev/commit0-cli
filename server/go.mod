@@ -13,7 +13,7 @@ require (
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-contrib/requestid v1.0.6
 	github.com/gin-gonic/gin v1.12.0
-	github.com/hashicorp/consul/api v1.34.0
+	github.com/hashicorp/consul/api v1.34.2
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/quic-go/quic-go v0.59.0
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
