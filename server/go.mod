@@ -6,7 +6,7 @@ require (
 	github.com/cloudwego/eino v0.8.8
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260409083444-42d9d11b55f4
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.9
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.12
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/commit0-dev/commit0/pkg/types v0.0.0
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/fxamacker/cbor/v2 v2.7.0
@@ -37,7 +37,7 @@ require (
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.16 // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/ollama v0.1.0 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
