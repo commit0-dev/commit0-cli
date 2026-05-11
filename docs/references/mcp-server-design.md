@@ -1,5 +1,7 @@
 # commit0 MCP Server — Interface Design
 
+> **Note (2026-05-11):** This document references the GitHub-Issue ROADMAP convention (`Refs ROADMAP issue commit0-dev/commit0#15`, "Refs #15", "the `[ROADMAP]` issue") that was deprecated on 2026-05-11. The canonical roadmap now lives in `plans/ROADMAP.md` (in this repo, migrated from Issue #2; the parent commit0 repo migrated from Issue #15 — see `plans/260511-2227-migrate-roadmap-to-plans-kanban/` there). The branch-shipping plan in §"Implementation plan" describes how the work would have been tracked under the old convention; the technical design itself is unchanged by the migration.
+
 > **Status:** Phase 1 — research and design only. No production code in this PR.
 > Refs ROADMAP issue [`commit0-dev/commit0#15`](https://github.com/commit0-dev/commit0/issues/15).
 > Source for this design: [`docs/references/agentic-code-analyzers-survey-2026.md`](agentic-code-analyzers-survey-2026.md), recommendation #2.

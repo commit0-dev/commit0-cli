@@ -39,8 +39,8 @@ Subject line follows the same `<type>: (feature/component) <what>` format as PR 
 
 Trailers:
 
-- `Refs #<N>` for any related Issue (incl. the [ROADMAP] Issue)
-- `Closes #<N>` ONLY for scope-bound child Issues — NEVER for the ROADMAP
+- `Refs #<N>` for any related Issue
+- `Closes #<N>` for scope-bound child Issues. The roadmap is no longer an Issue (see *Plans-kanban discipline* below); the per-feature plan dir is linked via the PR body's `Plan: plans/<date>-<slug>/` line, not via a commit trailer
 - NO `Co-Authored-By` — sole-author rule (enforced by commit-msg hook)
 - NO "Generated with X" attribution — same rule
 
@@ -60,22 +60,21 @@ Full English words, no abbreviations:
 
 CLI flag names may use short forms (`--repo`, `--cfg`) for ergonomics. Code identifiers must use the long form.
 
-## ROADMAP discipline
+## Plans-kanban discipline
 
-The pinned `[ROADMAP]` Issue (carrying the `roadmap` label) is persistent cross-session memory. Hard rules:
+`plans/ROADMAP.md` is persistent cross-session memory. Migrated from GitHub Issue #2 on 2026-05-11 (see commit0-dev/commit0 `plans/260511-2227-migrate-roadmap-to-plans-kanban/`). See global `~/.claude/CLAUDE.md` → *Plans-kanban discipline* for the hard rules; the project-local summary:
 
-1. **Exactly one** `[ROADMAP]` Issue per repository, ever
-2. **Never close it** — verify with `gh issue list --label roadmap --state open --json number | jq 'length'` (must be 1)
-3. **Never write the close-keyword form** (`Close`, `Closes`, `Closed`, `Fix`, `Fixes`, `Fixed`, `Resolve`, `Resolves`, `Resolved`, case-insensitive) targeting the ROADMAP anywhere — PR body, commit message, merge message. **Backticks do NOT protect.** GitHub's auto-close scanner is regex-based and matches inside code spans
-4. **Never open a second roadmap.** If the existing one doesn't fit, update its body and post a comment
-5. **Milestones land as comments**, not state transitions
+1. **Exactly one** `plans/ROADMAP.md` per repository, ever. Free-form markdown — not a `ck plan` plan.
+2. **Never delete it** — `git rm plans/ROADMAP.md` requires explicit user direction. Session-end ritual is *append* a `## Session note — YYYY-MM-DD` section, never overwrite or truncate.
+3. **Per-feature plans live in `plans/<date>-<slug>/`** managed by `ck plan create`; `ck plan kanban` opens the dashboard at `http://localhost:3456/plans`.
+4. **PR body convention** is `Plan: plans/<date>-<slug>/` (or `Plan: n/a` for trivial fixes). The roadmap is a file, not an Issue, so close-keywords (`Closes`, `Fixes`, etc.) targeting the roadmap don't apply — they only apply to per-feature Issues, where they work normally.
+5. **Milestones land as bullets in the latest session-note**, not as state transitions.
 
 Pre-flight check before every `gh pr create`:
 
 ```bash
-ROADMAP=$(gh issue list --label roadmap --state open --json number --jq '.[0].number')
-echo "$PR_BODY" | grep -iE "(close[sd]?|fix(es|ed)?|resolve[sd]?) +#${ROADMAP}\b" \
-    && { echo "VIOLATION — change to Refs #${ROADMAP}"; exit 1; }
+echo "$PR_BODY" | grep -qE "^Plan: (plans/[0-9]{6}-|n/a)" \
+    || { echo "VIOLATION — add 'Plan: plans/<date>-<slug>/' or 'Plan: n/a' to PR body"; exit 1; }
 ```
 
 ## Pre-commit hooks

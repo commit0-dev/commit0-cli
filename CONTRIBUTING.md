@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing to commit0. Please read the rules below before opening a Pull Request — they are HARD requirements enforced by automation, not guidelines.
 
-For the full conventions (branch prefixes, PR title format, commit message format, identifier naming, ROADMAP discipline, pre-merge gate), see [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+For the full conventions (branch prefixes, PR title format, commit message format, identifier naming, plans-kanban discipline, pre-merge gate), see [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 
 ## Signing your work
 
