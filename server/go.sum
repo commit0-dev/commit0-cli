@@ -155,10 +155,10 @@ github.com/gopherjs/gopherjs v1.17.2 h1:fQnZVsXk8uxXIStYb0N4bGk7jeyTalG/wsZjQ25d
 github.com/gopherjs/gopherjs v1.17.2/go.mod h1:pRRIvn/QzFLrKfvEz3qUuEhtE/zLCWfreZ6J5gM2i+k=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
-github.com/hashicorp/consul/api v1.34.0 h1:9xohQbBmU7BxlrrKYXhEZzXKtqmVlR5RIB+c6pGE2uM=
-github.com/hashicorp/consul/api v1.34.0/go.mod h1:9Gka/GgMEmqxWGMaTkpVWp/Trx/ZMqa/C7A/tvmd5+I=
-github.com/hashicorp/consul/sdk v0.18.0 h1:WvrUz2IYZXY4MX0i45QE9aFrD2izjyuUI+NZv2duatE=
-github.com/hashicorp/consul/sdk v0.18.0/go.mod h1:jnOmYjiNfVRpBaujQ1DFFVs0N6g3S1y6wygSjLTzYfc=
+github.com/hashicorp/consul/api v1.34.2 h1:B5jqSSKwWyY8U8WiGS5vmPEPkkF0bAvrECykdZkDR80=
+github.com/hashicorp/consul/api v1.34.2/go.mod h1:+gAdHQa2zvgYX3ZfcgITtnYCSj6AgS/cgotvCKaE+b8=
+github.com/hashicorp/consul/sdk v0.18.1 h1:RDTeBvAeOveI2xI86sV+8WkaN7OkP4zz+cG3fOobDCM=
+github.com/hashicorp/consul/sdk v0.18.1/go.mod h1:XdP2tEJmAvlK4jgoKTTtohGkRJlS4mU44mv9/sjU21s=
 github.com/hashicorp/errwrap v1.0.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
 github.com/hashicorp/errwrap v1.1.0 h1:OxrOeh75EUXMY8TBjag2fzXGZ40LB6IKw45YeGUDY2I=
 github.com/hashicorp/errwrap v1.1.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
