@@ -1,5 +1,7 @@
 # Platform-readiness critique — commit0 as a daily-collaboration platform
 
+> **Note (2026-05-11):** This document references the GitHub-Issue ROADMAP convention (`#15`, "comment on the ROADMAP", "ROADMAP — IMMUTABLE RULES") that was deprecated on 2026-05-11. The canonical roadmap now lives in `plans/ROADMAP.md` (in this repo, migrated from Issue #2; the parent commit0 repo migrated from Issue #15 — see `plans/260511-2227-migrate-roadmap-to-plans-kanban/` there). The original document body is preserved below verbatim for historical context; do not interpret references to "ROADMAP #15", "comment on the canonical ROADMAP", or "ROADMAP — IMMUTABLE RULES" as currently active rules.
+
 | Field | Value |
 |---|---|
 | Date | 2026-05-08 |

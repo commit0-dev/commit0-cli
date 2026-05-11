@@ -20,74 +20,66 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## SDLC Workflow — MANDATORY for every session
 
-### ROADMAP — IMMUTABLE RULES (HARD REQUIREMENT, do not violate)
+### Plans-kanban discipline (HARD REQUIREMENT, do not violate)
 
-The `[ROADMAP]` Issue is **persistent cross-session memory**. Treat it like a database, not a sprint board. These rules are HARD — not guidelines, not best practices. Violating any of them means corrective action (reopen, fold, relabel, comment) before proceeding with any other work.
+`plans/ROADMAP.md` is **persistent cross-session memory**. Migrated from GitHub Issue #2 on 2026-05-11 (see commit0-dev/commit0 `plans/260511-2227-migrate-roadmap-to-plans-kanban/`). Treat it like a database, not a sprint board. These rules are HARD — not guidelines.
 
-1. **Exactly ONE `[ROADMAP]` issue per repository, ever.** Created once, lives forever. The `roadmap` label is the canonical marker. Verify count with:
+1. **Exactly ONE `plans/ROADMAP.md` per repository, ever.** Free-form markdown — not a `ck plan` plan, not on the kanban board. Verify presence with:
    ```bash
-   gh issue list --label roadmap --json number,state | jq 'length'   # must be 1
+   test -f plans/ROADMAP.md   # must exist
    ```
-2. **NEVER close the ROADMAP.** Not when a milestone ships. Not when direction pivots. Not when scope changes. Closing it deletes the cross-session memory.
-3. **NEVER write the close-keyword form `<close-verb> #<roadmap-id>` ANYWHERE in a PR body, commit message, or merge message.** The forbidden verbs are `Close`, `Closes`, `Closed`, `Fix`, `Fixes`, `Fixed`, `Resolve`, `Resolves`, `Resolved` (case-insensitive). Use `Refs #<roadmap-id>` instead.
-   - **Backticks do not protect you.** GitHub's auto-close scanner is regex-based and matches the literal pattern even when it appears inside backticks, code blocks, or quoted prose. Paraphrase ("the close-keyword form", "C-l-o-s-e-s with hyphens", "the auto-close directive") rather than write the literal.
-   - **Describing a past violation triggers a new violation.** When narrating a lesson-learned in a PR body, never reproduce the offending string — paraphrase it.
+2. **NEVER delete `plans/ROADMAP.md`.** Not when a milestone ships. Not when direction pivots. Not when scope changes. Deleting it deletes the cross-session memory. `git rm plans/ROADMAP.md` requires explicit user direction.
+3. **PR-body convention: `Plan: plans/<date>-<slug>/`** — one line linking the per-feature plan dir, or `Plan: n/a` for trivial fixes. Per-feature GitHub Issues are still useful and `Closes #<feature-issue>` is fine for those — the rule only applies to the roadmap layer. The roadmap is a file, not an Issue, so close-keywords targeting it don't apply (mechanically impossible).
    - **Pre-flight before every `gh pr create` or `gh pr edit --body`:**
      ```bash
-     ROADMAP=$(gh issue list --label roadmap --state open --json number --jq '.[0].number')
-     echo "$PR_BODY" | grep -iE "(close[sd]?|fix(es|ed)?|resolve[sd]?) +#${ROADMAP}\b" \
-         && { echo "VIOLATION — close-keyword targeting ROADMAP found in body"; exit 1; }
+     echo "$PR_BODY" | grep -qE "^Plan: (plans/[0-9]{6}-|n/a)" \
+         || { echo "VIOLATION — add 'Plan: plans/<date>-<slug>/' or 'Plan: n/a' to PR body"; exit 1; }
      ```
-   - **Pre-flight before merging a PR (squash messages inherit the body):**
-     ```bash
-     gh pr view "$PR_NUM" --json body --jq .body \
-         | grep -iE "(close[sd]?|fix(es|ed)?|resolve[sd]?) +#${ROADMAP}\b" \
-         && { echo "VIOLATION — pre-merge: paraphrase before merge"; exit 1; }
-     ```
-   The close-keyword family is reserved for scope-bound items (features, bugs, milestones) — never for the ROADMAP itself.
-4. **NEVER open a second roadmap.** No `[ROADMAP-2]`, no `[ROADMAP] phase 2`, no parallel tracker for a "new direction." If the existing ROADMAP doesn't fit, **update its body** and post a comment.
-5. **Milestones land as comments on the ROADMAP, not as state transitions.** When a milestone ships: the milestone Issue (scope-bound) gets `Closes #<milestone>`; the ROADMAP gets `Refs #<roadmap>` plus a comment summarising what shipped, what's next, and any blockers.
-6. **Pre-flight before every `gh issue close`:** verify the issue does NOT carry the `roadmap` label.
+4. **Per-feature plans live in `plans/<date>-<slug>/`** managed by `ck plan create`. The kanban dashboard (`ck plan kanban`, opens at `http://localhost:3456/plans`) shows in-flight per-feature plans, *not* the roadmap.
+5. **Milestones land as bullets in the latest session-note**, not as state transitions or new files. Session-end ritual is *append* a `## Session note — YYYY-MM-DD` section to `plans/ROADMAP.md`, never overwrite or truncate.
+6. **Pre-flight before every session-end commit:**
    ```bash
-   gh issue view "$N" --json labels --jq '.labels[].name' | grep -qx roadmap && { echo "VIOLATION — do not close ROADMAP"; exit 1; }
+   test -f plans/ROADMAP.md \
+       || { echo "VIOLATION — plans/ROADMAP.md missing; restore from git or ask user before recreating"; exit 1; }
    ```
-7. **If you discover the rule was violated** (closed ROADMAP, second roadmap-labelled issue, `Closes #<roadmap>` in a merged PR): reopen the canonical ROADMAP, remove the `roadmap` label from any imposter, fold the imposter's content into a comment on the canonical one, post a corrective explanation. Do not silently continue.
-8. **Lessons learned 2026-05-08.** Two violations of this rule landed and were corrected in the same session:
-   - **Violation 1.** Canonical ROADMAP #15 was closed by a close-keyword targeting it in PR #59's body. A forbidden `[ROADMAP-2]` #62 was then opened. Corrective: reopened #15, folded #62 as a comment, removed the `roadmap` label from #62, closed #62 with explanation.
-   - **Violation 2.** The lesson-from-Violation-1 PR (#64) re-closed #15 because its commit message *described* the prior close-keyword using the literal string inside backticks. GitHub's auto-close scanner does not respect backticks. Corrective: reopened #15 again, amended rule #3 above to forbid any literal close-keyword targeting the ROADMAP anywhere in a PR body — including narrative descriptions of past violations. The literal must be paraphrased.
-   Do not reproduce either pattern. When narrating these lessons in future PR bodies, paraphrase rather than reproduce the offending string verbatim.
+7. **If you discover `plans/ROADMAP.md` was deleted or truncated:** restore from git history (`git log -- plans/ROADMAP.md`, `git checkout <sha>~1 -- plans/ROADMAP.md`), append a corrective session-note explaining what happened, do not silently continue.
+
+### Historical: GitHub-Issue ROADMAP convention (deprecated 2026-05-11)
+
+Before 2026-05-11 this project used a pinned `[ROADMAP]` Issue (#2) with a `roadmap` label, `Refs #2` PR-body linking, and per-session comments on the issue. The 2026-05-08 incident in the parent commit0 repo — closed canonical ROADMAP via close-keyword in a PR body, then re-closed when narrating the lesson with literal backticked close-keywords — motivated the migration. Both classes of violation are mechanically impossible against `plans/ROADMAP.md` because GitHub's auto-close scanner only operates on Issues, not files. The plans-kanban migration eliminates the failure mode rather than papering over it with more pre-flight checks.
 
 ### Session start
 
-1. Run `gh issue list --state open --limit 30` to see open work in this repo.
-2. Read the pinned `[ROADMAP]` Issue (`gh issue list --label roadmap`) for project state across sessions. If absent, ask the user to create and pin one before doing non-trivial work. Verify there is **exactly one** open issue with the `roadmap` label — more than one is a violation requiring corrective action before any other work begins.
-3. If continuing prior work, read the relevant Issue's comments — that's the persistent memory across sessions.
+1. Run `gh issue list --state open --limit 30` to see open per-feature work in this repo.
+2. `cat plans/ROADMAP.md` for project state across sessions, then `ck plan status` for in-flight per-feature plans. If `plans/ROADMAP.md` is missing, ask the user before recreating it (see Plans-kanban discipline above).
+3. If continuing prior work, read the relevant per-feature plan dir (`plans/<date>-<slug>/`) and the Issue's comments — both are persistent memory across sessions.
 
-### Per-feature: one Issue, one branch, one PR
+### Per-feature: one Plan, one Issue, one branch, one PR
 
-1. **Open an Issue** before coding any non-trivial feature. Title: short imperative. Body: persona → workflow → data model → tests → acceptance criteria. The Issue persists the plan even if the session crashes.
-2. **Create a feature branch** off `main`: `git checkout -b feat/<short-name>`. Never commit directly to `main`.
-3. **Implement** — sub-agents are briefed with: parent Issue number, Issue body excerpt, current `[ROADMAP]` state. Pass the Issue URL in the agent prompt.
-4. **Open the PR** with `Closes #<issue-number>` for the scope-bound child Issue, AND `Refs #<roadmap-id>` (NOT `Closes`) for the ROADMAP. The PR body must reference both. Pre-flight: confirm `Closes #N` where N is not the roadmap-labelled issue. See the ROADMAP — IMMUTABLE RULES section above.
-5. **After merge**, comment on the parent Issue with status (`done` / `partial` / `follow-up needed`) and link the merged PR.
+1. **Create a per-feature plan first**: `ck plan create` scaffolds `plans/<date>-<slug>/` (overview + phases). The plan dir is the persistent design doc.
+2. **Open an Issue** for non-trivial features. Title: short imperative. Body: persona → workflow → data model → tests → acceptance criteria, plus a `Plan: plans/<date>-<slug>/` line. Skip the Issue for trivial fixes (PR alone is fine, body says `Plan: n/a`).
+3. **Create a feature branch** off `main`: `git checkout -b feat/<short-name>`. Never commit directly to `main`.
+4. **Implement** — sub-agents are briefed with: parent Issue number (if any), per-feature plan dir path, current `plans/ROADMAP.md` excerpt. Pass the plan dir path in the agent prompt.
+5. **Open the PR** with `Closes #<issue-number>` (or `Refs #<n>`) AND `Plan: plans/<date>-<slug>/` (or `Plan: n/a`) in the body. Pre-flight: see Plans-kanban discipline rule 3.
+6. **After merge**, comment on the parent Issue with status (`done` / `partial` / `follow-up needed`) and link the merged PR; update the per-feature plan's phase statuses.
 
 ### Session end (ALWAYS do this before stopping)
 
-1. **Comment on the `[ROADMAP]` Issue** with one paragraph: what shipped this session, what's next, any blockers. **Do NOT close it. Do NOT open a new one.** See ROADMAP — IMMUTABLE RULES.
-2. **Update each touched Issue** with implementation progress and links to commits/PRs.
+1. **Append a `## Session note — YYYY-MM-DD` section to `plans/ROADMAP.md`** with one paragraph: what shipped this session, what's next, any blockers. **Do NOT overwrite or truncate.** Replaces the prior "comment on the `[ROADMAP]` Issue" ritual.
+2. **Update each touched per-feature plan** (`ck plan update` or edit the phase file directly), and each touched Issue with commit/PR links.
 3. **Run `/compact`** to preserve a session summary and shrink context for the next session.
-4. **Verify ROADMAP discipline before stopping:**
+4. **Verify discipline before stopping:**
    ```bash
-   gh issue list --label roadmap --state open --json number | jq 'length'   # must print: 1
+   test -f plans/ROADMAP.md   # must succeed
    ```
-   If the count is anything other than 1, perform the corrective action in ROADMAP rule #7 before ending the session.
-5. **Why this matters:** Claude Code loses context across sessions. GitHub Issues are the persistent memory. The single canonical ROADMAP is the index into that memory; closing it or splitting it deletes the index.
+   If the file is missing, perform the corrective action in Plans-kanban discipline rule 7 before ending the session.
+5. **Why this matters:** Claude Code loses context across sessions. `plans/ROADMAP.md` + per-feature plan dirs are the persistent memory. Without the session-end ritual, the next session starts blind and re-derives everything.
 
 ### Sub-agent dispatch contract
 
 Every `Agent` tool call must include in its prompt:
-- The parent Issue number and a one-line summary of acceptance criteria.
-- A pointer to the `[ROADMAP]` Issue for global context.
+- The parent Issue number (if any) and a one-line summary of acceptance criteria.
+- A pointer to `plans/ROADMAP.md` and the per-feature plan dir for global context.
 - An explicit `"model"` field — never inherit. Pick the cheapest tier that fits:
   - **`"model": "haiku"`** — simple, repetitive, mechanical work: CI/workflow tweaks, running tests, gofmt/lint fixes, doc edits, single-file refactors with no design choices, log-grepping, status checks.
   - **`"model": "sonnet"` (default)** — implementation slices: writing a service + tests, multi-file refactors, debugging a tricky bug, designing an API surface within an established pattern.
