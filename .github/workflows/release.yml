@@ -155,7 +155,7 @@ jobs:
       # Vulnerability scan of the published release image.
       # Uses CRITICAL,HIGH + ignore-unfixed to catch actionable issues only.
       - name: Scan release image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/commit0@${{ steps.build.outputs.digest }}
           format: sarif
