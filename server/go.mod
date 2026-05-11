@@ -15,7 +15,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/hashicorp/consul/api v1.34.0
 	github.com/modelcontextprotocol/go-sdk v1.6.0
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.59.1
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
