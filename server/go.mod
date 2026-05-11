@@ -9,7 +9,7 @@ require (
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.12
 	github.com/commit0-dev/commit0/pkg/types v0.0.0
 	github.com/eino-contrib/jsonschema v1.0.3
-	github.com/fxamacker/cbor/v2 v2.7.0
+	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-contrib/requestid v1.0.6
 	github.com/gin-gonic/gin v1.12.0
